@@ -1,0 +1,10 @@
+{
+    "name": "minimesaj-chrome-eklentisi",
+    "private": true,
+    "version": "0.1.0",
+    "description": "MiniMesaj Chrome eklentisi gelistirme bagimliliklari",
+    "dependencies": {
+        "alertifyjs": "^1.13.1",
+        "pusher-js": "^8.5.0"
+    }
+}

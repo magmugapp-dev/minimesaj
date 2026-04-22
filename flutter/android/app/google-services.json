@@ -1,0 +1,47 @@
+{
+  "project_info": {
+    "project_number": "609071245287",
+    "project_id": "magmug-2a095",
+    "storage_bucket": "magmug-2a095.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:609071245287:android:da24010c4271b4b203bf42",
+        "android_client_info": {
+          "package_name": "com.magmug.magmug"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "609071245287-96ueflh0cd1u5be1c0og08bcdhodfvk3.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.magmug.magmug",
+            "certificate_hash": "8e8a2be8fa11458e22c603adbeea07dbdbd2cf24"
+          }
+        },
+        {
+          "client_id": "609071245287-k6qcdj1kpg8mulm0febnckbsvapn45uk.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAQPsu2l9auGBqiugBJguLa_01KH2aXNSI"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "609071245287-k6qcdj1kpg8mulm0febnckbsvapn45uk.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

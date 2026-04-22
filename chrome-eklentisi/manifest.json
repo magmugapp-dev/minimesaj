@@ -1,0 +1,45 @@
+{
+    "manifest_version": 3,
+    "name": "MiniMesaj Instagram Yardimcisi",
+    "description": "Instagram DM sayfasinda okunmamis sohbetleri tarar ve hazir cevap gonderebilir.",
+    "version": "0.2.0",
+    "permissions": [
+        "storage",
+        "tabs"
+    ],
+    "host_permissions": [
+        "https://www.instagram.com/*",
+        "https://minimesaj.test/*"
+    ],
+    "action": {
+        "default_title": "MiniMesaj",
+        "default_popup": "popup.html"
+    },
+    "content_scripts": [
+        {
+            "matches": [
+                "https://www.instagram.com/*"
+            ],
+            "css": [
+                "node_modules/alertifyjs/build/css/alertify.min.css",
+                "node_modules/alertifyjs/build/css/themes/default.min.css",
+                "icerik/alertify-ozellestirme.css"
+            ],
+            "js": [
+                "node_modules/alertifyjs/build/alertify.min.js",
+                "node_modules/pusher-js/dist/web/pusher.min.js",
+                "icerik/cekirdek.js",
+                "icerik/dom-yardimcilari.js",
+                "icerik/bildirim-servisi.js",
+                "icerik/api-servisi.js",
+                "icerik/websocket-servisi.js",
+                "icerik/sohbet-servisi.js",
+                "icerik/mesaj-servisi.js",
+                "icerik/kuyruk-servisi.js",
+                "icerik/gozlemci-servisi.js",
+                "icerik-betigi.js"
+            ],
+            "run_at": "document_idle"
+        }
+    ]
+}

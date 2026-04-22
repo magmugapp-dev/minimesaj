@@ -1,0 +1,2198 @@
+openapi: 3.0.3
+info:
+  title: MiniMesaj API
+  description: >
+    MiniMesaj — Flutter tabanlı tanışma uygulaması ve Chrome eklentisi için REST API.
+    Tüm endpoint'ler `/api` prefix'i altında çalışır.
+    Kimlik doğrulama Sanctum Bearer Token ile yapılır.
+  version: 1.0.0
+  contact:
+    name: MiniMesaj Destek
+
+servers:
+  - url: http://minimesaj.test/api
+    description: Yerel geliştirme
+  - url: https://api.minimesaj.com/api
+    description: Production
+
+tags:
+  - name: Kimlik
+    description: Kayıt, giriş, çıkış ve kullanıcı bilgileri
+  - name: Profil
+    description: Kullanıcı profili görüntüleme ve güncelleme
+  - name: Fotoğraf
+    description: Profil fotoğrafı yönetimi
+  - name: Beğeni
+    description: Kullanıcı beğeni işlemleri
+  - name: Eşleşme
+    description: Eşleşme listeleme ve sonlandırma
+  - name: Sohbet
+    description: Sohbet listeleme
+  - name: Mesaj
+    description: Mesaj gönderme ve listeleme
+  - name: Bildirim
+    description: Uygulama içi bildirimler
+  - name: Engelleme
+    description: Kullanıcı engelleme işlemleri
+  - name: Şikayet
+    description: Şikayet oluşturma
+  - name: Instagram
+    description: Instagram hesap, kişi ve mesaj yönetimi (Chrome eklentisi)
+  - name: Yapay Zeka
+    description: AI ayar görüntüleme ve güncelleme
+  - name: Ödeme
+    description: Ödeme doğrulama, puan ve reklam ödülü
+  - name: Hediye
+    description: Hediye gönderme
+  - name: Admin
+    description: Yönetim paneli (admin scope gerekli)
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      description: Sanctum Bearer Token — kayıt/giriş sonrası alınan token
+
+  schemas:
+    # ── Hata Yanıtları ─────────────────────────────────────────────
+    HataMesaji:
+      type: object
+      properties:
+        mesaj:
+          type: string
+          example: İşlem başarısız.
+
+    DogrulamaHatasi:
+      type: object
+      properties:
+        message:
+          type: string
+          example: Verilen veri geçersiz.
+        errors:
+          type: object
+          additionalProperties:
+            type: array
+            items:
+              type: string
+          example:
+            kullanici_adi:
+              - Kullanıcı adı alanı gereklidir.
+
+    # ── Sayfalama Meta ─────────────────────────────────────────────
+    SayfaMeta:
+      type: object
+      properties:
+        current_page:
+          type: integer
+        from:
+          type: integer
+          nullable: true
+        last_page:
+          type: integer
+        per_page:
+          type: integer
+        to:
+          type: integer
+          nullable: true
+        total:
+          type: integer
+
+    SayfaLinkleri:
+      type: object
+      properties:
+        first:
+          type: string
+          nullable: true
+        last:
+          type: string
+          nullable: true
+        prev:
+          type: string
+          nullable: true
+        next:
+          type: string
+          nullable: true
+
+    # ── Resource Şemaları ──────────────────────────────────────────
+    KullaniciResource:
+      type: object
+      properties:
+        id:
+          type: integer
+        ad:
+          type: string
+        soyad:
+          type: string
+          nullable: true
+        kullanici_adi:
+          type: string
+        email:
+          type: string
+          format: email
+          description: Sadece kendi profilinde görünür
+        hesap_tipi:
+          type: string
+          enum: [standart, premium]
+        hesap_durumu:
+          type: string
+          enum: [aktif, pasif, askida, banlandi]
+        dogum_yili:
+          type: integer
+          nullable: true
+        cinsiyet:
+          type: string
+          enum: [erkek, kadin, belirtmek_istemiyorum]
+        ulke:
+          type: string
+          nullable: true
+        il:
+          type: string
+          nullable: true
+        ilce:
+          type: string
+          nullable: true
+        biyografi:
+          type: string
+          nullable: true
+        profil_resmi:
+          type: string
+          nullable: true
+        cevrim_ici_mi:
+          type: boolean
+        gorunum_modu:
+          type: string
+          enum: [acik, koyu, sistem]
+          description: Sadece kendi profilinde
+        ses_acik_mi:
+          type: boolean
+          description: Sadece kendi profilinde
+        bildirimler_acik_mi:
+          type: boolean
+          description: Sadece kendi profilinde
+        titresim_acik_mi:
+          type: boolean
+          description: Sadece kendi profilinde
+        mevcut_puan:
+          type: integer
+          description: Sadece kendi profilinde
+        gunluk_ucretsiz_hak:
+          type: integer
+          description: Sadece kendi profilinde
+        premium_aktif_mi:
+          type: boolean
+        premium_bitis_tarihi:
+          type: string
+          format: date-time
+          nullable: true
+          description: Sadece kendi profilinde
+        son_gorulme_tarihi:
+          type: string
+          format: date-time
+          nullable: true
+        fotograflar:
+          type: array
+          items:
+            $ref: '#/components/schemas/FotografResource'
+          description: İlişki yüklendiğinde
+        ai_ayar:
+          $ref: '#/components/schemas/AiAyarResource'
+        created_at:
+          type: string
+          format: date-time
+
+    KullaniciOzetResource:
+      type: object
+      properties:
+        id:
+          type: integer
+        ad:
+          type: string
+        kullanici_adi:
+          type: string
+        profil_resmi:
+          type: string
+          nullable: true
+        cevrim_ici_mi:
+          type: boolean
+
+    EslesmeResource:
+      type: object
+      properties:
+        id:
+          type: integer
+        user:
+          $ref: '#/components/schemas/KullaniciOzetResource'
+        eslesen_user:
+          $ref: '#/components/schemas/KullaniciOzetResource'
+        eslesme_turu:
+          type: string
+        eslesme_kaynagi:
+          type: string
+        durum:
+          type: string
+          enum: [aktif, bitti]
+        sohbet:
+          $ref: '#/components/schemas/SohbetResource'
+        created_at:
+          type: string
+          format: date-time
+
+    SohbetResource:
+      type: object
+      properties:
+        id:
+          type: integer
+        eslesme_id:
+          type: integer
+        eslesme:
+          $ref: '#/components/schemas/EslesmeResource'
+        son_mesaj:
+          $ref: '#/components/schemas/MesajResource'
+        son_mesaj_tarihi:
+          type: string
+          format: date-time
+          nullable: true
+        toplam_mesaj_sayisi:
+          type: integer
+        durum:
+          type: string
+          enum: [aktif, kapatildi]
+        created_at:
+          type: string
+          format: date-time
+
+    MesajResource:
+      type: object
+      properties:
+        id:
+          type: integer
+        sohbet_id:
+          type: integer
+        gonderen:
+          $ref: '#/components/schemas/KullaniciOzetResource'
+        mesaj_tipi:
+          type: string
+          enum: [metin, ses, foto, sistem]
+        mesaj_metni:
+          type: string
+          nullable: true
+        dosya_yolu:
+          type: string
+          nullable: true
+        dosya_suresi:
+          type: integer
+          nullable: true
+        okundu_mu:
+          type: boolean
+        ai_tarafindan_uretildi_mi:
+          type: boolean
+        cevaplanan_mesaj_id:
+          type: integer
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+
+    BegeniResource:
+      type: object
+      properties:
+        id:
+          type: integer
+        begenen:
+          $ref: '#/components/schemas/KullaniciOzetResource'
+        begenilen:
+          $ref: '#/components/schemas/KullaniciOzetResource'
+        eslesmeye_donustu_mu:
+          type: boolean
+        goruldu_mu:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+
+    FotografResource:
+      type: object
+      properties:
+        id:
+          type: integer
+        dosya_yolu:
+          type: string
+        sira_no:
+          type: integer
+        ana_fotograf_mi:
+          type: boolean
+        aktif_mi:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+
+    AiAyarResource:
+      type: object
+      properties:
+        id:
+          type: integer
+        aktif_mi:
+          type: boolean
+        saglayici_tipi:
+          type: string
+          enum: [gemini, openai]
+        model_adi:
+          type: string
+        yedek_saglayici_tipi:
+          type: string
+          nullable: true
+          enum: [gemini, openai]
+        yedek_model_adi:
+          type: string
+          nullable: true
+        kisilik_tipi:
+          type: string
+        kisilik_aciklamasi:
+          type: string
+          nullable: true
+        konusma_tonu:
+          type: string
+        konusma_stili:
+          type: string
+        emoji_seviyesi:
+          type: integer
+          minimum: 0
+          maximum: 10
+        flort_seviyesi:
+          type: integer
+          minimum: 0
+          maximum: 10
+        giriskenlik_seviyesi:
+          type: integer
+          minimum: 0
+          maximum: 10
+        utangaclik_seviyesi:
+          type: integer
+          minimum: 0
+          maximum: 10
+        duygusallik_seviyesi:
+          type: integer
+          minimum: 0
+          maximum: 10
+        kiskanclik_seviyesi:
+          type: integer
+          minimum: 0
+          maximum: 10
+        mizah_seviyesi:
+          type: integer
+          minimum: 0
+          maximum: 10
+        zeka_seviyesi:
+          type: integer
+          minimum: 0
+          maximum: 10
+        ilk_mesaj_atar_mi:
+          type: boolean
+        ilk_mesaj_sablonu:
+          type: string
+          nullable: true
+        gunluk_konusma_limiti:
+          type: integer
+        tek_kullanici_gunluk_mesaj_limiti:
+          type: integer
+        minimum_cevap_suresi_saniye:
+          type: integer
+        maksimum_cevap_suresi_saniye:
+          type: integer
+        ortalama_mesaj_uzunlugu:
+          type: integer
+        mesaj_uzunlugu_min:
+          type: integer
+        mesaj_uzunlugu_max:
+          type: integer
+        sesli_mesaj_gonderebilir_mi:
+          type: boolean
+        foto_gonderebilir_mi:
+          type: boolean
+        gece_aktif_mi:
+          type: boolean
+        gunduz_aktif_mi:
+          type: boolean
+        sistem_komutu:
+          type: string
+          nullable: true
+        yasakli_konular:
+          type: array
+          items:
+            type: string
+          nullable: true
+        zorunlu_kurallar:
+          type: array
+          items:
+            type: string
+          nullable: true
+        hafiza_aktif_mi:
+          type: boolean
+        hafiza_seviyesi:
+          type: string
+        kullaniciyi_hatirlar_mi:
+          type: boolean
+        temperature:
+          type: number
+          format: float
+          minimum: 0
+          maximum: 2
+        top_p:
+          type: number
+          format: float
+          minimum: 0
+          maximum: 1
+        max_output_tokens:
+          type: integer
+          minimum: 50
+          maximum: 8192
+
+    InstagramHesapResource:
+      type: object
+      properties:
+        id:
+          type: integer
+        instagram_kullanici_adi:
+          type: string
+        instagram_profil_id:
+          type: string
+          nullable: true
+        otomatik_cevap_aktif_mi:
+          type: boolean
+        yarim_otomatik_mod_aktif_mi:
+          type: boolean
+        aktif_mi:
+          type: boolean
+        son_baglanti_tarihi:
+          type: string
+          format: date-time
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+
+    InstagramKisiResource:
+      type: object
+      properties:
+        id:
+          type: integer
+        instagram_kisi_id:
+          type: string
+        kullanici_adi:
+          type: string
+          nullable: true
+        gorunen_ad:
+          type: string
+          nullable: true
+        profil_resmi:
+          type: string
+          nullable: true
+        notlar:
+          type: string
+          nullable: true
+        son_mesaj_tarihi:
+          type: string
+          format: date-time
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+
+    InstagramMesajResource:
+      type: object
+      properties:
+        id:
+          type: integer
+        instagram_hesap_id:
+          type: integer
+        instagram_kisi_id:
+          type: integer
+        kisi:
+          $ref: '#/components/schemas/InstagramKisiResource'
+        gonderen_tipi:
+          type: string
+          enum: [biz, karsi_taraf]
+        mesaj_metni:
+          type: string
+        mesaj_tipi:
+          type: string
+          enum: [metin, ses, foto]
+        ai_cevapladi_mi:
+          type: boolean
+        gonderildi_mi:
+          type: boolean
+        instagram_mesaj_kodu:
+          type: string
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+
+    SikayetResource:
+      type: object
+      properties:
+        id:
+          type: integer
+        sikayet_eden:
+          $ref: '#/components/schemas/KullaniciOzetResource'
+        hedef_tipi:
+          type: string
+          enum: [user, mesaj]
+        hedef_id:
+          type: integer
+        kategori:
+          type: string
+        aciklama:
+          type: string
+          nullable: true
+        durum:
+          type: string
+          enum: [beklemede, inceleniyor, sonuclandi, reddedildi]
+        yonetici_notu:
+          type: string
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+
+    PuanHareketResource:
+      type: object
+      properties:
+        id:
+          type: integer
+        islem_tipi:
+          type: string
+        puan_miktari:
+          type: integer
+        onceki_bakiye:
+          type: integer
+        sonraki_bakiye:
+          type: integer
+        aciklama:
+          type: string
+          nullable: true
+        referans_tipi:
+          type: string
+          nullable: true
+        referans_id:
+          type: integer
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+
+    IstatistikOzeti:
+      type: object
+      properties:
+        tarih:
+          type: string
+          format: date
+        toplam_kullanici:
+          type: integer
+        yeni_kayit:
+          type: integer
+        aktif_kullanici:
+          type: integer
+        toplam_mesaj:
+          type: integer
+        toplam_eslesme:
+          type: integer
+        toplam_sikayet:
+          type: integer
+
+    Bildirim:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        type:
+          type: string
+        data:
+          type: object
+        read_at:
+          type: string
+          format: date-time
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+
+  responses:
+    Unauthorized:
+      description: Kimlik doğrulaması gerekli.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/HataMesaji'
+          example:
+            mesaj: Kimlik doğrulaması gerekli.
+    Forbidden:
+      description: Bu işlem için yetkiniz yok.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/HataMesaji'
+          example:
+            mesaj: Bu işlem için yetkiniz yok.
+    NotFound:
+      description: Kayıt bulunamadı.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/HataMesaji'
+          example:
+            mesaj: Kayıt bulunamadı.
+    ValidationError:
+      description: Doğrulama hatası.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/DogrulamaHatasi'
+    TooManyRequests:
+      description: Çok fazla istek gönderildi.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/HataMesaji'
+          example:
+            mesaj: Çok fazla istek gönderildi.
+
+security:
+  - BearerAuth: []
+
+paths:
+  # ══════════════════════════════════════════════════════════════════
+  # KİMLİK
+  # ══════════════════════════════════════════════════════════════════
+  /auth/kayit:
+    post:
+      tags: [Kimlik]
+      summary: Yeni kullanıcı kaydı
+      description: Yeni bir kullanıcı hesabı oluşturur ve Bearer token döner.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [ad, kullanici_adi, password, password_confirmation, istemci_tipi]
+              properties:
+                ad:
+                  type: string
+                  maxLength: 255
+                soyad:
+                  type: string
+                  maxLength: 255
+                  nullable: true
+                kullanici_adi:
+                  type: string
+                  maxLength: 255
+                  description: Benzersiz olmalı
+                email:
+                  type: string
+                  format: email
+                  nullable: true
+                password:
+                  type: string
+                  minLength: 6
+                password_confirmation:
+                  type: string
+                cinsiyet:
+                  type: string
+                  enum: [erkek, kadin, belirtmek_istemiyorum]
+                dogum_yili:
+                  type: integer
+                  minimum: 1940
+                  maximum: 2010
+                istemci_tipi:
+                  type: string
+                  enum: [dating, extension]
+      responses:
+        '201':
+          description: Kayıt başarılı
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  kullanici:
+                    $ref: '#/components/schemas/KullaniciResource'
+                  token:
+                    type: string
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  /auth/giris:
+    post:
+      tags: [Kimlik]
+      summary: Kullanıcı girişi
+      description: Kullanıcı adı ve şifre ile giriş yapar, Bearer token döner.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [kullanici_adi, password, istemci_tipi]
+              properties:
+                kullanici_adi:
+                  type: string
+                password:
+                  type: string
+                istemci_tipi:
+                  type: string
+                  enum: [dating, extension, admin]
+      responses:
+        '200':
+          description: Giriş başarılı
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  kullanici:
+                    $ref: '#/components/schemas/KullaniciResource'
+                  token:
+                    type: string
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  /auth/cikis:
+    post:
+      tags: [Kimlik]
+      summary: Çıkış yap
+      description: Mevcut token'ı siler.
+      responses:
+        '200':
+          description: Çıkış başarılı
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HataMesaji'
+              example:
+                mesaj: Çıkış yapıldı.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /auth/ben:
+    get:
+      tags: [Kimlik]
+      summary: Mevcut kullanıcı bilgileri
+      description: Giriş yapmış kullanıcının profil bilgilerini AI ayarları ve fotoğrafları ile döner.
+      responses:
+        '200':
+          description: Kullanıcı bilgileri
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/KullaniciResource'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  # ══════════════════════════════════════════════════════════════════
+  # PROFİL
+  # ══════════════════════════════════════════════════════════════════
+  /dating/profil:
+    get:
+      tags: [Profil]
+      summary: Profilimi görüntüle
+      responses:
+        '200':
+          description: Profil bilgileri
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/KullaniciResource'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    patch:
+      tags: [Profil]
+      summary: Profilimi güncelle
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                ad:
+                  type: string
+                  maxLength: 255
+                soyad:
+                  type: string
+                  maxLength: 255
+                  nullable: true
+                biyografi:
+                  type: string
+                  maxLength: 1000
+                  nullable: true
+                dogum_yili:
+                  type: integer
+                  minimum: 1940
+                  maximum: 2010
+                cinsiyet:
+                  type: string
+                  enum: [erkek, kadin, belirtmek_istemiyorum]
+                ulke:
+                  type: string
+                  maxLength: 100
+                il:
+                  type: string
+                  maxLength: 100
+                ilce:
+                  type: string
+                  maxLength: 100
+                gorunum_modu:
+                  type: string
+                  enum: [acik, koyu, sistem]
+                ses_acik_mi:
+                  type: boolean
+                bildirimler_acik_mi:
+                  type: boolean
+                titresim_acik_mi:
+                  type: boolean
+      responses:
+        '200':
+          description: Profil güncellendi
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/KullaniciResource'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  # ══════════════════════════════════════════════════════════════════
+  # FOTOĞRAF
+  # ══════════════════════════════════════════════════════════════════
+  /dating/fotograflar:
+    get:
+      tags: [Fotoğraf]
+      summary: Fotoğraflarımı listele
+      responses:
+        '200':
+          description: Fotoğraf listesi
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/FotografResource'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      tags: [Fotoğraf]
+      summary: Fotoğraf yükle
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [dosya]
+              properties:
+                dosya:
+                  type: string
+                  format: binary
+                  description: Resim dosyası (max 5MB)
+                ana_fotograf_mi:
+                  type: boolean
+      responses:
+        '201':
+          description: Fotoğraf yüklendi
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/FotografResource'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /dating/fotograflar/{fotograf}:
+    delete:
+      tags: [Fotoğraf]
+      summary: Fotoğraf sil
+      parameters:
+        - name: fotograf
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Fotoğraf silindi
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HataMesaji'
+              example:
+                mesaj: Fotoğraf silindi.
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  # ══════════════════════════════════════════════════════════════════
+  # BEĞENİ
+  # ══════════════════════════════════════════════════════════════════
+  /dating/begeni/{kullanici}:
+    post:
+      tags: [Beğeni]
+      summary: Kullanıcıyı beğen
+      description: >
+        Hedef kullanıcıyı beğenir. Karşılıklı beğeni varsa otomatik eşleşme oluşur.
+      parameters:
+        - name: kullanici
+          in: path
+          required: true
+          schema:
+            type: integer
+          description: Beğenilecek kullanıcı ID
+      responses:
+        '200':
+          description: Beğeni sonucu
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  durum:
+                    type: string
+                    enum: [begenildi, eslesme]
+                  eslesme_id:
+                    type: integer
+                    description: Eşleşme oluşmuşsa ID
+        '422':
+          description: Kendinizi beğenemezsiniz
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HataMesaji'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /dating/begeniler:
+    get:
+      tags: [Beğeni]
+      summary: Gelen beğenileri listele
+      description: Henüz eşleşmeye dönüşmemiş, gelen beğenileri sayfalı döner.
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+      responses:
+        '200':
+          description: Gelen beğeniler
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/BegeniResource'
+                  links:
+                    $ref: '#/components/schemas/SayfaLinkleri'
+                  meta:
+                    $ref: '#/components/schemas/SayfaMeta'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  # ══════════════════════════════════════════════════════════════════
+  # EŞLEŞME
+  # ══════════════════════════════════════════════════════════════════
+  /dating/eslesmeler:
+    get:
+      tags: [Eşleşme]
+      summary: Aktif eşleşmeleri listele
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+      responses:
+        '200':
+          description: Aktif eşleşmeler
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/EslesmeResource'
+                  links:
+                    $ref: '#/components/schemas/SayfaLinkleri'
+                  meta:
+                    $ref: '#/components/schemas/SayfaMeta'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /dating/eslesmeler/{eslesme}/bitir:
+    post:
+      tags: [Eşleşme]
+      summary: Eşleşmeyi sonlandır
+      parameters:
+        - name: eslesme
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Eşleşme sonlandırıldı
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HataMesaji'
+              example:
+                mesaj: Eşleşme sonlandırıldı.
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  # ══════════════════════════════════════════════════════════════════
+  # SOHBET & MESAJ
+  # ══════════════════════════════════════════════════════════════════
+  /dating/sohbetler:
+    get:
+      tags: [Sohbet]
+      summary: Sohbetleri listele
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+      responses:
+        '200':
+          description: Sohbet listesi
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/SohbetResource'
+                  links:
+                    $ref: '#/components/schemas/SayfaLinkleri'
+                  meta:
+                    $ref: '#/components/schemas/SayfaMeta'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /dating/sohbetler/{sohbet}/mesajlar:
+    get:
+      tags: [Mesaj]
+      summary: Sohbet mesajlarını listele
+      parameters:
+        - name: sohbet
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+      responses:
+        '200':
+          description: Mesaj listesi
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/MesajResource'
+                  links:
+                    $ref: '#/components/schemas/SayfaLinkleri'
+                  meta:
+                    $ref: '#/components/schemas/SayfaMeta'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      tags: [Mesaj]
+      summary: Mesaj gönder
+      parameters:
+        - name: sohbet
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [mesaj_metni]
+              properties:
+                mesaj_tipi:
+                  type: string
+                  enum: [metin, ses, foto, sistem]
+                  default: metin
+                mesaj_metni:
+                  type: string
+                  maxLength: 5000
+                  description: mesaj_tipi=metin olduğunda zorunlu
+                dosya_yolu:
+                  type: string
+                  nullable: true
+                dosya_suresi:
+                  type: integer
+                  nullable: true
+                dosya_boyutu:
+                  type: integer
+                  nullable: true
+                cevaplanan_mesaj_id:
+                  type: integer
+                  nullable: true
+      responses:
+        '201':
+          description: Mesaj gönderildi
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/MesajResource'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /dating/sohbetler/{sohbet}/oku:
+    patch:
+      tags: [Mesaj]
+      summary: Mesajları okundu olarak işaretle
+      parameters:
+        - name: sohbet
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Mesajlar okundu
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HataMesaji'
+              example:
+                mesaj: Mesajlar okundu olarak işaretlendi.
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  # ══════════════════════════════════════════════════════════════════
+  # BİLDİRİM
+  # ══════════════════════════════════════════════════════════════════
+  /dating/bildirimler:
+    get:
+      tags: [Bildirim]
+      summary: Bildirimleri listele
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+      responses:
+        '200':
+          description: Bildirim listesi (sayfalı)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Bildirim'
+                  links:
+                    $ref: '#/components/schemas/SayfaLinkleri'
+                  meta:
+                    $ref: '#/components/schemas/SayfaMeta'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /dating/bildirimler/okunmamis:
+    get:
+      tags: [Bildirim]
+      summary: Okunmamış bildirim sayısı
+      responses:
+        '200':
+          description: Okunmamış sayısı
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  okunmamis_sayisi:
+                    type: integer
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /dating/bildirimler/oku:
+    patch:
+      tags: [Bildirim]
+      summary: Tüm bildirimleri okundu işaretle
+      responses:
+        '200':
+          description: Tamamı okundu
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HataMesaji'
+              example:
+                mesaj: Tüm bildirimler okundu olarak işaretlendi.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /dating/bildirimler/{bildirim}/oku:
+    patch:
+      tags: [Bildirim]
+      summary: Tek bildirimi okundu işaretle
+      parameters:
+        - name: bildirim
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Bildirim okundu
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HataMesaji'
+              example:
+                mesaj: Bildirim okundu.
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  # ══════════════════════════════════════════════════════════════════
+  # ENGELLEME & ŞİKAYET
+  # ══════════════════════════════════════════════════════════════════
+  /dating/engelle/{kullanici}:
+    post:
+      tags: [Engelleme]
+      summary: Kullanıcıyı engelle
+      parameters:
+        - name: kullanici
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                sebep:
+                  type: string
+                  nullable: true
+      responses:
+        '200':
+          description: Kullanıcı engellendi
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HataMesaji'
+              example:
+                mesaj: Kullanıcı engellendi.
+        '422':
+          description: Kendinizi engelleyemezsiniz
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    delete:
+      tags: [Engelleme]
+      summary: Engeli kaldır
+      parameters:
+        - name: kullanici
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Engel kaldırıldı
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HataMesaji'
+              example:
+                mesaj: Engel kaldırıldı.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /dating/sikayet:
+    post:
+      tags: [Şikayet]
+      summary: Şikayet oluştur
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [hedef_tipi, hedef_id, kategori]
+              properties:
+                hedef_tipi:
+                  type: string
+                  enum: [user, mesaj]
+                hedef_id:
+                  type: integer
+                kategori:
+                  type: string
+                  maxLength: 100
+                aciklama:
+                  type: string
+                  maxLength: 1000
+                  nullable: true
+      responses:
+        '201':
+          description: Şikayet oluşturuldu
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/SikayetResource'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  # ══════════════════════════════════════════════════════════════════
+  # INSTAGRAM
+  # ══════════════════════════════════════════════════════════════════
+  /instagram/hesaplar:
+    get:
+      tags: [Instagram]
+      summary: Instagram hesaplarını listele
+      responses:
+        '200':
+          description: Hesap listesi
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/InstagramHesapResource'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      tags: [Instagram]
+      summary: Instagram hesabı bağla
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [instagram_kullanici_adi]
+              properties:
+                instagram_kullanici_adi:
+                  type: string
+                  maxLength: 255
+                instagram_profil_id:
+                  type: string
+                  maxLength: 255
+                  nullable: true
+      responses:
+        '201':
+          description: Hesap bağlandı
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/InstagramHesapResource'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /instagram/hesaplar/{hesap}:
+    delete:
+      tags: [Instagram]
+      summary: Instagram hesabını kaldır
+      parameters:
+        - name: hesap
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Hesap kaldırıldı
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HataMesaji'
+              example:
+                mesaj: Hesap kaldırıldı.
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /instagram/hesaplar/{hesap}/kisiler:
+    get:
+      tags: [Instagram]
+      summary: Hesabın kişilerini listele
+      parameters:
+        - name: hesap
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+      responses:
+        '200':
+          description: Kişi listesi
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/InstagramKisiResource'
+                  links:
+                    $ref: '#/components/schemas/SayfaLinkleri'
+                  meta:
+                    $ref: '#/components/schemas/SayfaMeta'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /instagram/hesaplar/{hesap}/kisiler/senkronize:
+    post:
+      tags: [Instagram]
+      summary: Kişileri senkronize et
+      description: Chrome eklentisinden gelen kişi listesini upsert eder.
+      parameters:
+        - name: hesap
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [kisiler]
+              properties:
+                kisiler:
+                  type: array
+                  items:
+                    type: object
+                    required: [instagram_kisi_id]
+                    properties:
+                      instagram_kisi_id:
+                        type: string
+                      kullanici_adi:
+                        type: string
+                        maxLength: 255
+                      gorunen_ad:
+                        type: string
+                        maxLength: 255
+                      profil_resmi:
+                        type: string
+                        maxLength: 500
+      responses:
+        '200':
+          description: Senkronizasyon tamamlandı
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  mesaj:
+                    type: string
+                  senkronize_edilen:
+                    type: integer
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /instagram/hesaplar/{hesap}/mesajlar:
+    post:
+      tags: [Instagram]
+      summary: Mesajları al ve kaydet
+      description: Chrome eklentisinden gelen mesajları kaydeder. Aynı instagram_mesaj_kodu tekrar kaydedilmez (idempotent).
+      parameters:
+        - name: hesap
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [mesajlar]
+              properties:
+                mesajlar:
+                  type: array
+                  items:
+                    type: object
+                    required: [instagram_kisi_id, gonderen_tipi, mesaj_metni]
+                    properties:
+                      instagram_kisi_id:
+                        type: integer
+                        description: instagram_kisileri tablosundaki ID
+                      gonderen_tipi:
+                        type: string
+                        enum: [biz, karsi_taraf]
+                      mesaj_metni:
+                        type: string
+                        maxLength: 5000
+                      mesaj_tipi:
+                        type: string
+                        enum: [metin, ses, foto]
+                        default: metin
+                      instagram_mesaj_kodu:
+                        type: string
+                        maxLength: 255
+                        nullable: true
+      responses:
+        '200':
+          description: Mesajlar kaydedildi
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  mesaj:
+                    type: string
+                  kaydedilen:
+                    type: integer
+                  atlanan:
+                    type: integer
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /instagram/hesaplar/{hesap}/giden-kuyruk:
+    get:
+      tags: [Instagram]
+      summary: Giden mesaj kuyruğunu listele
+      description: Henüz gönderilmemiş AI üretimi mesajları döner.
+      parameters:
+        - name: hesap
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Giden kuyruk
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/InstagramMesajResource'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /mesajlar/{mesaj}/gonderildi:
+    patch:
+      tags: [Instagram]
+      summary: Mesajı gönderildi olarak işaretle
+      description: Chrome eklentisi mesajı Instagram'a gönderdiğinde çağrılır.
+      parameters:
+        - name: mesaj
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Mesaj gönderildi olarak işaretlendi
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HataMesaji'
+              example:
+                mesaj: Mesaj gönderildi olarak işaretlendi.
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  # ══════════════════════════════════════════════════════════════════
+  # YAPAY ZEKA
+  # ══════════════════════════════════════════════════════════════════
+  /ai/ayarlar:
+    get:
+      tags: [Yapay Zeka]
+      summary: AI ayarlarını görüntüle
+      description: Kullanıcının AI yapılandırma ayarlarını döner.
+      responses:
+        '200':
+          description: AI ayarları
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/AiAyarResource'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+    put:
+      tags: [Yapay Zeka]
+      summary: AI ayarlarını güncelle
+      description: Kullanıcının AI kişilik, konuşma, sağlayıcı ve teknik ayarlarını günceller.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                aktif_mi:
+                  type: boolean
+                saglayici_tipi:
+                  type: string
+                  enum: [gemini, openai]
+                model_adi:
+                  type: string
+                  maxLength: 100
+                yedek_saglayici_tipi:
+                  type: string
+                  enum: [gemini, openai]
+                  nullable: true
+                yedek_model_adi:
+                  type: string
+                  maxLength: 100
+                  nullable: true
+                kisilik_tipi:
+                  type: string
+                  maxLength: 100
+                kisilik_aciklamasi:
+                  type: string
+                  maxLength: 2000
+                  nullable: true
+                konusma_tonu:
+                  type: string
+                  maxLength: 100
+                konusma_stili:
+                  type: string
+                  maxLength: 100
+                emoji_seviyesi:
+                  type: integer
+                  minimum: 0
+                  maximum: 10
+                flort_seviyesi:
+                  type: integer
+                  minimum: 0
+                  maximum: 10
+                giriskenlik_seviyesi:
+                  type: integer
+                  minimum: 0
+                  maximum: 10
+                utangaclik_seviyesi:
+                  type: integer
+                  minimum: 0
+                  maximum: 10
+                duygusallik_seviyesi:
+                  type: integer
+                  minimum: 0
+                  maximum: 10
+                kiskanclik_seviyesi:
+                  type: integer
+                  minimum: 0
+                  maximum: 10
+                mizah_seviyesi:
+                  type: integer
+                  minimum: 0
+                  maximum: 10
+                zeka_seviyesi:
+                  type: integer
+                  minimum: 0
+                  maximum: 10
+                ilk_mesaj_atar_mi:
+                  type: boolean
+                ilk_mesaj_sablonu:
+                  type: string
+                  maxLength: 1000
+                  nullable: true
+                gunluk_konusma_limiti:
+                  type: integer
+                  minimum: 0
+                tek_kullanici_gunluk_mesaj_limiti:
+                  type: integer
+                  minimum: 0
+                minimum_cevap_suresi_saniye:
+                  type: integer
+                  minimum: 0
+                maksimum_cevap_suresi_saniye:
+                  type: integer
+                  minimum: 0
+                ortalama_mesaj_uzunlugu:
+                  type: integer
+                  minimum: 10
+                mesaj_uzunlugu_min:
+                  type: integer
+                  minimum: 1
+                mesaj_uzunlugu_max:
+                  type: integer
+                  minimum: 10
+                sesli_mesaj_gonderebilir_mi:
+                  type: boolean
+                foto_gonderebilir_mi:
+                  type: boolean
+                gece_aktif_mi:
+                  type: boolean
+                gunduz_aktif_mi:
+                  type: boolean
+                sistem_komutu:
+                  type: string
+                  maxLength: 5000
+                  nullable: true
+                yasakli_konular:
+                  type: array
+                  items:
+                    type: string
+                  nullable: true
+                zorunlu_kurallar:
+                  type: array
+                  items:
+                    type: string
+                  nullable: true
+                hafiza_aktif_mi:
+                  type: boolean
+                hafiza_seviyesi:
+                  type: string
+                  maxLength: 50
+                kullaniciyi_hatirlar_mi:
+                  type: boolean
+                temperature:
+                  type: number
+                  minimum: 0
+                  maximum: 2
+                top_p:
+                  type: number
+                  minimum: 0
+                  maximum: 1
+                max_output_tokens:
+                  type: integer
+                  minimum: 50
+                  maximum: 8192
+      responses:
+        '200':
+          description: Ayarlar güncellendi
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/AiAyarResource'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  # ══════════════════════════════════════════════════════════════════
+  # ÖDEME & PUAN
+  # ══════════════════════════════════════════════════════════════════
+  /odeme/bakiye:
+    get:
+      tags: [Ödeme]
+      summary: Puan bakiyesi
+      responses:
+        '200':
+          description: Bakiye bilgisi
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  mevcut_puan:
+                    type: integer
+                  toplam_harcanan_puan:
+                    type: integer
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /odeme/hareketler:
+    get:
+      tags: [Ödeme]
+      summary: Puan hareketlerini listele
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+      responses:
+        '200':
+          description: Puan hareketleri (sayfalı)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/PuanHareketResource'
+                  links:
+                    $ref: '#/components/schemas/SayfaLinkleri'
+                  meta:
+                    $ref: '#/components/schemas/SayfaMeta'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /odeme/dogrula:
+    post:
+      tags: [Ödeme]
+      summary: Satın alma fişini doğrula
+      description: >
+        Apple/Google uygulama mağazasından gelen satın alma fişini doğrular
+        ve puan yükler. Aynı fiş tekrar işlenmez (idempotent).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [platform, fis_verisi, urun_kodu, tutar, para_birimi]
+              properties:
+                platform:
+                  type: string
+                  enum: [ios, android, web]
+                fis_verisi:
+                  type: string
+                  description: Platform'dan gelen fiş ham verisi
+                urun_kodu:
+                  type: string
+                  maxLength: 100
+                tutar:
+                  type: number
+                  minimum: 0
+                para_birimi:
+                  type: string
+                  minLength: 3
+                  maxLength: 3
+                  example: TRY
+      responses:
+        '201':
+          description: Ödeme onaylandı
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  mesaj:
+                    type: string
+                    example: Ödeme onaylandı.
+                  odeme:
+                    type: object
+        '200':
+          description: Bu fiş zaten işlenmiş (idempotent)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  mesaj:
+                    type: string
+                    example: Bu fiş zaten işlenmiş.
+                  odeme:
+                    type: object
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /odeme/reklam-odul:
+    post:
+      tags: [Ödeme]
+      summary: Reklam ödülü kaydet
+      description: Reklam izleme sonrası +5 puan kazandırır. Günlük limit 10 izleme.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reklam_platformu, reklam_birim_kodu]
+              properties:
+                reklam_platformu:
+                  type: string
+                  maxLength: 50
+                  example: admob
+                reklam_birim_kodu:
+                  type: string
+                  maxLength: 100
+      responses:
+        '201':
+          description: Ödül kazanıldı
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  mesaj:
+                    type: string
+                    example: "Ödül kazandınız: +5 puan"
+                  kalan_hak:
+                    type: integer
+        '429':
+          description: Günlük limit aşıldı
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HataMesaji'
+              example:
+                mesaj: Günlük reklam ödül limitine ulaştınız.
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  # ══════════════════════════════════════════════════════════════════
+  # HEDİYE
+  # ══════════════════════════════════════════════════════════════════
+  /hediye/gonder:
+    post:
+      tags: [Hediye]
+      summary: Hediye gönder
+      description: Başka bir kullanıcıya puan harcayarak hediye gönderir.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [alici_user_id, hediye_tipi, puan_degeri]
+              properties:
+                alici_user_id:
+                  type: integer
+                  description: Alıcı kullanıcı ID
+                hediye_tipi:
+                  type: string
+                  maxLength: 50
+                  example: gul
+                puan_degeri:
+                  type: integer
+                  minimum: 1
+                  maximum: 10000
+                mesaj:
+                  type: string
+                  maxLength: 500
+                  nullable: true
+      responses:
+        '201':
+          description: Hediye gönderildi
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  mesaj:
+                    type: string
+                    example: Hediye gönderildi!
+                  gonderim:
+                    type: object
+        '422':
+          description: Kendine hediye veya yetersiz puan
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HataMesaji'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  # ══════════════════════════════════════════════════════════════════
+  # ADMİN
+  # ══════════════════════════════════════════════════════════════════
+  /admin/istatistik/ozet:
+    get:
+      tags: [Admin]
+      summary: Günlük istatistik özeti
+      description: Belirtilen tarihe ait platform istatistiklerini döner. Admin scope gerektirir.
+      parameters:
+        - name: tarih
+          in: query
+          schema:
+            type: string
+            format: date
+          description: Varsayılan bugünün tarihi
+      responses:
+        '200':
+          description: İstatistik özeti
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IstatistikOzeti'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /admin/sikayetler:
+    get:
+      tags: [Admin]
+      summary: Şikayetleri listele
+      description: Tüm şikayetleri sayfalı listeler. Durum filtresi opsiyonel.
+      parameters:
+        - name: durum
+          in: query
+          schema:
+            type: string
+            enum: [beklemede, inceleniyor, sonuclandi, reddedildi]
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+      responses:
+        '200':
+          description: Şikayet listesi (sayfalı)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/SikayetResource'
+                  links:
+                    $ref: '#/components/schemas/SayfaLinkleri'
+                  meta:
+                    $ref: '#/components/schemas/SayfaMeta'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /admin/sikayetler/{sikayet}:
+    patch:
+      tags: [Admin]
+      summary: Şikayet durumunu güncelle
+      parameters:
+        - name: sikayet
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [durum]
+              properties:
+                durum:
+                  type: string
+                  enum: [beklemede, inceleniyor, sonuclandi, reddedildi]
+                yonetici_notu:
+                  type: string
+                  maxLength: 2000
+                  nullable: true
+      responses:
+        '200':
+          description: Şikayet güncellendi
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/SikayetResource'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'

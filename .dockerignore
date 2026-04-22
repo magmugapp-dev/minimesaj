@@ -1,0 +1,42 @@
+# Vendor & dependencies
+/vendor/
+/node_modules/
+
+# Build outputs
+/public/build/
+/public/hot
+
+# Environment
+.env
+.env.backup
+.env.production
+
+# Storage (runtime)
+/storage/*.key
+/storage/framework/cache/data/*
+/storage/framework/sessions/*
+/storage/framework/views/*
+/storage/logs/*
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Testing
+.phpunit.result.cache
+.phpunit.cache/
+/coverage/
+
+# Docker volumes
+mysql-data/
+redis-data/
+
+# Apple/Google credentials
+/storage/app/apple/
+/storage/app/google/
