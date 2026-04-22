@@ -108,16 +108,6 @@
                             <p class="studio-stat__meta">Toplam eşleşme</p>
                         </div>
                         <div class="studio-stat">
-                            <p class="studio-stat__label">Beğeni</p>
-                            <p class="studio-stat__value">{{ number_format($kullanici->begeniler_count) }}</p>
-                            <p class="studio-stat__meta">Atılan beğeni</p>
-                        </div>
-                        <div class="studio-stat">
-                            <p class="studio-stat__label">Gelen</p>
-                            <p class="studio-stat__value">{{ number_format($kullanici->gelen_begeniler_count) }}</p>
-                            <p class="studio-stat__meta">Gelen beğeni</p>
-                        </div>
-                        <div class="studio-stat">
                             <p class="studio-stat__label">Günlük limit</p>
                             <p class="studio-stat__value">{{ $ayar->gunluk_konusma_limiti ?: '∞' }}</p>
                             <p class="studio-stat__meta">Konuşma tavanı</p>

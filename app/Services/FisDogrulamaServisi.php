@@ -2,22 +2,33 @@
 
 namespace App\Services;
 
+use App\Services\Odeme\MobilOdemeAyarServisi;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
 class FisDogrulamaServisi
 {
+    public function __construct(private MobilOdemeAyarServisi $mobilOdemeAyarServisi) {}
+
     /**
      * Platform bazlı fiş doğrulaması yapar.
      *
      * @return array{gecerli: bool, islem_kodu: ?string, hata: ?string}
      */
-    public function dogrula(string $platform, string $fisVerisi, string $urunKodu): array
+    public function dogrula(string $platform, string $fisVerisi, string $urunKodu, string $urunTipi = 'tek_seferlik'): array
     {
+        if (!$this->mobilOdemeAyarServisi->kanalAktifMi($platform)) {
+            return [
+                'gecerli' => false,
+                'islem_kodu' => null,
+                'hata' => 'Secilen mobil odeme kanali panelde pasif durumda.',
+            ];
+        }
+
         return match ($platform) {
             'ios' => $this->appleDogrula($fisVerisi, $urunKodu),
-            'android' => $this->googleDogrula($fisVerisi, $urunKodu),
-            default => ['gecerli' => false, 'islem_kodu' => null, 'hata' => 'Geçersiz platform.'],
+            'android' => $this->googleDogrula($fisVerisi, $urunKodu, $urunTipi),
+            default => ['gecerli' => false, 'islem_kodu' => null, 'hata' => 'Gecersiz platform.'],
         };
     }
 
@@ -88,7 +99,17 @@ class FisDogrulamaServisi
      */
     private function appleDogrula(string $fisVerisi, string $urunKodu): array
     {
-        $ortam = config('services.apple.sandbox', true) ? 'sandbox' : 'production';
+        $ayarlar = $this->mobilOdemeAyarServisi->appleAyarlari();
+
+        if (!$this->mobilOdemeAyarServisi->appleHazirMi()) {
+            return [
+                'gecerli' => false,
+                'islem_kodu' => null,
+                'hata' => 'Apple odeme ayarlari panelde eksik.',
+            ];
+        }
+
+        $ortam = ($ayarlar['sandbox'] ?? true) ? 'sandbox' : 'production';
         $temelUrl = $ortam === 'sandbox'
             ? 'https://api.storekit-sandbox.itunes.apple.com'
             : 'https://api.storekit.itunes.apple.com';
@@ -103,7 +124,7 @@ class FisDogrulamaServisi
         }
 
         try {
-            $jwt = $this->appleJwtOlustur();
+            $jwt = $this->appleJwtOlustur($ayarlar);
 
             $yanit = Http::withToken($jwt)
                 ->timeout(15)
@@ -130,7 +151,7 @@ class FisDogrulamaServisi
                 return [
                     'gecerli' => false,
                     'islem_kodu' => $islemKodu,
-                    'hata' => 'Ürün kodu uyuşmuyor.',
+                    'hata' => 'Urun kodu uyusmuyor.',
                 ];
             }
 
@@ -154,22 +175,25 @@ class FisDogrulamaServisi
      * Google Play Developer API ile doğrulama.
      * https://developers.google.com/android-publisher/api-ref/rest/v3/purchases.products
      */
-    private function googleDogrula(string $fisVerisi, string $urunKodu): array
+    private function googleDogrula(string $fisVerisi, string $urunKodu, string $urunTipi): array
     {
-        $paketAdi = config('services.google_play.paket_adi');
+        $ayarlar = $this->mobilOdemeAyarServisi->googlePlayAyarlari();
+        $paketAdi = $ayarlar['paket_adi'] ?? null;
 
-        if (!$paketAdi) {
+        if (!$this->mobilOdemeAyarServisi->googlePlayHazirMi() || !$paketAdi) {
             return [
                 'gecerli' => false,
                 'islem_kodu' => null,
-                'hata' => 'Google Play paket adı yapılandırılmamış.',
+                'hata' => 'Google Play odeme ayarlari panelde eksik.',
             ];
         }
 
         try {
-            $erisimJetonu = $this->googleErisimJetonuAl();
+            $erisimJetonu = $this->googleErisimJetonuAl($ayarlar);
 
-            $url = "https://androidpublisher.googleapis.com/androidpublisher/v3/applications/{$paketAdi}/purchases/products/{$urunKodu}/tokens/{$fisVerisi}";
+            $url = $urunTipi === 'abonelik'
+                ? "https://androidpublisher.googleapis.com/androidpublisher/v3/applications/{$paketAdi}/purchases/subscriptionsv2/tokens/{$fisVerisi}"
+                : "https://androidpublisher.googleapis.com/androidpublisher/v3/applications/{$paketAdi}/purchases/products/{$urunKodu}/tokens/{$fisVerisi}";
 
             $yanit = Http::withToken($erisimJetonu)
                 ->timeout(15)
@@ -189,6 +213,10 @@ class FisDogrulamaServisi
             }
 
             $veri = $yanit->json();
+
+            if ($urunTipi === 'abonelik') {
+                return $this->googleAbonelikSonucunuDonustur($veri, $urunKodu, $fisVerisi);
+            }
 
             // purchaseState: 0 = satın alındı, 1 = iptal, 2 = beklemede
             if (($veri['purchaseState'] ?? -1) !== 0) {
@@ -220,13 +248,13 @@ class FisDogrulamaServisi
      * Apple App Store Server API için JWT oluşturur.
      * Gerekli config: services.apple.issuer_id, key_id, private_key_path
      */
-    private function appleJwtOlustur(): string
+    private function appleJwtOlustur(array $ayarlar): string
     {
-        $issuerId = config('services.apple.issuer_id');
-        $keyId = config('services.apple.key_id');
-        $ozelAnahtarYolu = config('services.apple.private_key_path');
+        $issuerId = $ayarlar['issuer_id'];
+        $keyId = $ayarlar['key_id'];
+        $ozelAnahtarYolu = $ayarlar['private_key_path'];
 
-        $ozelAnahtar = file_get_contents(storage_path($ozelAnahtarYolu));
+        $ozelAnahtar = file_get_contents($ozelAnahtarYolu);
 
         $baslik = [
             'alg' => 'ES256',
@@ -239,7 +267,7 @@ class FisDogrulamaServisi
             'iat' => time(),
             'exp' => time() + 3600,
             'aud' => 'appstoreconnect-v1',
-            'bid' => config('services.apple.bundle_id'),
+            'bid' => $ayarlar['bundle_id'],
         ];
 
         $baslikB64 = rtrim(strtr(base64_encode(json_encode($baslik)), '+/', '-_'), '=');
@@ -259,10 +287,10 @@ class FisDogrulamaServisi
     /**
      * Google OAuth2 service account ile erişim jetonu alır.
      */
-    private function googleErisimJetonuAl(): string
+    private function googleErisimJetonuAl(array $ayarlar): string
     {
-        $servisHesabi = config('services.google_play.service_account_path');
-        $kimlikBilgisi = json_decode(file_get_contents(storage_path($servisHesabi)), true);
+        $servisHesabi = $ayarlar['service_account_path'];
+        $kimlikBilgisi = json_decode(file_get_contents($servisHesabi), true);
 
         $baslik = ['alg' => 'RS256', 'typ' => 'JWT'];
         $yukBilgisi = [
@@ -287,7 +315,43 @@ class FisDogrulamaServisi
             'assertion' => $jwt,
         ]);
 
-        return $yanit->json('access_token');
+        return (string) $yanit->json('access_token');
+    }
+
+    /**
+     * @param  array<string, mixed>  $veri
+     * @return array{gecerli: bool, islem_kodu: ?string, hata: ?string}
+     */
+    private function googleAbonelikSonucunuDonustur(array $veri, string $urunKodu, string $fisVerisi): array
+    {
+        $lineItems = $veri['lineItems'] ?? [];
+        $ilkSatir = is_array($lineItems) ? ($lineItems[0] ?? null) : null;
+        $lineItem = is_array($ilkSatir) ? $ilkSatir : [];
+        $productId = $lineItem['productId'] ?? null;
+        $state = $veri['subscriptionState'] ?? null;
+        $islemKodu = $veri['latestOrderId'] ?? $fisVerisi;
+
+        if (is_string($productId) && $productId !== '' && $productId !== $urunKodu) {
+            return [
+                'gecerli' => false,
+                'islem_kodu' => (string) $islemKodu,
+                'hata' => 'Abonelik urun kodu uyusmuyor.',
+            ];
+        }
+
+        if (!in_array($state, ['SUBSCRIPTION_STATE_ACTIVE', 'SUBSCRIPTION_STATE_IN_GRACE_PERIOD'], true)) {
+            return [
+                'gecerli' => false,
+                'islem_kodu' => (string) $islemKodu,
+                'hata' => 'Abonelik henuz aktif degil.',
+            ];
+        }
+
+        return [
+            'gecerli' => true,
+            'islem_kodu' => (string) $islemKodu,
+            'hata' => null,
+        ];
     }
 
     /**

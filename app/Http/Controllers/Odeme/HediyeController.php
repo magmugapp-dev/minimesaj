@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Odeme;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Odeme\HediyeGonderRequest;
 use App\Models\HediyeGonderimi;
+use App\Models\SessizeAlinanKullanici;
 use App\Models\User;
 use App\Notifications\HediyeAlindi;
 use App\Services\PuanServisi;
@@ -45,7 +46,10 @@ class HediyeController extends Controller
         ]);
 
         $alici = User::find($veri['alici_user_id']);
-        if ($alici instanceof User) {
+        if (
+            $alici instanceof User
+            && ! SessizeAlinanKullanici::aktifKayitVarMi((int) $alici->id, (int) $gonderen->id)
+        ) {
             $alici->notify(new HediyeAlindi($gonderim, $gonderen));
         }
 

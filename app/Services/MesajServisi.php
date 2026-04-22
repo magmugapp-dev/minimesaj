@@ -7,6 +7,7 @@ use App\Events\MesajlarOkundu;
 use App\Events\YapayZekaCevabiHazir;
 use App\Jobs\YapayZekaCevapGorevi;
 use App\Models\Mesaj;
+use App\Models\SessizeAlinanKullanici;
 use App\Models\Sohbet;
 use App\Models\User;
 use App\Models\YapayZekaGorevi;
@@ -98,7 +99,10 @@ class MesajServisi
                     return;
                 }
 
-                if ($karsiTaraf instanceof User) {
+                if (
+                    $karsiTaraf instanceof User
+                    && ! SessizeAlinanKullanici::aktifKayitVarMi((int) $karsiTaraf->id, (int) $gonderen->id)
+                ) {
                     $karsiTaraf->notify(new YeniMesaj($mesaj, $gonderen));
                 }
             });
@@ -138,7 +142,10 @@ class MesajServisi
             DB::afterCommit(function () use ($mesaj, $aiUser, $karsiTaraf) {
                 YapayZekaCevabiHazir::dispatch($mesaj);
 
-                if ($karsiTaraf instanceof User) {
+                if (
+                    $karsiTaraf instanceof User
+                    && ! SessizeAlinanKullanici::aktifKayitVarMi((int) $karsiTaraf->id, (int) $aiUser->id)
+                ) {
                     $karsiTaraf->notify(new YeniMesaj($mesaj, $aiUser));
                 }
             });

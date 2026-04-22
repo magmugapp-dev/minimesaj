@@ -36,6 +36,7 @@ use Laravel\Sanctum\HasApiTokens;
     'gorunum_modu',
     'bildirimler_acik_mi',
     'titresim_acik_mi',
+    'dil',
     'cihaz_bilgi',
     'son_gunluk_giris_puani_tarihi',
     'eslesme_cinsiyet_filtresi',
@@ -86,16 +87,6 @@ class User extends Authenticatable
         return $this->hasMany(Eslesme::class, 'user_id');
     }
 
-    public function begeniler(): HasMany
-    {
-        return $this->hasMany(Begeni::class, 'begenen_user_id');
-    }
-
-    public function gelenBegeniler(): HasMany
-    {
-        return $this->hasMany(Begeni::class, 'begenilen_user_id');
-    }
-
     public function engellemeler(): HasMany
     {
         return $this->hasMany(Engelleme::class, 'engelleyen_user_id');
@@ -104,6 +95,16 @@ class User extends Authenticatable
     public function sikayetler(): HasMany
     {
         return $this->hasMany(Sikayet::class, 'sikayet_eden_user_id');
+    }
+
+    public function destekTalepleri(): HasMany
+    {
+        return $this->hasMany(DestekTalebi::class, 'user_id');
+    }
+
+    public function destekTalebiYanitlari(): HasMany
+    {
+        return $this->hasMany(DestekTalebiYaniti::class, 'admin_user_id');
     }
 
     public function puanHareketleri(): HasMany

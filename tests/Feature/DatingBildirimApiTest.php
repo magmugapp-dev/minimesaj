@@ -207,7 +207,52 @@ it('creates the yeni mesaj notification immediately after a message is sent', fu
         ->and($alici->notifications()->first()?->type)->toBe(YeniMesaj::class);
 });
 
-it('includes ai users in discovery and auto-matches them when liked', function () {
+it('does not notify a user for messages from a muted peer', function () {
+    config()->set('broadcasting.default', 'null');
+
+    $gonderen = User::factory()->create();
+    $alici = User::factory()->create([
+        'bildirimler_acik_mi' => true,
+    ]);
+
+    $eslesme = Eslesme::query()->create([
+        'user_id' => $gonderen->id,
+        'eslesen_user_id' => $alici->id,
+        'eslesme_turu' => 'otomatik',
+        'eslesme_kaynagi' => 'gercek_kullanici',
+        'durum' => 'aktif',
+        'baslatan_user_id' => $gonderen->id,
+    ]);
+
+    $sohbet = Sohbet::query()->create([
+        'eslesme_id' => $eslesme->id,
+        'durum' => 'aktif',
+    ]);
+
+    Sanctum::actingAs($alici);
+
+    $this->postJson("/api/dating/sessize-al/{$gonderen->id}", [
+        'sure' => '1_saat',
+    ])->assertOk()
+        ->assertJsonPath('sessize_alindi_mi', true);
+
+    $mesaj = app(MesajServisi::class)->gonder($sohbet, $gonderen, [
+        'mesaj_tipi' => 'metin',
+        'mesaj_metni' => 'Bu mesaj sessizde kalmali.',
+    ]);
+
+    expect($mesaj->exists)->toBeTrue();
+
+    $alici->refresh();
+
+    expect($alici->notifications()->count())->toBe(0);
+
+    $this->deleteJson("/api/dating/sessize-al/{$gonderen->id}")
+        ->assertOk()
+        ->assertJsonPath('sessize_alindi_mi', false);
+});
+
+it('includes ai users in discovery and starts a direct match conversation', function () {
     $kullanici = User::factory()->create([
         'hesap_tipi' => 'user',
         'hesap_durumu' => 'aktif',
@@ -229,15 +274,9 @@ it('includes ai users in discovery and auto-matches them when liked', function (
             'hesap_tipi' => 'ai',
         ]);
 
-    $this->postJson("/api/dating/begeni/{$aiKullanici->id}")
+    $this->postJson("/api/dating/eslesme-sohbet/{$aiKullanici->id}")
         ->assertOk()
         ->assertJsonPath('durum', 'eslesme');
-
-    $this->assertDatabaseHas('begeniler', [
-        'begenen_user_id' => $aiKullanici->id,
-        'begenilen_user_id' => $kullanici->id,
-        'eslesmeye_donustu_mu' => true,
-    ]);
 
     $this->assertDatabaseHas('eslesmeler', [
         'user_id' => $kullanici->id,
@@ -251,6 +290,43 @@ it('includes ai users in discovery and auto-matches them when liked', function (
         'saglayici_tipi' => 'gemini',
         'model_adi' => 'gemini-2.5-flash',
     ]);
+});
+
+it('can return a random photo-backed discovery showcase for the home banner', function () {
+    $kullanici = User::factory()->create([
+        'hesap_tipi' => 'user',
+        'hesap_durumu' => 'aktif',
+        'cevrim_ici_mi' => true,
+    ]);
+
+    User::factory()
+        ->count(5)
+        ->create([
+            'hesap_tipi' => 'user',
+            'hesap_durumu' => 'aktif',
+            'cevrim_ici_mi' => true,
+            'profil_resmi' => 'https://example.test/profile.jpg',
+        ]);
+
+    User::factory()
+        ->count(2)
+        ->create([
+            'hesap_tipi' => 'user',
+            'hesap_durumu' => 'aktif',
+            'cevrim_ici_mi' => true,
+            'profil_resmi' => null,
+        ]);
+
+    Sanctum::actingAs($kullanici);
+
+    $response = $this->getJson('/api/dating/kesfet?profil_resimli=1&per_page=4');
+
+    $response->assertOk()
+        ->assertJsonCount(4, 'data');
+
+    collect($response->json('data'))->each(function (array $aday) {
+        expect($aday['profil_resmi'] ?? null)->not->toBeNull();
+    });
 });
 
 it('queues an ai first message after an automatic ai match is created', function () {
@@ -270,7 +346,7 @@ it('queues an ai first message after an automatic ai match is created', function
 
     Sanctum::actingAs($kullanici);
 
-    $this->postJson("/api/dating/begeni/{$aiKullanici->id}")
+    $this->postJson("/api/dating/eslesme-sohbet/{$aiKullanici->id}")
         ->assertOk()
         ->assertJsonPath('durum', 'eslesme');
 

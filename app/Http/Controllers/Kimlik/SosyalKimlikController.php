@@ -7,15 +7,23 @@ use App\Http\Requests\Kimlik\KullaniciAdiMusaitRequest;
 use App\Http\Requests\Kimlik\SosyalGirisRequest;
 use App\Http\Requests\Kimlik\SosyalKayitRequest;
 use App\Http\Resources\KullaniciResource;
+use App\Services\AyarServisi;
 use App\Services\Kimlik\Sosyal\SosyalAuthServisi;
 use Illuminate\Http\JsonResponse;
 
 class SosyalKimlikController extends Controller
 {
-    public function __construct(private SosyalAuthServisi $sosyalAuthServisi) {}
+    public function __construct(
+        private SosyalAuthServisi $sosyalAuthServisi,
+        private AyarServisi $ayarServisi,
+    ) {}
 
     public function giris(SosyalGirisRequest $request): JsonResponse
     {
+        if ($yanit = $this->guncellemeGerekliYaniti($request->validated('uygulama_versiyonu'))) {
+            return $yanit;
+        }
+
         $sonuc = $this->sosyalAuthServisi->giris($request->validated());
 
         if ($sonuc['durum'] === 'authenticated') {
@@ -35,6 +43,10 @@ class SosyalKimlikController extends Controller
 
     public function kayit(SosyalKayitRequest $request): JsonResponse
     {
+        if ($yanit = $this->guncellemeGerekliYaniti($request->validated('uygulama_versiyonu'))) {
+            return $yanit;
+        }
+
         $sonuc = $this->sosyalAuthServisi->kayit(
             $request->validated(),
             $request->file('dosya'),
@@ -54,5 +66,59 @@ class SosyalKimlikController extends Controller
                 $request->validated('kullanici_adi'),
             ),
         ]);
+    }
+
+    private function guncellemeGerekliYaniti(?string $uygulamaVersiyonu): ?JsonResponse
+    {
+        $minimumVersiyon = $this->normalizeVersion(
+            $this->ayarServisi->al('mobil_minimum_versiyon', env('MOBIL_MINIMUM_VERSIYON')),
+        );
+        $istemciVersiyonu = $this->normalizeVersion($uygulamaVersiyonu);
+
+        if ($minimumVersiyon === null || $istemciVersiyonu === null) {
+            return null;
+        }
+
+        if (version_compare($istemciVersiyonu, $minimumVersiyon, '>=')) {
+            return null;
+        }
+
+        $guncellemeUrl = $this->normalizeString(
+            $this->ayarServisi->al(
+                'android_play_store_url',
+                env('ANDROID_PLAY_STORE_URL'),
+            ),
+        );
+
+        return response()->json([
+            'kod' => 'update_required',
+            'mesaj' => 'Devam etmek icin uygulamanin guncel surumunu yuklemen gerekiyor.',
+            'minimum_versiyon' => $minimumVersiyon,
+            'guncelleme_url' => $guncellemeUrl,
+        ], 426);
+    }
+
+    private function normalizeVersion(mixed $version): ?string
+    {
+        $normalized = $this->normalizeString($version);
+        if ($normalized === null) {
+            return null;
+        }
+
+        $normalized = preg_replace('/\+.*/', '', $normalized);
+        $normalized = trim((string) $normalized);
+
+        return $normalized !== '' ? $normalized : null;
+    }
+
+    private function normalizeString(mixed $value): ?string
+    {
+        if (!is_string($value) && !is_numeric($value)) {
+            return null;
+        }
+
+        $normalized = trim((string) $value);
+
+        return $normalized !== '' ? $normalized : null;
     }
 }

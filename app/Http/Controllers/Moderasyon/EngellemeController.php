@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Moderasyon;
 
 use App\Http\Controllers\Controller;
+use App\Http\Resources\EngellenenKullaniciResource;
 use App\Models\Engelleme;
 use App\Models\User;
 use Illuminate\Http\JsonResponse;
@@ -10,6 +11,17 @@ use Illuminate\Http\Request;
 
 class EngellemeController extends Controller
 {
+    public function listele(Request $request): JsonResponse
+    {
+        return EngellenenKullaniciResource::collection(
+            Engelleme::query()
+                ->with('engellenen')
+                ->where('engelleyen_user_id', $request->user()->id)
+                ->latest()
+                ->get()
+        )->response();
+    }
+
     public function engelle(Request $request, User $kullanici): JsonResponse
     {
         if ($kullanici->id === $request->user()->id) {

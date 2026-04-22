@@ -3,6 +3,7 @@
 use App\Models\Ayar;
 use App\Models\PuanHareketi;
 use App\Models\User;
+use App\Services\AyarServisi;
 use Illuminate\Support\Facades\Hash;
 
 it('awards registration bonus points on classic registration', function () {
@@ -10,6 +11,7 @@ it('awards registration bonus points on classic registration', function () {
         ['anahtar' => 'kayit_puani'],
         ['deger' => '40', 'grup' => 'puan_sistemi', 'tip' => 'integer', 'aciklama' => 'Kayit Bonusu'],
     );
+    app(AyarServisi::class)->onbellekTemizle();
 
     $response = $this->postJson('/api/auth/kayit', [
         'ad' => 'Test Kullanici',
@@ -20,7 +22,9 @@ it('awards registration bonus points on classic registration', function () {
         'istemci_tipi' => 'dating',
     ]);
 
-    $response->assertCreated();
+    $response->assertCreated()
+        ->assertJsonPath('kullanici.mevcut_puan', 40)
+        ->assertJsonPath('kullanici.gunluk_ucretsiz_hak', 3);
 
     $user = User::query()->where('kullanici_adi', 'kayitbonus')->firstOrFail();
 
@@ -38,6 +42,7 @@ it('awards daily login bonus once per day on login', function () {
         ['anahtar' => 'gunluk_giris_puani'],
         ['deger' => '15', 'grup' => 'puan_sistemi', 'tip' => 'integer', 'aciklama' => 'Gunluk Giris Bonusu'],
     );
+    app(AyarServisi::class)->onbellekTemizle();
 
     $user = User::factory()->create([
         'kullanici_adi' => 'dailybonus',
@@ -50,7 +55,8 @@ it('awards daily login bonus once per day on login', function () {
         'kullanici_adi' => 'dailybonus',
         'password' => 'secret123',
         'istemci_tipi' => 'dating',
-    ])->assertOk();
+    ])->assertOk()
+        ->assertJsonPath('kullanici.mevcut_puan', 15);
 
     $this->postJson('/api/auth/giris', [
         'kullanici_adi' => 'dailybonus',
@@ -74,6 +80,7 @@ it('awards daily login bonus on me bootstrap when not already awarded today', fu
         ['anahtar' => 'gunluk_giris_puani'],
         ['deger' => '12', 'grup' => 'puan_sistemi', 'tip' => 'integer', 'aciklama' => 'Gunluk Giris Bonusu'],
     );
+    app(AyarServisi::class)->onbellekTemizle();
 
     $user = User::factory()->create([
         'mevcut_puan' => 5,

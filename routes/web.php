@@ -12,6 +12,7 @@ use App\Http\Controllers\Admin\InstagramController;
 use App\Http\Controllers\Admin\IstatistikController;
 use App\Http\Controllers\Admin\KullaniciController;
 use App\Http\Controllers\Admin\PanoController;
+use App\Http\Controllers\Admin\DestekTalebiController;
 use App\Http\Controllers\Admin\PuanPaketiController;
 use App\Http\Controllers\Admin\SikayetController;
 use Illuminate\Support\Facades\Route;
@@ -59,9 +60,14 @@ Route::prefix('admin')->group(function () {
         Route::get('moderasyon/engeller', [EngelController::class, 'index'])->name('admin.moderasyon.engeller');
         Route::delete('moderasyon/engeller/{engelleme}', [EngelController::class, 'kaldir'])->name('admin.moderasyon.engeller.kaldir');
 
+        // Moderasyon — Destek Talepleri
+        Route::get('moderasyon/destek-talepleri', [DestekTalebiController::class, 'index'])->name('admin.moderasyon.destek-talepleri');
+        Route::get('moderasyon/destek-talepleri/{destekTalebi}', [DestekTalebiController::class, 'goster'])->name('admin.moderasyon.destek-talepleri.goster');
+        Route::patch('moderasyon/destek-talepleri/{destekTalebi}/durum', [DestekTalebiController::class, 'durumGuncelle'])->name('admin.moderasyon.destek-talepleri.durum-guncelle');
+        Route::post('moderasyon/destek-talepleri/{destekTalebi}/yanitlar', [DestekTalebiController::class, 'yanitEkle'])->name('admin.moderasyon.destek-talepleri.yanit-ekle');
+
         // Eşleşme Yönetimi
         Route::get('eslesmeler', [EslesmeController::class, 'index'])->name('admin.eslesmeler.index');
-        Route::get('eslesmeler/begeniler', [EslesmeController::class, 'begeniler'])->name('admin.eslesmeler.begeniler');
         Route::get('eslesmeler/{eslesme}/kullanicilar/{kullanici}/hafiza', [EslesmeController::class, 'kisiHafiza'])->name('admin.eslesmeler.kisi-hafiza');
         Route::get('eslesmeler/{eslesme}/sohbet', [EslesmeController::class, 'sohbet'])->name('admin.eslesmeler.sohbet');
         Route::get('eslesmeler/{eslesme}', [EslesmeController::class, 'goster'])->name('admin.eslesmeler.goster');
@@ -106,6 +112,9 @@ Route::prefix('admin')->group(function () {
 
         // Ayarlar
         Route::get('ayarlar', [AyarController::class, 'index'])->name('admin.ayarlar');
-        Route::put('ayarlar', [AyarController::class, 'guncelle'])->name('admin.ayarlar.guncelle');
+        Route::post('ayarlar/depolama/nginx-limit-uygula', [AyarController::class, 'nginxUploadLimitiniUygula'])
+            ->name('admin.ayarlar.depolama.nginx-limit-uygula');
+        Route::get('ayarlar/{kategori}', [AyarController::class, 'show'])->name('admin.ayarlar.kategori');
+        Route::put('ayarlar/{kategori}', [AyarController::class, 'guncelle'])->name('admin.ayarlar.kategori.guncelle');
     });
 });

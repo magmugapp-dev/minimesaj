@@ -189,42 +189,8 @@
                         <p class="text-sm text-gray-400">Bu eslesmeye henuz bir sohbet baslatilmamis.</p>
                     @endif
                 </div>
-
-                @if ($begeniler->isNotEmpty())
-                    <div class="rounded-xl border border-gray-200 bg-white p-6">
-                        <h4 class="mb-4 text-sm font-semibold text-gray-900">Ilgili Begeniler ({{ $begeniler->count() }})
-                        </h4>
-                        <div class="divide-y divide-gray-100">
-                            @foreach ($begeniler as $begeni)
-                                <div class="flex items-center justify-between py-3">
-                                    <div class="flex items-center gap-2">
-                                        @if ($begeni->begenen)
-                                            <span class="text-sm font-medium text-gray-900">{{ $begeni->begenen->ad }}
-                                                {{ $begeni->begenen->soyad }}</span>
-                                        @endif
-                                        <svg class="h-4 w-4 text-pink-400" fill="currentColor" viewBox="0 0 24 24">
-                                            <path
-                                                d="M21 8.25c0-2.485-2.099-4.5-4.688-4.5-1.935 0-3.597 1.126-4.312 2.733-.715-1.607-2.377-2.733-4.313-2.733C5.1 3.75 3 5.765 3 8.25c0 7.22 9 12 9 12s9-4.78 9-12z" />
-                                        </svg>
-                                        @if ($begeni->begenilen)
-                                            <span class="text-sm font-medium text-gray-900">{{ $begeni->begenilen->ad }}
-                                                {{ $begeni->begenilen->soyad }}</span>
-                                        @endif
-                                    </div>
-                                    <div class="flex items-center gap-2">
-                                        @if ($begeni->eslesmeye_donustu_mu)
-                                            <span
-                                                class="rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-700">Eslesti</span>
-                                        @endif
-                                        <span
-                                            class="text-xs text-gray-400">{{ $begeni->created_at->format('d.m.Y H:i') }}</span>
-                                    </div>
-                                </div>
-                            @endforeach
-                        </div>
-                    </div>
-                @endif
-            </div>
+</div>
+</div>
 
             <div class="space-y-6">
                 <div class="rounded-xl border border-gray-200 bg-white p-6">

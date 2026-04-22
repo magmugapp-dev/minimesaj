@@ -59,8 +59,6 @@ class KullaniciController extends Controller
     {
         $kullanici->loadCount([
             'eslesmeler',
-            'begeniler',
-            'gelenBegeniler',
             'sikayetler',
             'odemeler',
             'instagramHesaplari',

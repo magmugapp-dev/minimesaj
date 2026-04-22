@@ -19,6 +19,7 @@ class DatabaseSeeder extends Seeder
             AdminSeeder::class,
             AyarSeeder::class,
             PuanPaketiSeeder::class,
+            AbonelikPaketiSeeder::class,
             GelistirmeSeeder::class,
         ]);
     }

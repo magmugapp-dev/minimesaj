@@ -17,6 +17,9 @@ class AyarSeeder extends Seeder
             ['anahtar' => 'varsayilan_dil', 'deger' => 'tr', 'grup' => 'genel', 'tip' => 'string', 'aciklama' => 'Varsayılan Dil'],
             ['anahtar' => 'kayit_aktif_mi', 'deger' => '1', 'grup' => 'genel', 'tip' => 'boolean', 'aciklama' => 'Kayıt Aktif mi'],
             ['anahtar' => 'uygulama_versiyonu', 'deger' => '1.0.0', 'grup' => 'genel', 'tip' => 'string', 'aciklama' => 'Uygulama Versiyonu'],
+            ['anahtar' => 'mobil_minimum_versiyon', 'deger' => '1.0.0', 'grup' => 'genel', 'tip' => 'string', 'aciklama' => 'Mobil Minimum Versiyon'],
+            ['anahtar' => 'destek_eposta', 'deger' => '', 'grup' => 'genel', 'tip' => 'string', 'aciklama' => 'Destek E-posta Adresi'],
+            ['anahtar' => 'destek_whatsapp', 'deger' => '', 'grup' => 'genel', 'tip' => 'string', 'aciklama' => 'Destek WhatsApp Numarası'],
             ['anahtar' => 'uygulama_logosu', 'deger' => '', 'grup' => 'genel', 'tip' => 'file', 'aciklama' => 'Uygulama Logosu'],
             ['anahtar' => 'flutter_logosu', 'deger' => '', 'grup' => 'genel', 'tip' => 'file', 'aciklama' => 'Flutter Uygulama Logosu (API: /api/uygulama/logo)'],
 
@@ -33,21 +36,24 @@ class AyarSeeder extends Seeder
             // ── Apple ──────────────────────────────────────────────
             ['anahtar' => 'apple_issuer_id', 'deger' => '', 'grup' => 'apple', 'tip' => 'string', 'aciklama' => 'Apple Issuer ID'],
             ['anahtar' => 'apple_key_id', 'deger' => '', 'grup' => 'apple', 'tip' => 'string', 'aciklama' => 'Apple Key ID'],
-            ['anahtar' => 'apple_private_key_path', 'deger' => '', 'grup' => 'apple', 'tip' => 'string', 'aciklama' => 'Apple Private Key Dosya Yolu'],
+            ['anahtar' => 'apple_private_key_path', 'deger' => '', 'grup' => 'apple', 'tip' => 'file', 'aciklama' => 'Apple Private Key Dosyası'],
             ['anahtar' => 'apple_bundle_id', 'deger' => '', 'grup' => 'apple', 'tip' => 'string', 'aciklama' => 'Apple Bundle ID'],
             ['anahtar' => 'apple_sandbox', 'deger' => '1', 'grup' => 'apple', 'tip' => 'boolean', 'aciklama' => 'Apple Sandbox Modu'],
+            ['anahtar' => 'apple_odeme_aktif_mi', 'deger' => '0', 'grup' => 'apple', 'tip' => 'boolean', 'aciklama' => 'App Store odemeleri aktif mi'],
+            ['anahtar' => 'ios_app_store_url', 'deger' => '', 'grup' => 'apple', 'tip' => 'string', 'aciklama' => 'App Store Uygulama Linki'],
             ['anahtar' => 'google_auth_ios_client_id', 'deger' => '', 'grup' => 'google_auth', 'tip' => 'string', 'aciklama' => 'Google iOS Client ID'],
             ['anahtar' => 'google_auth_android_client_id', 'deger' => '', 'grup' => 'google_auth', 'tip' => 'string', 'aciklama' => 'Google Android Client ID'],
             ['anahtar' => 'google_auth_server_client_id', 'deger' => '', 'grup' => 'google_auth', 'tip' => 'string', 'aciklama' => 'Google Server Client ID'],
 
             // ── Google Play ────────────────────────────────────────
             ['anahtar' => 'google_play_paket_adi', 'deger' => '', 'grup' => 'google_play', 'tip' => 'string', 'aciklama' => 'Google Play Paket Adı'],
-            ['anahtar' => 'google_play_service_account_path', 'deger' => '', 'grup' => 'google_play', 'tip' => 'string', 'aciklama' => 'Google Play Service Account Dosya Yolu'],
+            ['anahtar' => 'google_play_service_account_path', 'deger' => '', 'grup' => 'google_play', 'tip' => 'file', 'aciklama' => 'Google Play Service Account JSON'],
+            ['anahtar' => 'google_play_odeme_aktif_mi', 'deger' => '0', 'grup' => 'google_play', 'tip' => 'boolean', 'aciklama' => 'Google Play odemeleri aktif mi'],
+            ['anahtar' => 'android_play_store_url', 'deger' => 'https://play.google.com/store/apps/details?id=com.magmug.magmug', 'grup' => 'google_play', 'tip' => 'string', 'aciklama' => 'Play Store Uygulama Linki'],
 
             // ── Puan Sistemi ───────────────────────────────────────
             ['anahtar' => 'kayit_puani', 'deger' => '100', 'grup' => 'puan_sistemi', 'tip' => 'integer', 'aciklama' => 'Kayıt Bonusu Puanı'],
             ['anahtar' => 'gunluk_giris_puani', 'deger' => '10', 'grup' => 'puan_sistemi', 'tip' => 'integer', 'aciklama' => 'Günlük Giriş Puanı'],
-            ['anahtar' => 'begeni_maliyeti', 'deger' => '5', 'grup' => 'puan_sistemi', 'tip' => 'integer', 'aciklama' => 'Beğeni Puan Maliyeti'],
             ['anahtar' => 'eslesme_baslatma_maliyeti', 'deger' => '8', 'grup' => 'puan_sistemi', 'tip' => 'integer', 'aciklama' => 'Eşleşme Başlatma Maliyeti'],
             ['anahtar' => 'eslesme_odulu', 'deger' => '20', 'grup' => 'puan_sistemi', 'tip' => 'integer', 'aciklama' => 'Eşleşme Ödül Puanı'],
             ['anahtar' => 'reklam_odulu', 'deger' => '15', 'grup' => 'puan_sistemi', 'tip' => 'integer', 'aciklama' => 'Reklam İzleme Ödülü'],
@@ -58,10 +64,10 @@ class AyarSeeder extends Seeder
             ['anahtar' => 'premium_aylik_fiyat', 'deger' => '49.99', 'grup' => 'premium', 'tip' => 'string', 'aciklama' => 'Premium Aylık Fiyat (₺)'],
             ['anahtar' => 'premium_yillik_fiyat', 'deger' => '399.99', 'grup' => 'premium', 'tip' => 'string', 'aciklama' => 'Premium Yıllık Fiyat (₺)'],
             ['anahtar' => 'premium_gunluk_hak', 'deger' => '999', 'grup' => 'premium', 'tip' => 'integer', 'aciklama' => 'Premium Günlük Hak'],
-            ['anahtar' => 'premium_ozellikler', 'deger' => '["sinirsiz_begeni","kimler_begendi","okundu_bilgisi","profil_one_cikarma"]', 'grup' => 'premium', 'tip' => 'json', 'aciklama' => 'Premium Özellikler'],
+            ['anahtar' => 'premium_ozellikler', 'deger' => '["okundu_bilgisi","profil_one_cikarma"]', 'grup' => 'premium', 'tip' => 'json', 'aciklama' => 'Premium Özellikler'],
 
             // ── Limitler ───────────────────────────────────────────
-            ['anahtar' => 'gunluk_ucretsiz_hak', 'deger' => '3', 'grup' => 'limitler', 'tip' => 'integer', 'aciklama' => 'Günlük Ücretsiz Beğeni Hakkı'],
+            ['anahtar' => 'gunluk_ucretsiz_hak', 'deger' => '3', 'grup' => 'limitler', 'tip' => 'integer', 'aciklama' => 'Günlük Ücretsiz Eşleşme Hakkı'],
             ['anahtar' => 'foto_limit', 'deger' => '6', 'grup' => 'limitler', 'tip' => 'integer', 'aciklama' => 'Maksimum Fotoğraf Sayısı'],
             ['anahtar' => 'mesaj_uzunluk_max', 'deger' => '1000', 'grup' => 'limitler', 'tip' => 'integer', 'aciklama' => 'Maksimum Mesaj Uzunluğu'],
             ['anahtar' => 'biyografi_uzunluk_max', 'deger' => '500', 'grup' => 'limitler', 'tip' => 'integer', 'aciklama' => 'Maksimum Biyografi Uzunluğu'],
@@ -79,10 +85,9 @@ class AyarSeeder extends Seeder
             ['anahtar' => 'firebase_server_key', 'deger' => '', 'grup' => 'bildirimler', 'tip' => 'string', 'aciklama' => 'Firebase Server Key (Legacy - Kullanilmiyor)'],
             ['anahtar' => 'firebase_project_id', 'deger' => '', 'grup' => 'bildirimler', 'tip' => 'string', 'aciklama' => 'Firebase Project ID'],
             ['anahtar' => 'firebase_service_account_path', 'deger' => '', 'grup' => 'bildirimler', 'tip' => 'file', 'aciklama' => 'Firebase Service Account JSON'],
-            ['anahtar' => 'apns_sertifika_yolu', 'deger' => '', 'grup' => 'bildirimler', 'tip' => 'string', 'aciklama' => 'APNs Sertifika Yolu'],
+            ['anahtar' => 'apns_sertifika_yolu', 'deger' => '', 'grup' => 'bildirimler', 'tip' => 'file', 'aciklama' => 'APNs Sertifika Dosyası'],
             ['anahtar' => 'bildirim_esleme', 'deger' => '1', 'grup' => 'bildirimler', 'tip' => 'boolean', 'aciklama' => 'Eşleşme Bildirimi'],
             ['anahtar' => 'bildirim_mesaj', 'deger' => '1', 'grup' => 'bildirimler', 'tip' => 'boolean', 'aciklama' => 'Mesaj Bildirimi'],
-            ['anahtar' => 'bildirim_begeni', 'deger' => '1', 'grup' => 'bildirimler', 'tip' => 'boolean', 'aciklama' => 'Beğeni Bildirimi'],
             ['anahtar' => 'bildirim_hediye', 'deger' => '1', 'grup' => 'bildirimler', 'tip' => 'boolean', 'aciklama' => 'Hediye Bildirimi'],
 
             // ── E-posta ────────────────────────────────────────────
@@ -107,7 +112,13 @@ class AyarSeeder extends Seeder
             ['anahtar' => 's3_secret', 'deger' => '', 'grup' => 'depolama', 'tip' => 'string', 'aciklama' => 'S3 Secret Key'],
             ['anahtar' => 's3_bucket', 'deger' => '', 'grup' => 'depolama', 'tip' => 'string', 'aciklama' => 'S3 Bucket'],
             ['anahtar' => 's3_region', 'deger' => 'eu-central-1', 'grup' => 'depolama', 'tip' => 'string', 'aciklama' => 'S3 Region'],
+            ['anahtar' => 'depolama_fotograf_dizini', 'deger' => 'fotograflar', 'grup' => 'depolama', 'tip' => 'string', 'aciklama' => 'Fotograf Klasor Dizin Adi'],
+            ['anahtar' => 'depolama_video_dizini', 'deger' => 'videolar', 'grup' => 'depolama', 'tip' => 'string', 'aciklama' => 'Video Klasor Dizin Adi'],
+            ['anahtar' => 'izinli_fotograf_uzantilari', 'deger' => 'jpg,jpeg,png,gif,webp,heic,heif,bmp,svg', 'grup' => 'depolama', 'tip' => 'string', 'aciklama' => 'Izinli fotograf uzantilari (virgulle)'],
+            ['anahtar' => 'izinli_video_uzantilari', 'deger' => 'mp4,mov,avi,webm,m4v,3gp,mkv,flv,wmv', 'grup' => 'depolama', 'tip' => 'string', 'aciklama' => 'Izinli video uzantilari (virgulle)'],
             ['anahtar' => 'max_foto_boyut_mb', 'deger' => '5', 'grup' => 'depolama', 'tip' => 'integer', 'aciklama' => 'Maksimum Fotoğraf Boyutu (MB)'],
+            ['anahtar' => 'max_video_boyut_mb', 'deger' => '100', 'grup' => 'depolama', 'tip' => 'integer', 'aciklama' => 'Maksimum Video Boyutu (MB)'],
+            ['anahtar' => 'nginx_max_body_mb', 'deger' => '100', 'grup' => 'depolama', 'tip' => 'integer', 'aciklama' => 'Nginx Maksimum Upload Boyutu (MB)'],
 
             // ── WebSocket ──────────────────────────────────────────
             ['anahtar' => 'reverb_app_id', 'deger' => '', 'grup' => 'websocket', 'tip' => 'string', 'aciklama' => 'Reverb App ID'],

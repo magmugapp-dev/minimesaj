@@ -37,6 +37,11 @@ class Sikayet extends Model
         return $this->belongsTo(User::class, 'hedef_id');
     }
 
+    public function hedefMesaj(): BelongsTo
+    {
+        return $this->belongsTo(Mesaj::class, 'hedef_id');
+    }
+
     public function sikayetEdilen(): BelongsTo
     {
         return $this->belongsTo(User::class, 'hedef_id');

@@ -26,6 +26,14 @@ class NotificationsFcmCheck extends Command
                     $diagnostics['google_application_credentials'] ?? '(not set)',
                 ],
                 [
+                    'checked_service_account_paths',
+                    implode(', ', $diagnostics['checked_service_account_paths'] ?? []) ?: '(none)',
+                ],
+                [
+                    'recommended_local_path',
+                    $diagnostics['recommended_service_account_path'] ?? '(unknown)',
+                ],
+                [
                     'access_token_received',
                     $diagnostics['access_token_received'] ? 'yes' : 'no',
                 ],
@@ -44,6 +52,8 @@ class NotificationsFcmCheck extends Command
 
         $this->error('FCM HTTP v1 is not ready yet.');
         $this->line('Create/download a Firebase service account JSON key and point the app to it.');
+        $this->line('Recommended setting value: ' . ($diagnostics['recommended_service_account_setting'] ?? 'ayarlar/firebase/service-account.json'));
+        $this->line('Recommended local file path: ' . ($diagnostics['recommended_service_account_path'] ?? storage_path('app/private/ayarlar/firebase/service-account.json')));
 
         return self::FAILURE;
     }

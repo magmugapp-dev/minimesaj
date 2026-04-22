@@ -17,6 +17,7 @@ class SosyalGirisRequest extends FormRequest
             'provider' => 'required|in:apple,google',
             'token' => 'required|string',
             'istemci_tipi' => 'required|in:dating,extension,admin',
+            'uygulama_versiyonu' => 'nullable|string|max:32',
             'ad' => 'nullable|string|max:255',
             'soyad' => 'nullable|string|max:255',
             'avatar_url' => 'nullable|url|max:2048',

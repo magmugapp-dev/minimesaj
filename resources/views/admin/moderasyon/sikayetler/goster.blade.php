@@ -115,10 +115,23 @@
                             </div>
                         @else
                             <div class="rounded-lg bg-gray-50 p-4">
-                                <p class="text-sm text-gray-700">{{ $hedef->icerik ?? '—' }}</p>
+                                <p class="text-sm whitespace-pre-wrap break-words text-gray-700">
+                                    {{ $hedef->mesaj_metni ?: 'Mesaj metni yok.' }}
+                                </p>
+                                <div class="mt-3 space-y-1 text-xs text-gray-500">
+                                    <p>Mesaj Tipi: {{ $hedef->mesaj_tipi ?: '—' }}</p>
+                                    @if ($hedef->sohbet)
+                                        <p>Sohbet: #{{ $hedef->sohbet->id }}</p>
+                                    @endif
+                                </div>
                                 @if ($hedef->gonderen)
-                                    <p class="mt-2 text-xs text-gray-500">Gönderen: {{ $hedef->gonderen->ad }}
-                                        {{ $hedef->gonderen->soyad }}</p>
+                                    <p class="mt-2 text-xs text-gray-500">
+                                        Gönderen:
+                                        <a href="{{ route('admin.kullanicilar.goster', $hedef->gonderen) }}"
+                                            class="font-medium text-indigo-600 hover:text-indigo-800">
+                                            {{ $hedef->gonderen->ad }} {{ $hedef->gonderen->soyad }}
+                                        </a>
+                                    </p>
                                 @endif
                                 <p class="mt-1 text-xs text-gray-400">{{ $hedef->created_at?->format('d.m.Y H:i') }}</p>
                             </div>
@@ -230,6 +243,16 @@
                                         d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931z" />
                                 </svg>
                                 Kullanıcıyı Düzenle
+                            </a>
+                        @elseif ($sikayet->hedef_tipi === 'mesaj' && $hedef?->sohbet?->eslesme)
+                            <a href="{{ route('admin.eslesmeler.sohbet', $hedef->sohbet->eslesme) }}"
+                                class="flex items-center gap-2 rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50">
+                                <svg class="h-4 w-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke-width="2"
+                                    stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round"
+                                        d="M8.625 9.75a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H8.25m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0h-.375m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0h-.375m-9 8.25h10.5a2.25 2.25 0 002.25-2.25V8.25A2.25 2.25 0 0017.25 6H6.75A2.25 2.25 0 004.5 8.25v7.5A2.25 2.25 0 006.75 18z" />
+                                </svg>
+                                Sohbeti Görüntüle
                             </a>
                         @endif
                         @if ($sikayet->sikayetEden)

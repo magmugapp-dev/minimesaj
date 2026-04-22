@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
+use App\Models\Mesaj;
 use App\Models\Sikayet;
 use App\Models\User;
 use Illuminate\Http\Request;
@@ -11,18 +12,18 @@ class SikayetController extends Controller
 {
     public function index(Request $request)
     {
-        $sorgu = Sikayet::with('sikayetEden');
+        $sorgu = Sikayet::with(['sikayetEden', 'hedefMesaj.gonderen']);
 
         // Arama
         if ($arama = $request->input('arama')) {
             $sorgu->where(function ($q) use ($arama) {
                 $q->where('kategori', 'like', "%{$arama}%")
-                  ->orWhere('aciklama', 'like', "%{$arama}%")
-                  ->orWhereHas('sikayetEden', function ($q2) use ($arama) {
-                      $q2->where('ad', 'like', "%{$arama}%")
-                         ->orWhere('soyad', 'like', "%{$arama}%")
-                         ->orWhere('email', 'like', "%{$arama}%");
-                  });
+                    ->orWhere('aciklama', 'like', "%{$arama}%")
+                    ->orWhereHas('sikayetEden', function ($q2) use ($arama) {
+                        $q2->where('ad', 'like', "%{$arama}%")
+                            ->orWhere('soyad', 'like', "%{$arama}%")
+                            ->orWhere('email', 'like', "%{$arama}%");
+                    });
             });
         }
 
@@ -67,7 +68,7 @@ class SikayetController extends Controller
         if ($sikayet->hedef_tipi === 'user') {
             $hedef = User::find($sikayet->hedef_id);
         } elseif ($sikayet->hedef_tipi === 'mesaj') {
-            $hedef = \App\Models\Mesaj::with('gonderen')->find($sikayet->hedef_id);
+            $hedef = Mesaj::with(['gonderen', 'sohbet.eslesme'])->find($sikayet->hedef_id);
         }
 
         // Aynı hedef hakkındaki diğer şikayetler

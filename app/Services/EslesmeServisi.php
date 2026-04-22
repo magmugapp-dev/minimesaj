@@ -4,12 +4,11 @@ namespace App\Services;
 
 use App\Events\EslesmeOlustu;
 use App\Jobs\EslesmeSonrasiAiIlkMesajGorevi;
-use App\Models\Begeni;
 use App\Models\Engelleme;
 use App\Models\Eslesme;
+use App\Models\EslesmeGecilenKullanici;
 use App\Models\Sohbet;
 use App\Models\User;
-use App\Notifications\YeniBegeni;
 use App\Notifications\YeniEslesme;
 use App\Services\YapayZeka\AiKullaniciHazirlamaServisi;
 use App\Services\YapayZeka\AiMesajZamanlamaServisi;
@@ -31,73 +30,67 @@ class EslesmeServisi
         $this->ayarServisi ??= app(AyarServisi::class);
     }
 
-    /**
-     * Beğeni oluştur; karşılıklıysa otomatik eşleşme yap.
-     */
-    public function begen(User $begenen, User $begenilen): array
+    public function sohbetBaslat(User $baslatan, User $aday): array
     {
-        $engellendi = Engelleme::where(function ($q) use ($begenen, $begenilen) {
-            $q->where('engelleyen_user_id', $begenilen->id)
-                ->where('engellenen_user_id', $begenen->id);
-        })->orWhere(function ($q) use ($begenen, $begenilen) {
-            $q->where('engelleyen_user_id', $begenen->id)
-                ->where('engellenen_user_id', $begenilen->id);
-        })->exists();
+        if ((int) $baslatan->id === (int) $aday->id) {
+            return ['durum' => 'aday_gecersiz'];
+        }
 
-        if ($engellendi) {
+        if (!in_array($aday->hesap_tipi, ['user', 'ai'], true) || $aday->is_admin || $aday->hesap_durumu !== 'aktif') {
+            return ['durum' => 'aday_gecersiz'];
+        }
+
+        if ($this->engellemeVarMi($baslatan, $aday)) {
             return ['durum' => 'engellendi'];
         }
 
-        if (!$begenilen->cevrim_ici_mi) {
-            return ['durum' => 'cevrim_disi'];
-        }
-
-        $begeni = Begeni::firstOrCreate(
-            ['begenen_user_id' => $begenen->id, 'begenilen_user_id' => $begenilen->id],
-        );
-
-        if ($begenilen->hesap_tipi === 'ai') {
-            $this->aiKullaniciHazirlamaServisi->hazirla($begenilen);
-
-            Begeni::firstOrCreate(
-                ['begenen_user_id' => $begenilen->id, 'begenilen_user_id' => $begenen->id],
+        if ($mevcutEslesme = $this->aktifEslesmeBul($baslatan, $aday)) {
+            $sohbet = Sohbet::firstOrCreate(
+                ['eslesme_id' => $mevcutEslesme->id],
+                ['durum' => 'aktif'],
             );
+            if ($sohbet->durum !== 'aktif') {
+                $sohbet->update(['durum' => 'aktif']);
+            }
+
+            return [
+                'durum' => 'eslesme',
+                'eslesme_id' => $mevcutEslesme->id,
+                'sohbet_id' => $sohbet->id,
+                'eslesme' => $mevcutEslesme->loadMissing(['user', 'eslesenUser']),
+                'sohbet' => $sohbet->loadMissing(['eslesme.user', 'eslesme.eslesenUser', 'sonMesaj.gonderen']),
+            ];
         }
 
-        $karsilikli = Begeni::query()
-            ->where('begenen_user_id', $begenilen->id)
-            ->where('begenilen_user_id', $begenen->id)
-            ->where('eslesmeye_donustu_mu', false)
-            ->first();
+        if ($aday->hesap_tipi === 'ai') {
+            $this->aiKullaniciHazirlamaServisi->hazirla($aday);
+        }
 
-        if ($karsilikli) {
-            return DB::transaction(function () use ($begeni, $karsilikli, $begenen, $begenilen) {
-                $begeni->update(['eslesmeye_donustu_mu' => true]);
-                $karsilikli->update(['eslesmeye_donustu_mu' => true]);
+        return DB::transaction(function () use ($baslatan, $aday) {
+            $eslesme = Eslesme::create([
+                'user_id' => $baslatan->id,
+                'eslesen_user_id' => $aday->id,
+                'eslesme_turu' => 'otomatik',
+                'eslesme_kaynagi' => $aday->hesap_tipi === 'ai'
+                    ? 'yapay_zeka'
+                    : 'gercek_kullanici',
+                'durum' => 'aktif',
+                'baslatan_user_id' => $baslatan->id,
+            ]);
 
-                $eslesme = Eslesme::create([
-                    'user_id' => $begenen->id,
-                    'eslesen_user_id' => $begenilen->id,
-                    'eslesme_turu' => 'otomatik',
-                    'eslesme_kaynagi' => $begenilen->hesap_tipi === 'ai'
-                        ? 'yapay_zeka'
-                        : 'gercek_kullanici',
-                    'durum' => 'aktif',
-                    'baslatan_user_id' => $begenen->id,
-                ]);
+            $sohbet = Sohbet::create([
+                'eslesme_id' => $eslesme->id,
+                'durum' => 'aktif',
+            ]);
 
-                $sohbet = Sohbet::create([
-                    'eslesme_id' => $eslesme->id,
-                    'durum' => 'aktif',
-                ]);
+            DB::afterCommit(function () use ($eslesme, $sohbet, $baslatan, $aday) {
+                EslesmeOlustu::dispatch($eslesme);
 
-                DB::afterCommit(function () use ($eslesme, $sohbet, $begenen, $begenilen) {
-                    EslesmeOlustu::dispatch($eslesme);
+                $baslatan->notify(new YeniEslesme($eslesme, $aday));
+                $aday->notify(new YeniEslesme($eslesme, $baslatan));
 
-                    $begenen->notify(new YeniEslesme($eslesme, $begenilen));
-                    $begenilen->notify(new YeniEslesme($eslesme, $begenen));
-
-                    $aiUser = $this->ilkMesajiAtacakAiBul($begenen, $begenilen);
+                try {
+                    $aiUser = $this->ilkMesajiAtacakAiBul($baslatan, $aday);
 
                     if ($aiUser?->aiAyar?->ilk_mesaj_atar_mi) {
                         $zamanlama = $this->aiMesajZamanlamaServisi
@@ -109,32 +102,41 @@ class EslesmeServisi
                             return;
                         }
 
-                        $gorev = EslesmeSonrasiAiIlkMesajGorevi::dispatch($sohbet, $aiUser);
-
                         if ($zamanlama['sonraki_kontrol_at']) {
-                            $gorev->delay($zamanlama['sonraki_kontrol_at']);
+                            EslesmeSonrasiAiIlkMesajGorevi::dispatch($sohbet, $aiUser)
+                                ->delay($zamanlama['sonraki_kontrol_at']);
+
+                            return;
                         }
+
+                        EslesmeSonrasiAiIlkMesajGorevi::dispatch($sohbet, $aiUser);
                     }
-                });
-
-                return ['durum' => 'eslesme', 'eslesme_id' => $eslesme->id];
+                } catch (\Throwable $exception) {
+                    report($exception);
+                }
             });
-        }
 
-        $begenilen->notify(new YeniBegeni($begenen));
-
-        return ['durum' => 'begenildi'];
+            return [
+                'durum' => 'eslesme',
+                'eslesme_id' => $eslesme->id,
+                'sohbet_id' => $sohbet->id,
+                'eslesme' => $eslesme->loadMissing(['user', 'eslesenUser']),
+                'sohbet' => $sohbet->loadMissing(['eslesme.user', 'eslesme.eslesenUser', 'sonMesaj.gonderen']),
+            ];
+        });
     }
 
     public function merkez(User $user): array
     {
+        $user = $this->gunlukHaklariYenile($user->fresh());
         $adaySorgusu = $this->adaySorgusu($user);
 
         return [
             'mevcut_puan' => (int) $user->mevcut_puan,
+            'gunluk_ucretsiz_hak' => (int) $user->gunluk_ucretsiz_hak,
             'eslesme_baslatma_maliyeti' => $this->eslesmeBaslatmaMaliyeti(),
-            'cevrimici_kisi_sayisi' => (clone $adaySorgusu)->count(),
-            'bekleyen_begeni_sayisi' => $this->bekleyenBegeniSayisi($user),
+            'cevrimici_kisi_sayisi' => (clone $adaySorgusu)->where('cevrim_ici_mi', true)->count(),
+            'bekleyen_kisi_sayisi' => (clone $adaySorgusu)->count(),
             'filtreler' => $this->filtreleriDiziyeDonustur($user),
         ];
     }
@@ -152,42 +154,68 @@ class EslesmeServisi
         return $user->fresh();
     }
 
+    public function adayGec(User $user, User $aday): void
+    {
+        if ((int) $user->id === (int) $aday->id) {
+            return;
+        }
+
+        EslesmeGecilenKullanici::query()->firstOrCreate([
+            'gecen_user_id' => $user->id,
+            'gecilen_user_id' => $aday->id,
+        ]);
+    }
+
     public function eslesmeBaslat(User $user): array
     {
-        $user = $user->fresh();
+        $user = $this->gunlukHaklariYenile($user->fresh());
         $aday = $this->sonrakiAday($user);
         $maliyet = $this->eslesmeBaslatmaMaliyeti();
+        $ucretsizHak = max(0, (int) $user->gunluk_ucretsiz_hak);
 
         if (!$aday) {
             return [
                 'durum' => 'aday_yok',
                 'mevcut_puan' => (int) $user->mevcut_puan,
+                'gunluk_ucretsiz_hak' => $ucretsizHak,
                 'eslesme_baslatma_maliyeti' => $maliyet,
             ];
         }
 
-        if ($user->mevcut_puan < $maliyet) {
+        if ($ucretsizHak <= 0 && $user->mevcut_puan < $maliyet) {
             return [
                 'durum' => 'yetersiz_puan',
                 'mevcut_puan' => (int) $user->mevcut_puan,
+                'gunluk_ucretsiz_hak' => $ucretsizHak,
                 'gerekli_puan' => $maliyet,
                 'eksik_puan' => $maliyet - (int) $user->mevcut_puan,
             ];
         }
 
-        $this->puanServisi->harca(
-            $user,
-            $maliyet,
-            'Eşleşme başlatma',
-            'user',
-            $aday->id,
-        );
+        $ucretsizKullanildi = false;
+
+        if ($ucretsizHak > 0) {
+            $user->decrement('gunluk_ucretsiz_hak');
+            $ucretsizKullanildi = true;
+        } else {
+            $this->puanServisi->harca(
+                $user,
+                $maliyet,
+                'Eşleşme başlatma',
+                'user',
+                $aday->id,
+            );
+        }
+
+        $yenilenmisKullanici = $user->fresh();
 
         return [
             'durum' => 'aday_bulundu',
             'aday' => $aday->fresh('fotograflar'),
-            'mevcut_puan' => (int) $user->fresh()->mevcut_puan,
+            'mevcut_puan' => (int) $yenilenmisKullanici->mevcut_puan,
+            'gunluk_ucretsiz_hak' => (int) $yenilenmisKullanici->gunluk_ucretsiz_hak,
             'eslesme_baslatma_maliyeti' => $maliyet,
+            'ucretsiz_hak_kullanildi' => $ucretsizKullanildi,
         ];
     }
 
@@ -277,19 +305,59 @@ class EslesmeServisi
         return $aday->fresh('aiAyar');
     }
 
+    private function engellemeVarMi(User $birinci, User $ikinci): bool
+    {
+        return Engelleme::where(function ($q) use ($birinci, $ikinci) {
+            $q->where('engelleyen_user_id', $birinci->id)
+                ->where('engellenen_user_id', $ikinci->id);
+        })->orWhere(function ($q) use ($birinci, $ikinci) {
+            $q->where('engelleyen_user_id', $ikinci->id)
+                ->where('engellenen_user_id', $birinci->id);
+        })->exists();
+    }
+
+    private function aktifEslesmeBul(User $birinci, User $ikinci): ?Eslesme
+    {
+        return Eslesme::query()
+            ->where('durum', 'aktif')
+            ->where(function (Builder $query) use ($birinci, $ikinci) {
+                $query->where(function (Builder $query) use ($birinci, $ikinci) {
+                    $query->where('user_id', $birinci->id)
+                        ->where('eslesen_user_id', $ikinci->id);
+                })->orWhere(function (Builder $query) use ($birinci, $ikinci) {
+                    $query->where('user_id', $ikinci->id)
+                        ->where('eslesen_user_id', $birinci->id);
+                });
+            })
+            ->with('sohbet')
+            ->first();
+    }
+
     private function sonrakiAday(User $user): ?User
     {
-        $sorgu = $this->adaySorgusu($user)->with('fotograflar');
+        $sorgu = $this->oncelikliAdaySorgusu($user)->with('fotograflar');
 
         if ($user->super_eslesme_aktif_mi) {
             return $sorgu->inRandomOrder()
                 ->limit(40)
                 ->get()
-                ->sortByDesc(fn (User $aday) => $this->uyumlulukPuani($user, $aday))
+                ->sortByDesc(fn(User $aday) => $this->uyumlulukPuani($user, $aday))
                 ->first();
         }
 
         return $sorgu->inRandomOrder()->first();
+    }
+
+    private function oncelikliAdaySorgusu(User $user): Builder
+    {
+        $cevrimiciSorgu = $this->adaySorgusu($user)
+            ->where('cevrim_ici_mi', true);
+
+        if ((clone $cevrimiciSorgu)->exists()) {
+            return $cevrimiciSorgu;
+        }
+
+        return $this->adaySorgusu($user);
     }
 
     private function adaySorgusu(User $user): Builder
@@ -299,7 +367,7 @@ class EslesmeServisi
         $sorgu = User::query()
             ->whereIn('hesap_tipi', ['user', 'ai'])
             ->where('hesap_durumu', 'aktif')
-            ->where('cevrim_ici_mi', true)
+            ->where('is_admin', false)
             ->whereNotIn('id', $haricTutulanlar);
 
         $this->cinsiyetFiltresiUygula($sorgu, $user);
@@ -318,10 +386,9 @@ class EslesmeServisi
                     ->where('engellenen_user_id', $user->id)
                     ->pluck('engelleyen_user_id')
             );
-
-        $begenilen = Begeni::query()
-            ->where('begenen_user_id', $user->id)
-            ->pluck('begenilen_user_id');
+$gecilen = EslesmeGecilenKullanici::query()
+            ->where('gecen_user_id', $user->id)
+            ->pluck('gecilen_user_id');
 
         $eslesilen = Eslesme::query()
             ->where(function ($query) use ($user) {
@@ -332,11 +399,11 @@ class EslesmeServisi
             ->get(['user_id', 'eslesen_user_id'])
             ->flatMap(function (Eslesme $eslesme) use ($user) {
                 return collect([$eslesme->user_id, $eslesme->eslesen_user_id])
-                    ->reject(fn ($id) => (int) $id === (int) $user->id);
+                    ->reject(fn($id) => (int) $id === (int) $user->id);
             });
 
         return $engellenen
-            ->merge($begenilen)
+            ->merge($gecilen)
             ->merge($eslesilen)
             ->push($user->id)
             ->unique()
@@ -364,13 +431,6 @@ class EslesmeServisi
         };
     }
 
-    private function bekleyenBegeniSayisi(User $user): int
-    {
-        return $user->gelenBegeniler()
-            ->where('eslesmeye_donustu_mu', false)
-            ->count();
-    }
-
     private function filtreleriDiziyeDonustur(User $user): array
     {
         return [
@@ -383,6 +443,25 @@ class EslesmeServisi
     private function eslesmeBaslatmaMaliyeti(): int
     {
         return max(1, (int) $this->ayarServisi->al('eslesme_baslatma_maliyeti', 8));
+    }
+
+    private function gunlukHaklariYenile(User $user): User
+    {
+        $bugun = now()->startOfDay();
+        $sonYenileme = $user->son_hak_yenileme_tarihi?->copy()?->startOfDay();
+
+        if ($sonYenileme && $sonYenileme->equalTo($bugun)) {
+            return $user;
+        }
+
+        $hakLimiti = max(0, (int) $this->ayarServisi->al('gunluk_ucretsiz_hak', 3));
+
+        $user->forceFill([
+            'gunluk_ucretsiz_hak' => $hakLimiti,
+            'son_hak_yenileme_tarihi' => now(),
+        ])->save();
+
+        return $user->fresh();
     }
 
     private function uyumlulukPuani(User $user, User $aday): int

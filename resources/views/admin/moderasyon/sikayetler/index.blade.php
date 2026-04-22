@@ -149,15 +149,26 @@
                                             Kullanıcı #{{ $sikayet->hedef_id }}
                                         </span>
                                     @else
-                                        <span
-                                            class="inline-flex items-center gap-1 rounded-full bg-orange-100 px-2 py-0.5 text-xs font-medium text-orange-700">
-                                            <svg class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke-width="2"
-                                                stroke="currentColor">
-                                                <path stroke-linecap="round" stroke-linejoin="round"
-                                                    d="M8.625 12a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H8.25m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H12m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0h-.375M21 12c0 4.556-4.03 8.25-9 8.25a9.764 9.764 0 01-2.555-.337A5.972 5.972 0 015.41 20.97a5.969 5.969 0 01-.474-.065 4.48 4.48 0 00.978-2.025c.09-.457-.133-.901-.467-1.226C3.93 16.178 3 14.189 3 12c0-4.556 4.03-8.25 9-8.25s9 3.694 9 8.25z" />
-                                            </svg>
-                                            Mesaj #{{ $sikayet->hedef_id }}
-                                        </span>
+                                        <div class="space-y-1">
+                                            <span
+                                                class="inline-flex items-center gap-1 rounded-full bg-orange-100 px-2 py-0.5 text-xs font-medium text-orange-700">
+                                                <svg class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke-width="2"
+                                                    stroke="currentColor">
+                                                    <path stroke-linecap="round" stroke-linejoin="round"
+                                                        d="M8.625 12a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H8.25m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H12m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0h-.375M21 12c0 4.556-4.03 8.25-9 8.25a9.764 9.764 0 01-2.555-.337A5.972 5.972 0 015.41 20.97a5.969 5.969 0 01-.474-.065 4.48 4.48 0 00.978-2.025c.09-.457-.133-.901-.467-1.226C3.93 16.178 3 14.189 3 12c0-4.556 4.03-8.25 9-8.25s9 3.694 9 8.25z" />
+                                                </svg>
+                                                Mesaj #{{ $sikayet->hedef_id }}
+                                            </span>
+                                            <p class="max-w-xs truncate text-xs text-gray-500">
+                                                {{ $sikayet->hedefMesaj?->mesaj_metni ?: 'Mesaj metni yok.' }}
+                                            </p>
+                                            @if ($sikayet->hedefMesaj?->gonderen)
+                                                <p class="text-xs text-gray-400">
+                                                    Gönderen: {{ $sikayet->hedefMesaj->gonderen->ad }}
+                                                    {{ $sikayet->hedefMesaj->gonderen->soyad }}
+                                                </p>
+                                            @endif
+                                        </div>
                                     @endif
                                 </td>
                                 <td class="px-3 py-3">

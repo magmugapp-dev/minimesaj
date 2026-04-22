@@ -1,228 +1,78 @@
+import 'dart:async';
 import 'dart:io';
 
+import 'package:magmug/l10n/app_localizations.dart';
 import 'package:magmug/app_core.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:in_app_purchase/in_app_purchase.dart';
+import 'package:magmug/features/blocked_users/domain/entities/blocked_user.dart';
+import 'package:magmug/features/blocked_users/presentation/providers/blocked_users_providers.dart';
 import 'package:magmug/features/match/match_flow.dart';
 import 'package:magmug/features/onboarding/onboarding_flow.dart';
+import 'package:magmug/features/payment/store_purchase_service.dart';
+import 'package:magmug/features/profile/profile_photo_utils.dart';
+import 'package:magmug/features/profile/profile_purchase_utils.dart';
+import 'package:magmug/features/profile/widgets/profile_form_widgets.dart';
+import 'package:magmug/features/profile/widgets/profile_help_widgets.dart';
+import 'package:magmug/features/profile/widgets/profile_overview_widgets.dart';
+import 'package:magmug/features/profile/widgets/profile_paywall_widgets.dart';
+import 'package:magmug/features/profile/widgets/profile_policy_widgets.dart';
+import 'package:magmug/features/profile/widgets/profile_photo_widgets.dart';
+import 'package:magmug/features/profile/widgets/profile_purchase_widgets.dart';
+import 'package:magmug/features/profile/widgets/profile_sheet_widgets.dart';
+import 'package:magmug/features/profile/widgets/profile_settings_widgets.dart';
+import 'package:magmug/features/profile/widgets/profile_support_widgets.dart';
 
 // =============================================================================
 
-enum AppLanguage { tr, en, de, fr }
-
 @immutable
 class NotificationPrefs {
-  final bool messages;
-  final bool matches;
-  final bool likes;
-  final bool campaigns;
+  final bool notificationsEnabled;
+  final bool vibrationEnabled;
 
   const NotificationPrefs({
-    this.messages = true,
-    this.matches = true,
-    this.likes = false,
-    this.campaigns = false,
+    this.notificationsEnabled = true,
+    this.vibrationEnabled = true,
   });
+
+  factory NotificationPrefs.fromUser(AppUser? user) {
+    return NotificationPrefs(
+      notificationsEnabled: user?.notificationsEnabled ?? true,
+      vibrationEnabled: user?.vibrationEnabled ?? true,
+    );
+  }
 
   NotificationPrefs copyWith({
-    bool? messages,
-    bool? matches,
-    bool? likes,
-    bool? campaigns,
+    bool? notificationsEnabled,
+    bool? vibrationEnabled,
   }) {
     return NotificationPrefs(
-      messages: messages ?? this.messages,
-      matches: matches ?? this.matches,
-      likes: likes ?? this.likes,
-      campaigns: campaigns ?? this.campaigns,
+      notificationsEnabled: notificationsEnabled ?? this.notificationsEnabled,
+      vibrationEnabled: vibrationEnabled ?? this.vibrationEnabled,
     );
   }
 }
-
-class NotificationPrefsNotifier extends Notifier<NotificationPrefs> {
-  @override
-  NotificationPrefs build() => const NotificationPrefs();
-
-  void set(NotificationPrefs next) => state = next;
-}
-
-final notifPrefsProvider =
-    NotifierProvider<NotificationPrefsNotifier, NotificationPrefs>(
-      NotificationPrefsNotifier.new,
-    );
-
-@immutable
-class BlockedUser {
-  final String name;
-  final String handle;
-  final String? avatarAsset;
-
-  const BlockedUser({
-    required this.name,
-    required this.handle,
-    this.avatarAsset,
-  });
-}
-
-const List<BlockedUser> _mockBlocked = [
-  BlockedUser(
-    name: 'Ayse K.',
-    handle: '@ayse.k',
-    avatarAsset: 'assets/images/gallery_4.png',
-  ),
-  BlockedUser(
-    name: 'Zeynep A.',
-    handle: '@zeynep.a',
-    avatarAsset: 'assets/images/gallery_5.png',
-  ),
-];
-
-// ------ Shared primitives -----------------------------------------------------
-
-class _SheetHandle extends StatelessWidget {
-  const _SheetHandle();
-
-  @override
-  Widget build(BuildContext context) {
-    return Center(
-      child: Container(
-        width: 48,
-        height: 4,
-        decoration: BoxDecoration(
-          color: const Color(0xFFD4D4D4),
-          borderRadius: BorderRadius.circular(8),
-        ),
-      ),
-    );
-  }
-}
-
-class _SettingsTile extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  final String? trailingText;
-  final String? badgeCount;
-  final bool danger;
-  final bool showDivider;
-  final VoidCallback onTap;
-
-  const _SettingsTile({
-    required this.icon,
-    required this.label,
-    required this.onTap,
-    this.trailingText,
-    this.badgeCount,
-    this.danger = false,
-    this.showDivider = false,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final color = danger ? const Color(0xFFEF4444) : AppColors.black;
-    final bg = danger ? const Color(0xFFFEF2F2) : AppColors.grayField;
-
-    return Column(
-      children: [
-        PressableScale(
-          onTap: onTap,
-          scale: 0.99,
-          child: Container(
-            height: 62,
-            padding: const EdgeInsets.symmetric(horizontal: 18),
-            child: Row(
-              children: [
-                Container(
-                  width: 34,
-                  height: 34,
-                  decoration: BoxDecoration(
-                    color: bg,
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  alignment: Alignment.center,
-                  child: Icon(icon, size: 16, color: color),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Text(
-                    label,
-                    style: TextStyle(
-                      fontFamily: AppFont.family,
-                      fontWeight: FontWeight.w600,
-                      fontSize: 14,
-                      color: color,
-                    ),
-                  ),
-                ),
-                if (trailingText != null)
-                  Text(
-                    trailingText!,
-                    style: const TextStyle(
-                      fontFamily: AppFont.family,
-                      fontWeight: FontWeight.w600,
-                      fontSize: 12,
-                      color: Color(0xFF999999),
-                    ),
-                  ),
-                if (badgeCount != null) ...[
-                  const SizedBox(width: 8),
-                  Text(
-                    badgeCount!,
-                    style: const TextStyle(
-                      fontFamily: AppFont.family,
-                      fontWeight: FontWeight.w600,
-                      fontSize: 12,
-                      color: Color(0xFF999999),
-                    ),
-                  ),
-                ],
-                if (!danger) ...[
-                  const SizedBox(width: 10),
-                  const Icon(
-                    CupertinoIcons.chevron_right,
-                    size: 14,
-                    color: Color(0xFFBBBBBB),
-                  ),
-                ],
-              ],
-            ),
-          ),
-        ),
-        if (showDivider)
-          Container(
-            margin: const EdgeInsets.symmetric(horizontal: 18),
-            height: 1,
-            color: const Color(0xFFF0F0F0),
-          ),
-      ],
-    );
-  }
-}
-
-class _SettingsGroup extends StatelessWidget {
-  final List<Widget> children;
-
-  const _SettingsGroup({required this.children});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      decoration: BoxDecoration(
-        color: AppColors.white,
-        borderRadius: BorderRadius.circular(16),
-      ),
-      child: Column(children: children),
-    );
-  }
-}
-
-// ------ Profile Screen --------------------------------------------------------
 
 class ProfileScreen extends ConsumerWidget {
   const ProfileScreen({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final gem = ref.watch(matchProvider.select((s) => s.gemBalance));
+    final l10n = AppLocalizations.of(context)!;
+    final user = ref.watch(appAuthProvider).asData?.value?.user;
+    final int gem =
+        user?.gemBalance ??
+        ref.watch(matchProvider.select((s) => s.gemBalance));
+    final blockedUsersAsync = ref.watch(blockedUsersProvider);
+    final publicSettings = ref.watch(appPublicSettingsProvider).asData?.value;
+    final appLanguage =
+        ref.watch(appLanguageProvider).asData?.value ??
+        AppPreferencesStorage.fallbackLanguage();
+    final blockedUsersCount = blockedUsersAsync.when(
+      data: (users) => '${users.length}',
+      loading: () => null,
+      error: (_, _) => null,
+    );
 
     void openSheet(Widget sheet) {
       showCupertinoModalPopup<void>(context: context, builder: (_) => sheet);
@@ -251,14 +101,13 @@ class ProfileScreen extends ConsumerWidget {
                     ),
                   ),
                   const SizedBox(width: 6),
-                  const Expanded(
+                  Expanded(
                     child: Text(
-                      'Profilim',
-                      style: TextStyle(
+                      l10n.profileScreenTitle,
+                      style: const TextStyle(
                         fontFamily: AppFont.family,
                         fontWeight: FontWeight.w800,
                         fontSize: 18,
-                        color: AppColors.black,
                       ),
                     ),
                   ),
@@ -271,116 +120,124 @@ class ProfileScreen extends ConsumerWidget {
                 physics: const BouncingScrollPhysics(),
                 padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
                 children: [
-                  const _ProfileHeader(),
+                  ProfileHeaderSection(
+                    photoManagerSheetBuilder: (_) =>
+                        const ProfilePhotoManagerSheet(),
+                    editProfileSheetBuilder: (_) => const EditProfileSheet(),
+                  ),
                   const SizedBox(height: 20),
-                  _PremiumPromoBanner(
+                  PremiumPromoBanner(
                     onTap: () => Navigator.of(
                       context,
                     ).push(cupertinoRoute(const PaywallScreen())),
                   ),
                   const SizedBox(height: 12),
-                  _SettingsGroup(
+                  ProfileSettingsGroup(
                     children: [
-                      _SettingsTile(
+                      ProfileSettingsTile(
                         icon: CupertinoIcons.star_circle_fill,
-                        label: 'Tas Bakiyesi',
+                        label: l10n.profileGemBalance,
                         trailingText: formatGem(gem),
                         onTap: () => openSheet(const JetonPurchaseSheet()),
                       ),
                     ],
                   ),
-                  _SettingsGroup(
+                  ProfileSettingsGroup(
                     children: [
-                      _SettingsTile(
+                      ProfileSettingsTile(
                         icon: CupertinoIcons.chat_bubble_2_fill,
-                        label: 'Bize Ulasin',
-                        trailingText: 'WhatsApp',
-                        onTap: () {},
+                        label: l10n.profileContactUs,
+                        trailingText: publicSettings?.contactChannelLabel,
+                        onTap: () => openSheet(const HelpSheet()),
                       ),
                     ],
                   ),
-                  const _ProfileMediaSection(),
+                  ProfileMediaSection(
+                    managerSheetBuilder: (_) =>
+                        const ProfilePhotoManagerSheet(),
+                  ),
                   const SizedBox(height: 16),
-                  _SettingsGroup(
+                  ProfileSettingsGroup(
                     children: [
-                      _SettingsTile(
+                      ProfileSettingsTile(
                         icon: CupertinoIcons.bell,
-                        label: 'Bildirimler',
+                        label: l10n.profileNotifications,
                         showDivider: true,
                         onTap: () => openSheet(const NotificationPrefsSheet()),
                       ),
-                      _SettingsTile(
+                      ProfileSettingsTile(
                         icon: CupertinoIcons.globe,
-                        label: 'Dil',
-                        trailingText: 'Turkce',
+                        label: l10n.profileLanguage,
+                        trailingText: appLanguage.label,
                         showDivider: true,
                         onTap: () => openSheet(const LanguageSheet()),
                       ),
-                      _SettingsTile(
+                      ProfileSettingsTile(
                         icon: CupertinoIcons.nosign,
-                        label: 'Engellenen Kullanicilar',
-                        badgeCount: '${_mockBlocked.length}',
+                        label: l10n.profileBlockedUsers,
+                        badgeCount: blockedUsersCount,
                         onTap: () => openSheet(const BlockedUsersSheet()),
                       ),
                     ],
                   ),
-                  _SettingsGroup(
+                  ProfileSettingsGroup(
                     children: [
-                      _SettingsTile(
+                      ProfileSettingsTile(
                         icon: CupertinoIcons.question_circle,
-                        label: 'Yardim',
+                        label: l10n.profileHelp,
                         showDivider: true,
                         onTap: () => openSheet(const HelpSheet()),
                       ),
-                      _SettingsTile(
+                      ProfileSettingsTile(
                         icon: CupertinoIcons.arrow_clockwise,
-                        label: 'Satin Alimlari Geri Yukle',
-                        onTap: () {},
+                        label: l10n.profileRestorePurchases,
+                        onTap: () => openSheet(const RestorePurchasesSheet()),
                       ),
                     ],
                   ),
-                  _SettingsGroup(
+                  ProfileSettingsGroup(
                     children: [
-                      _SettingsTile(
+                      ProfileSettingsTile(
                         icon: CupertinoIcons.shield,
-                        label: 'Gizlilik Politikasi',
+                        label: l10n.profilePrivacyPolicy,
                         showDivider: true,
                         onTap: () => Navigator.of(
                           context,
                         ).push(cupertinoRoute(const PrivacyPolicyScreen())),
                       ),
-                      _SettingsTile(
+                      ProfileSettingsTile(
                         icon: CupertinoIcons.doc_text,
-                        label: 'KVKK Aydinlatma Metni',
+                        label: l10n.profileKvkk,
                         showDivider: true,
                         onTap: () => Navigator.of(
                           context,
                         ).push(cupertinoRoute(const KvkkScreen())),
                       ),
-                      _SettingsTile(
+                      ProfileSettingsTile(
                         icon: CupertinoIcons.doc_plaintext,
-                        label: 'Kullanim Kosullari',
+                        label: l10n.profileTerms,
                         onTap: () => Navigator.of(
                           context,
                         ).push(cupertinoRoute(const TermsOfUseScreen())),
                       ),
                     ],
                   ),
-                  _SettingsGroup(
+                  ProfileSettingsGroup(
                     children: [
-                      _SettingsTile(
-                        icon: CupertinoIcons.arrow_right_square,
-                        label: 'Cikis Yap',
-                        danger: true,
+                      ProfileSettingsTile(
+                        icon: CupertinoIcons.exclamationmark_triangle_fill,
+                        label: l10n.profileDeleteAccount,
+                        accentColor: const Color(0xFFD97706),
+                        iconBackgroundColor: const Color(0xFFFFF7ED),
                         showDivider: true,
-                        onTap: () => openSheet(const SignOutConfirmSheet()),
-                      ),
-                      _SettingsTile(
-                        icon: CupertinoIcons.trash,
-                        label: 'Hesabi Sil',
-                        danger: true,
                         onTap: () =>
                             openSheet(const DeleteAccountConfirmSheet()),
+                      ),
+                      ProfileSettingsTile(
+                        icon: CupertinoIcons.arrow_right_square,
+                        label: l10n.profileSignOut,
+                        danger: true,
+                        onTap: () => openSheet(const SignOutConfirmSheet()),
                       ),
                     ],
                   ),
@@ -405,209 +262,24 @@ class ProfileScreen extends ConsumerWidget {
   }
 }
 
-class _ProfileHeader extends ConsumerWidget {
-  const _ProfileHeader();
+class ProfilePhotoManagerSheet extends ConsumerStatefulWidget {
+  const ProfilePhotoManagerSheet({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final user = ref.watch(appAuthProvider).asData?.value?.user;
-    final data = ref.watch(onboardProvider);
-    final localDisplayName = '${data.name} ${data.surname}'.trim();
-    final displayName = user?.displayName.isNotEmpty == true
-        ? user!.displayName
-        : (localDisplayName.isNotEmpty ? localDisplayName : 'Mehmet');
-    final username = user?.username.isNotEmpty == true
-        ? user!.username
-        : (data.username.isNotEmpty ? data.username : 'mehmet.k');
-    final photo = data.photoPath;
-    final remotePhoto = user?.profileImageUrl;
-
-    return Column(
-      children: [
-        Stack(
-          clipBehavior: Clip.none,
-          children: [
-            Container(
-              width: 96,
-              height: 96,
-              decoration: const BoxDecoration(
-                shape: BoxShape.circle,
-                boxShadow: [
-                  BoxShadow(
-                    color: Color(0x14000000),
-                    blurRadius: 16,
-                    offset: Offset(0, 4),
-                  ),
-                ],
-              ),
-              child: ClipOval(
-                child: photo != null
-                    ? Image.file(File(photo), fit: BoxFit.cover)
-                    : remotePhoto != null && remotePhoto.isNotEmpty
-                    ? Image.network(remotePhoto, fit: BoxFit.cover)
-                    : Image.asset(
-                        'assets/images/portrait_self.png',
-                        fit: BoxFit.cover,
-                      ),
-              ),
-            ),
-            Positioned(
-              right: -4,
-              bottom: 4,
-              child: Container(
-                width: 30,
-                height: 30,
-                decoration: BoxDecoration(
-                  color: AppColors.black,
-                  shape: BoxShape.circle,
-                  border: Border.all(color: AppColors.neutral100, width: 3),
-                ),
-                alignment: Alignment.center,
-                child: const Icon(
-                  CupertinoIcons.camera_fill,
-                  size: 13,
-                  color: AppColors.white,
-                ),
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 14),
-        Text(
-          displayName,
-          style: const TextStyle(
-            fontFamily: AppFont.family,
-            fontWeight: FontWeight.w800,
-            fontSize: 20,
-            color: AppColors.black,
-          ),
-        ),
-        const SizedBox(height: 2),
-        Text(
-          '@$username',
-          style: const TextStyle(
-            fontFamily: AppFont.family,
-            fontSize: 13,
-            color: Color(0xFF999999),
-          ),
-        ),
-        const SizedBox(height: 12),
-        PressableScale(
-          onTap: () => showCupertinoModalPopup<void>(
-            context: context,
-            builder: (_) => const EditProfileSheet(),
-          ),
-          scale: 0.97,
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-            decoration: BoxDecoration(
-              color: AppColors.white,
-              borderRadius: BorderRadius.circular(50),
-              border: Border.all(color: const Color(0xFFE0E0E0)),
-            ),
-            child: const Text(
-              'Profili Duzenle',
-              style: TextStyle(
-                fontFamily: AppFont.family,
-                fontWeight: FontWeight.w700,
-                fontSize: 13,
-                color: AppColors.black,
-              ),
-            ),
-          ),
-        ),
-      ],
-    );
-  }
+  ConsumerState<ProfilePhotoManagerSheet> createState() =>
+      _ProfilePhotoManagerSheetState();
 }
 
-class _PremiumPromoBanner extends StatelessWidget {
-  final VoidCallback onTap;
-
-  const _PremiumPromoBanner({required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    return PressableScale(
-      onTap: onTap,
-      scale: 0.99,
-      child: Container(
-        height: 96,
-        padding: const EdgeInsets.symmetric(horizontal: 16),
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(24),
-          gradient: const LinearGradient(
-            begin: Alignment.centerLeft,
-            end: Alignment.centerRight,
-            colors: [Color(0xFF7C6DF5), Color(0xFFB194F9), Color(0xFFFF9EC4)],
-          ),
-          boxShadow: const [
-            BoxShadow(
-              color: Color(0x297C6DF5),
-              blurRadius: 16,
-              offset: Offset(0, 6),
-            ),
-          ],
-        ),
-        child: Row(
-          children: [
-            Image.asset(
-              'assets/images/promo_char.png',
-              width: 80,
-              height: 80,
-              fit: BoxFit.contain,
-            ),
-            const SizedBox(width: 12),
-            const Expanded(
-              child: Text(
-                'Lorem ipsum\ndolor sit amet',
-                style: TextStyle(
-                  fontFamily: AppFont.family,
-                  fontWeight: FontWeight.w800,
-                  fontSize: 15,
-                  color: AppColors.white,
-                  height: 1.25,
-                ),
-              ),
-            ),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-              decoration: BoxDecoration(
-                color: AppColors.white,
-                borderRadius: BorderRadius.circular(24),
-              ),
-              child: const Text(
-                'Upgrade',
-                style: TextStyle(
-                  fontFamily: AppFont.family,
-                  fontWeight: FontWeight.w700,
-                  fontSize: 13,
-                  color: Color(0xFF171717),
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _ProfileMediaSection extends ConsumerStatefulWidget {
-  const _ProfileMediaSection();
-
-  @override
-  ConsumerState<_ProfileMediaSection> createState() =>
-      _ProfileMediaSectionState();
-}
-
-class _ProfileMediaSectionState extends ConsumerState<_ProfileMediaSection> {
+class _ProfilePhotoManagerSheetState
+    extends ConsumerState<ProfilePhotoManagerSheet> {
   final AppAuthApi _authApi = AppAuthApi();
   final ImagePicker _picker = ImagePicker();
-  int _tab = 0;
   bool _loading = true;
   bool _uploading = false;
   String? _notice;
+  String? _pendingUploadPath;
+  bool _pendingUploadIsVideo = false;
+  double _pendingUploadProgress = 0;
   List<AppProfilePhoto> _photos = const [];
 
   @override
@@ -625,7 +297,9 @@ class _ProfileMediaSectionState extends ConsumerState<_ProfileMediaSection> {
   Future<void> _loadPhotos() async {
     final token = ref.read(appAuthProvider).asData?.value?.token;
     if (token == null || token.trim().isEmpty) {
-      if (!mounted) return;
+      if (!mounted) {
+        return;
+      }
       setState(() {
         _photos = const [];
         _loading = false;
@@ -640,50 +314,201 @@ class _ProfileMediaSectionState extends ConsumerState<_ProfileMediaSection> {
 
     try {
       final photos = await _authApi.fetchProfilePhotos(token);
-      if (!mounted) return;
-      setState(() => _photos = photos);
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _photos = photos;
+        _loading = false;
+      });
     } catch (error) {
-      if (!mounted) return;
+      if (!mounted) {
+        return;
+      }
       setState(() {
         _notice = AppAuthErrorFormatter.messageFrom(error);
-      });
-    } finally {
-      if (mounted) {
-        setState(() => _loading = false);
-      }
-    }
-  }
-
-  Future<void> _pickFrom(ImageSource source) async {
-    if (_uploading) return;
-
-    try {
-      final file = await _picker.pickImage(
-        source: source,
-        imageQuality: 85,
-        maxWidth: 1600,
-      );
-      if (file != null) {
-        await _uploadPhoto(file.path);
-      }
-    } catch (_) {
-      if (!mounted) return;
-      setState(() {
-        _notice = 'Fotograf secilirken izin veya cihaz hatasi olustu.';
+        _loading = false;
       });
     }
   }
 
-  Future<void> _uploadPhoto(String filePath) async {
+  bool get _atMediaLimit => _photos.length >= kProfileMediaLimit;
+
+  bool get _hasPrimaryPhoto =>
+      _photos.any((photo) => photo.isPhoto && photo.isPrimary);
+
+  void _setMediaLimitNotice() {
+    setState(() {
+      _notice = profileMediaLimitNotice(kProfileMediaLimit);
+    });
+  }
+
+  Future<void> _refreshMediaState({String? notice}) async {
+    final token = ref.read(appAuthProvider).asData?.value?.token;
+    if (token == null || token.trim().isEmpty) {
+      return;
+    }
+
+    final photos = await _authApi.fetchProfilePhotos(token);
+    await ref.read(appAuthProvider.notifier).refreshCurrentUser();
+    ref.read(onboardProvider.notifier).clearPhoto();
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _photos = photos;
+      _notice = notice;
+    });
+  }
+
+  Future<void> _uploadMedia(String filePath, {required bool isVideo}) async {
+    final l10n = AppLocalizations.of(context)!;
     final token = ref.read(appAuthProvider).asData?.value?.token;
     if (token == null || token.trim().isEmpty) {
       setState(() {
-        _notice = 'Fotograf yuklemek icin once giris yapmalisin.';
+        _notice = l10n.profileActionAuthRequired;
       });
       return;
     }
 
-    final shouldMarkPrimary = _photos.isEmpty;
+    setState(() {
+      _uploading = true;
+      _notice = null;
+      _pendingUploadPath = filePath;
+      _pendingUploadIsVideo = isVideo;
+      _pendingUploadProgress = 0;
+    });
+
+    String uploadPath = filePath;
+    try {
+      uploadPath = await prepareProfileMediaUploadPath(
+        filePath,
+        isVideo: isVideo,
+      );
+      if (isVideo) {
+        final uploadFile = File(uploadPath);
+        if (await uploadFile.exists()) {
+          final uploadBytes = await uploadFile.length();
+          if (uploadBytes > profileMaxSafeUploadBytes) {
+            if (mounted) {
+              setState(() {
+                _notice =
+                    'Video boyutu hala yuksek. Daha kisa bir video secip tekrar dene.';
+              });
+            }
+            debugPrint(
+              '[ProfileUpload] skip upload because file is still too large: $uploadBytes bytes',
+            );
+            return;
+          }
+        }
+      }
+
+      final uploaded = await _authApi.uploadProfileMedia(
+        token,
+        filePath: uploadPath,
+        markAsPrimary: !isVideo && !_hasPrimaryPhoto,
+        onProgress: (progress) {
+          if (!mounted) {
+            return;
+          }
+          setState(() {
+            _pendingUploadProgress = progress;
+          });
+        },
+      );
+
+      await _refreshMediaState(
+        notice: uploaded.isVideo
+            ? l10n.profileVideoAdded
+            : l10n.profilePhotoDraftAdded,
+      );
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _notice = AppAuthErrorFormatter.messageFrom(error);
+      });
+      debugPrint(
+        '[ProfileUpload] fail isVideo=$isVideo path=$uploadPath error=$error',
+      );
+    } finally {
+      if (uploadPath != filePath) {
+        try {
+          final tempFile = File(uploadPath);
+          if (await tempFile.exists()) {
+            await tempFile.delete();
+          }
+        } catch (_) {}
+      }
+      if (mounted) {
+        setState(() {
+          _uploading = false;
+          _pendingUploadPath = null;
+          _pendingUploadProgress = 0;
+          _pendingUploadIsVideo = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _pickMediaFrom(
+    ImageSource source, {
+    required bool isVideo,
+  }) async {
+    if (_uploading) {
+      return;
+    }
+    if (_atMediaLimit) {
+      _setMediaLimitNotice();
+      return;
+    }
+
+    try {
+      final pickedPath = await pickProfileMediaPath(
+        _picker,
+        source: source,
+        isVideo: isVideo,
+      );
+      if (pickedPath == null) {
+        return;
+      }
+      await _uploadMedia(pickedPath, isVideo: isVideo);
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _notice = AppAuthErrorFormatter.messageFrom(error);
+      });
+    }
+  }
+
+  Future<void> _showMediaActions(AppProfilePhoto photo) async {
+    if (_uploading) {
+      return;
+    }
+
+    final l10n = AppLocalizations.of(context)!;
+
+    final action = await showProfileMediaActionSheet(
+      context,
+      photo: photo,
+      l10n: l10n,
+    );
+
+    if (!mounted || action == null) {
+      return;
+    }
+
+    final token = ref.read(appAuthProvider).asData?.value?.token;
+    if (token == null || token.trim().isEmpty) {
+      setState(() {
+        _notice = l10n.profileActionAuthRequired;
+      });
+      return;
+    }
 
     setState(() {
       _uploading = true;
@@ -691,444 +516,103 @@ class _ProfileMediaSectionState extends ConsumerState<_ProfileMediaSection> {
     });
 
     try {
-      final photo = await _authApi.uploadProfilePhoto(
-        token,
-        filePath: filePath,
-        markAsPrimary: shouldMarkPrimary,
-      );
-      if (!mounted) return;
+      if (action == ProfileMediaAction.makePrimary) {
+        await _authApi.updateProfileMedia(
+          token,
+          mediaId: photo.id,
+          markAsPrimary: true,
+        );
+        await _refreshMediaState(notice: l10n.profilePhotoUpdated);
+      }
 
-      final nextPhotos = [..._photos, photo]
-        ..sort((left, right) => left.order.compareTo(right.order));
-      setState(() => _photos = nextPhotos);
-
-      if (shouldMarkPrimary) {
-        ref.read(onboardProvider.notifier).setPhoto(filePath);
+      if (action == ProfileMediaAction.delete) {
+        await _authApi.deleteProfileMedia(token, mediaId: photo.id);
+        await _refreshMediaState(
+          notice: photo.isVideo
+              ? l10n.profileVideoRemoved
+              : l10n.profilePhotoRemoved,
+        );
       }
     } catch (error) {
-      if (!mounted) return;
+      if (!mounted) {
+        return;
+      }
       setState(() {
         _notice = AppAuthErrorFormatter.messageFrom(error);
       });
     } finally {
       if (mounted) {
-        setState(() => _uploading = false);
+        setState(() {
+          _uploading = false;
+        });
       }
     }
   }
 
-  void _openPickerSheet() {
-    showCupertinoModalPopup<void>(
-      context: context,
-      builder: (sheetContext) => CupertinoActionSheet(
-        title: const Text(
-          'Fotograf kaynagi',
-          style: TextStyle(fontFamily: AppFont.family),
-        ),
-        actions: [
-          CupertinoActionSheetAction(
-            onPressed: () {
-              Navigator.of(sheetContext).pop();
-              _pickFrom(ImageSource.camera);
-            },
-            child: const Text(
-              'Kamera',
-              style: TextStyle(fontFamily: AppFont.family),
-            ),
-          ),
-          CupertinoActionSheetAction(
-            onPressed: () {
-              Navigator.of(sheetContext).pop();
-              _pickFrom(ImageSource.gallery);
-            },
-            child: const Text(
-              'Galeri',
-              style: TextStyle(fontFamily: AppFont.family),
-            ),
-          ),
-        ],
-        cancelButton: CupertinoActionSheetAction(
-          onPressed: () => Navigator.of(sheetContext).pop(),
-          child: const Text(
-            'Vazgec',
-            style: TextStyle(fontFamily: AppFont.family),
-          ),
-        ),
-      ),
+  void _openViewer(AppProfilePhoto selected) {
+    final media = sortProfileMedia(_photos);
+    openProfileMediaViewer(
+      context,
+      media: media,
+      initialIndex: resolveProfileMediaInitialIndex(media, selected),
     );
   }
 
   @override
   Widget build(BuildContext context) {
-    final isAuthenticated =
-        ref.watch(appAuthProvider).asData?.value?.token.trim().isNotEmpty ==
-        true;
-    final mediaTiles = isAuthenticated ? _remoteTiles() : _mockTiles();
+    final l10n = AppLocalizations.of(context)!;
+    final user = ref.watch(appAuthProvider).asData?.value?.user;
+    final primaryPhoto = resolvePrimaryProfilePhoto(_photos);
+    final placeholderLabel = resolveProfilePhotoPlaceholderLabel(user, l10n);
 
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: AppColors.white,
-        borderRadius: BorderRadius.circular(16),
-      ),
-      child: Column(
-        children: [
-          _ProfileMediaTabBar(
-            selected: _tab,
-            onChanged: (i) => setState(() => _tab = i),
-          ),
-          const SizedBox(height: 14),
-          AspectRatio(
-            aspectRatio: 3 / 2,
-            child: _loading && isAuthenticated
-                ? const Center(child: CupertinoActivityIndicator(radius: 14))
-                : _tab == 2
-                ? _emptyMediaState('Video yukleme henuz aktif degil.')
-                : GridView.count(
-                    shrinkWrap: true,
-                    physics: const NeverScrollableScrollPhysics(),
-                    crossAxisCount: 3,
-                    mainAxisSpacing: 6,
-                    crossAxisSpacing: 6,
-                    children: mediaTiles,
-                  ),
-          ),
-          if (_notice != null) ...[
-            const SizedBox(height: 12),
-            Text(
-              _notice!,
-              style: const TextStyle(
-                fontFamily: AppFont.family,
-                fontSize: 12,
-                height: 1.4,
-                color: Color(0xFFEF4444),
-              ),
-            ),
-          ],
-          const SizedBox(height: 12),
-          PressableScale(
-            onTap: isAuthenticated ? _loadPhotos : null,
-            scale: 0.99,
-            child: Container(
-              height: 40,
-              decoration: BoxDecoration(
-                color: AppColors.grayField,
-                borderRadius: BorderRadius.circular(12),
-              ),
-              alignment: Alignment.center,
-              child: Text(
-                _uploading ? 'Yukleniyor...' : 'Yenile',
-                style: TextStyle(
-                  fontFamily: AppFont.family,
-                  fontWeight: FontWeight.w700,
-                  fontSize: 13,
-                  color: Color(0xFF555555),
-                ),
-              ),
-            ),
-          ),
-        ],
-      ),
+    final photoCount = profilePhotoCount(_photos);
+    final videoCount = profileVideoCount(_photos);
+    final galleryTiles = buildProfilePhotoGalleryTiles(
+      photos: _photos,
+      maxLimit: kProfileMediaLimit,
+      pendingUploadPath: _pendingUploadPath,
+      pendingUploadIsVideo: _pendingUploadIsVideo,
+      pendingUploadProgress: _pendingUploadProgress,
+      primaryBadgeLabel: l10n.profileBadgePrimary,
+      videoBadgeLabel: l10n.profileBadgeVideo,
+      onPhotoTap: _openViewer,
+      onPhotoMoreTap: _showMediaActions,
     );
-  }
+    final actionDisabled = _uploading || _atMediaLimit;
 
-  List<Widget> _remoteTiles() {
-    final visiblePhotos = _photos.take(5).toList();
-    final tiles = visiblePhotos.map(_networkMediaTile).toList();
-    while (tiles.length < 5) {
-      tiles.add(_emptyTile());
-    }
-    tiles.add(_addTile());
-    return tiles;
-  }
-
-  List<Widget> _mockTiles() {
-    return [
-      _mediaTile('assets/images/gallery_1.png'),
-      _mediaTile('assets/images/gallery_2.png'),
-      _mediaTile('assets/images/gallery_3.png', video: '0:34'),
-      _mediaTile('assets/images/gallery_4.png'),
-      _mediaTile('assets/images/gallery_5.png'),
-      _addTile(),
-    ];
-  }
-
-  Widget _mediaTile(String asset, {String? video}) {
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(10),
-      child: Stack(
-        fit: StackFit.expand,
-        children: [
-          Image.asset(asset, fit: BoxFit.cover),
-          if (video != null)
-            Positioned(
-              left: 5,
-              bottom: 5,
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                decoration: BoxDecoration(
-                  color: const Color(0x8C000000),
-                  borderRadius: BorderRadius.circular(6),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const Icon(
-                      CupertinoIcons.play_fill,
-                      size: 9,
-                      color: AppColors.white,
-                    ),
-                    const SizedBox(width: 3),
-                    Text(
-                      video,
-                      style: const TextStyle(
-                        fontFamily: AppFont.family,
-                        fontWeight: FontWeight.w500,
-                        fontSize: 10,
-                        color: AppColors.white,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-        ],
+    return ProfilePhotoManagerSheetView(
+      title: l10n.profilePhotoTitle,
+      subtitle: l10n.profilePhotoSubtitle,
+      preview: ProfilePhotoManagerPreview(
+        primaryPhoto: primaryPhoto,
+        fallbackImageUrl: user?.profileImageUrl,
+        placeholderLabel: placeholderLabel,
       ),
-    );
-  }
-
-  Widget _networkMediaTile(AppProfilePhoto photo) {
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(10),
-      child: Stack(
-        fit: StackFit.expand,
-        children: [
-          Image.network(
-            photo.url,
-            fit: BoxFit.cover,
-            errorBuilder: (_, __, ___) => _emptyTile(),
-          ),
-          if (photo.isPrimary)
-            Positioned(
-              left: 5,
-              top: 5,
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-                decoration: BoxDecoration(
-                  color: const Color(0xA6111111),
-                  borderRadius: BorderRadius.circular(999),
-                ),
-                child: const Text(
-                  'Ana',
-                  style: TextStyle(
-                    fontFamily: AppFont.family,
-                    fontWeight: FontWeight.w700,
-                    fontSize: 10,
-                    color: AppColors.white,
-                  ),
-                ),
-              ),
-            ),
-        ],
-      ),
-    );
-  }
-
-  Widget _addTile() {
-    return PressableScale(
-      onTap: _uploading ? null : _openPickerSheet,
-      child: Container(
-        decoration: BoxDecoration(
-          color: AppColors.grayField,
-          borderRadius: BorderRadius.circular(10),
-        ),
-        alignment: Alignment.center,
-        child: _uploading
-            ? const CupertinoActivityIndicator(radius: 10)
-            : const Icon(
-                CupertinoIcons.add,
-                size: 22,
-                color: Color(0xFFAAAAAA),
-              ),
-      ),
-    );
-  }
-
-  Widget _emptyTile() {
-    return Container(
-      decoration: BoxDecoration(
-        color: AppColors.grayField,
-        borderRadius: BorderRadius.circular(10),
-      ),
-    );
-  }
-
-  Widget _emptyMediaState(String message) {
-    return Container(
-      decoration: BoxDecoration(
-        color: AppColors.grayField,
-        borderRadius: BorderRadius.circular(14),
-      ),
-      alignment: Alignment.center,
-      padding: const EdgeInsets.symmetric(horizontal: 24),
-      child: Text(
-        message,
-        textAlign: TextAlign.center,
-        style: const TextStyle(
-          fontFamily: AppFont.family,
-          fontWeight: FontWeight.w600,
-          fontSize: 13,
-          color: AppColors.gray,
-        ),
-      ),
-    );
-  }
-}
-
-class _ProfileMediaTabBar extends StatelessWidget {
-  final int selected;
-  final ValueChanged<int> onChanged;
-
-  const _ProfileMediaTabBar({required this.selected, required this.onChanged});
-
-  @override
-  Widget build(BuildContext context) {
-    const labels = ['Tumu', 'Fotograflar', 'Videolar'];
-    return Container(
-      height: 37,
-      padding: const EdgeInsets.all(3),
-      decoration: BoxDecoration(
-        color: const Color(0xFFF2F2F4),
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Row(
-        children: List.generate(3, (i) {
-          final isOn = selected == i;
-          return Expanded(
-            child: PressableScale(
-              onTap: () => onChanged(i),
-              scale: 0.98,
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 180),
-                decoration: BoxDecoration(
-                  color: isOn ? AppColors.black : const Color(0x00000000),
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                alignment: Alignment.center,
-                child: Text(
-                  labels[i],
-                  style: TextStyle(
-                    fontFamily: AppFont.family,
-                    fontWeight: FontWeight.w600,
-                    fontSize: 12,
-                    color: isOn ? AppColors.white : const Color(0xFF999999),
-                  ),
-                ),
-              ),
-            ),
-          );
-        }),
-      ),
-    );
-  }
-}
-
-// ------ Privacy & Terms (generic scaffold) ------------------------------------
-
-class _PolicyScaffold extends StatelessWidget {
-  final String title;
-  final List<({String heading, String body})> sections;
-
-  const _PolicyScaffold({required this.title, required this.sections});
-
-  @override
-  Widget build(BuildContext context) {
-    return CupertinoPageScaffold(
-      backgroundColor: AppColors.white,
-      child: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 24),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const SizedBox(height: 8),
-              Row(
-                children: [
-                  CircleBackButton(
-                    filled: true,
-                    onTap: () => Navigator.of(context).maybePop(),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Text(
-                      title,
-                      style: const TextStyle(
-                        fontFamily: AppFont.family,
-                        fontWeight: FontWeight.w800,
-                        fontSize: 20,
-                        color: AppColors.black,
-                        letterSpacing: -0.4,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 20),
-              Expanded(
-                child: ListView(
-                  physics: const BouncingScrollPhysics(),
-                  children: [
-                    for (var i = 0; i < sections.length; i++)
-                      _KvkkSection(
-                        title: '${i + 1}. ${sections[i].heading}',
-                        body: sections[i].body,
-                      ),
-                    const SizedBox(height: 24),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _KvkkSection extends StatelessWidget {
-  final String title;
-  final String body;
-
-  const _KvkkSection({required this.title, required this.body});
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 18),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            title,
-            style: const TextStyle(
-              fontFamily: AppFont.family,
-              fontWeight: FontWeight.w700,
-              fontSize: 14,
-              color: AppColors.black,
-            ),
-          ),
-          const SizedBox(height: 6),
-          Text(
-            body,
-            style: const TextStyle(
-              fontFamily: AppFont.family,
-              fontSize: 14,
-              height: 1.55,
-              color: AppColors.black,
-            ),
-          ),
-        ],
-      ),
+      summaryTitle: photoCount > 0
+          ? l10n.profileActivePhotosCount(photoCount)
+          : l10n.profileNoActivePhotos,
+      summarySubtitle: videoCount > 0
+          ? l10n.profileVideoCount(videoCount)
+          : l10n.profilePrimaryHint,
+      takePhotoLabel: l10n.profileTakePhoto,
+      pickPhotoLabel: l10n.profilePickPhoto,
+      pickVideoLabel: l10n.profilePickVideo,
+      onTakePhoto: actionDisabled
+          ? null
+          : () => _pickMediaFrom(ImageSource.camera, isVideo: false),
+      onPickPhoto: actionDisabled
+          ? null
+          : () => _pickMediaFrom(ImageSource.gallery, isVideo: false),
+      onPickVideo: actionDisabled
+          ? null
+          : () => _pickMediaFrom(ImageSource.gallery, isVideo: true),
+      galleryTitle: l10n.profileGalleryTitle,
+      galleryCountLabel: '${_photos.length}/$kProfileMediaLimit',
+      isGalleryLoading: _loading,
+      galleryTiles: galleryTiles,
+      notice: _notice,
+      doneLabel: _uploading ? '${l10n.commonLoading}...' : l10n.commonDone,
+      onDone: _uploading ? null : () => Navigator.of(context).maybePop(),
     );
   }
 }
@@ -1138,34 +622,16 @@ class PrivacyPolicyScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const _PolicyScaffold(
-      title: 'Gizlilik Politikasi',
+    final l10n = AppLocalizations.of(context)!;
+
+    return ProfilePolicyScaffold(
+      title: l10n.privacyTitle,
       sections: [
-        (
-          heading: 'Veri Toplama',
-          body:
-              'magmug uygulamasi, kullanicilarinin deneyimini iyilestirmek amaciyla belirli kisisel verileri toplar. Bu veriler arasinda ad, soyad, e-posta adresi, konum bilgisi, profil fotograflari ve uygulama ici etkilesim verileri yer alir.',
-        ),
-        (
-          heading: 'Verilerin Kullanimi',
-          body:
-              'Toplanan veriler, size daha iyi eslesmeler sunmak, uygulama deneyimini kisisellestirmek ve guvenliginizi saglamak amaciyla kullanilir. Verileriniz ucuncu taraflarla paylasilmaz.',
-        ),
-        (
-          heading: 'Veri Guvenligi',
-          body:
-              'Tum kisisel verileriniz 256-bit SSL sifreleme ile korunmaktadir. Sunucularimiz guvenli veri merkezlerinde barindirilmakta ve duzenli olarak denetlenmektedir.',
-        ),
-        (
-          heading: 'Cerezler',
-          body:
-              'Uygulamamiz, kullanici deneyimini iyilestirmek icin cerezler ve benzer teknolojiler kullanmaktadir. Bu cerezler, oturum yonetimi ve tercihlerinizin hatirlanmasi amaciyla kullanilir.',
-        ),
-        (
-          heading: 'Iletisim',
-          body:
-              'Gizlilik politikamizla ilgili sorulariniz icin destek sayfamiz uzerinden bize ulasabilirsiniz.',
-        ),
+        (heading: l10n.privacyHeading1, body: l10n.privacyBody1),
+        (heading: l10n.privacyHeading2, body: l10n.privacyBody2),
+        (heading: l10n.privacyHeading3, body: l10n.privacyBody3),
+        (heading: l10n.privacyHeading4, body: l10n.privacyBody4),
+        (heading: l10n.privacyHeading5, body: l10n.privacyBody5),
       ],
     );
   }
@@ -1176,34 +642,16 @@ class TermsOfUseScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const _PolicyScaffold(
-      title: 'Kullanim Kosullari',
+    final l10n = AppLocalizations.of(context)!;
+
+    return ProfilePolicyScaffold(
+      title: l10n.termsTitle,
       sections: [
-        (
-          heading: 'Hizmet Tanimi',
-          body:
-              'magmug, kullanicilarin birbirleriyle mesajlasma ve eslesme yoluyla tanismalarini saglayan bir sosyal platformdur.',
-        ),
-        (
-          heading: 'Kullanici Sorumluluklari',
-          body:
-              'Kullanicilar, dogru ve guncel bilgiler saglamakla yukumludur. Sahte profil olusturmak, taciz, kufur ve uygunsuz icerik paylasmak kesinlikle yasaktir.',
-        ),
-        (
-          heading: 'Yas Siniri',
-          body:
-              "magmug'u kullanmak icin en az 18 yasinda olmaniz gerekmektedir. 18 yasindan kucuk kullanicilarin hesaplari tespit edildiginde kapatilacaktir.",
-        ),
-        (
-          heading: 'Odeme ve Iadeler',
-          body:
-              'Uygulama ici satin alimlar Apple App Store veya Google Play Store uzerinden gerceklestirilir. Iade talepleri ilgili magaza politikalarina tabidir.',
-        ),
-        (
-          heading: 'Hesap Sonlandirma',
-          body:
-              'magmug, kullanim kosullarini ihlal eden hesaplari onceden bildirim yapmaksizin askiya alma veya sonlandirma hakkini sakli tutar.',
-        ),
+        (heading: l10n.termsHeading1, body: l10n.termsBody1),
+        (heading: l10n.termsHeading2, body: l10n.termsBody2),
+        (heading: l10n.termsHeading3, body: l10n.termsBody3),
+        (heading: l10n.termsHeading4, body: l10n.termsBody4),
+        (heading: l10n.termsHeading5, body: l10n.termsBody5),
       ],
     );
   }
@@ -1211,115 +659,159 @@ class TermsOfUseScreen extends StatelessWidget {
 
 // ------ Sheets ----------------------------------------------------------------
 
-class _ConfirmSheet extends StatelessWidget {
-  final String title;
-  final String subtitle;
-  final String confirmLabel;
-  final bool destructive;
-  final Future<void> Function()? onConfirm;
+class RestorePurchasesSheet extends StatefulWidget {
+  const RestorePurchasesSheet({super.key});
 
-  const _ConfirmSheet({
-    required this.title,
-    required this.subtitle,
-    required this.confirmLabel,
-    this.destructive = false,
-    this.onConfirm,
-  });
+  @override
+  State<RestorePurchasesSheet> createState() => _RestorePurchasesSheetState();
+}
+
+class _RestorePurchasesSheetState extends State<RestorePurchasesSheet> {
+  final InAppPurchase _inAppPurchase = InAppPurchase.instance;
+  StreamSubscription<List<PurchaseDetails>>? _purchaseSubscription;
+  Timer? _resultTimer;
+  late AppLocalizations _l10n;
+  bool _checkingStore = true;
+  bool _storeAvailable = false;
+  bool _restoring = false;
+  int _restoredCount = 0;
+  String? _notice;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _l10n = AppLocalizations.of(context)!;
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _purchaseSubscription = _inAppPurchase.purchaseStream.listen(
+      _handlePurchaseUpdates,
+      onError: (_) {
+        if (!mounted) {
+          return;
+        }
+        setState(() {
+          _restoring = false;
+          _notice = _l10n.restorePurchasesConnectionFailed;
+        });
+      },
+    );
+    _checkStoreAvailability();
+  }
+
+  @override
+  void dispose() {
+    _resultTimer?.cancel();
+    _purchaseSubscription?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _checkStoreAvailability() async {
+    final l10n = AppLocalizations.of(context)!;
+    final isAvailable = await _inAppPurchase.isAvailable();
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _checkingStore = false;
+      _storeAvailable = isAvailable;
+      if (!isAvailable) {
+        _notice = l10n.restorePurchasesUnavailable;
+      }
+    });
+  }
+
+  Future<void> _restorePurchases() async {
+    final l10n = AppLocalizations.of(context)!;
+    if (_checkingStore || _restoring) {
+      return;
+    }
+    if (!_storeAvailable) {
+      setState(() {
+        _notice = l10n.restorePurchasesStoreRequired;
+      });
+      return;
+    }
+
+    setState(() {
+      _restoring = true;
+      _restoredCount = 0;
+      _notice = null;
+    });
+
+    _resultTimer?.cancel();
+    _resultTimer = Timer(const Duration(seconds: 4), () {
+      if (!mounted || !_restoring) {
+        return;
+      }
+      setState(() {
+        _restoring = false;
+        _notice = resolveRestorePurchasesTimeoutNotice(l10n, _restoredCount);
+      });
+    });
+
+    await _inAppPurchase.restorePurchases();
+  }
+
+  Future<void> _handlePurchaseUpdates(List<PurchaseDetails> purchases) async {
+    final l10n = AppLocalizations.of(context)!;
+    final resolution = resolveRestorePurchasesUpdate(purchases, l10n);
+
+    for (final purchase in resolution.purchasesToComplete) {
+      await _inAppPurchase.completePurchase(purchase);
+    }
+
+    if (!mounted) {
+      return;
+    }
+
+    if (resolution.restoredInBatch > 0) {
+      _resultTimer?.cancel();
+      setState(() {
+        _restoring = false;
+        _restoredCount += resolution.restoredInBatch;
+        _notice = l10n.restorePurchasesRestoredCount(_restoredCount);
+      });
+      return;
+    }
+
+    if (resolution.notice != null) {
+      setState(() {
+        if (resolution.shouldStopRestoring) {
+          _restoring = false;
+          _resultTimer?.cancel();
+        }
+        _notice = resolution.notice;
+      });
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
-    final confirmBg = destructive ? const Color(0xFFEF4444) : null;
-    final confirmGradient = destructive ? null : AppColors.primary;
+    final l10n = AppLocalizations.of(context)!;
+    final success = _restoredCount > 0;
 
-    return Container(
-      decoration: const BoxDecoration(
-        color: AppColors.white,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+    return ProfileRestorePurchasesSheetView(
+      title: l10n.profileRestorePurchases,
+      subtitle: l10n.restorePurchasesSubtitle,
+      stepOneTitle: l10n.restorePurchasesStep1Title,
+      stepOneDescription: l10n.restorePurchasesStep1Description,
+      stepTwoTitle: l10n.restorePurchasesStep2Title,
+      stepTwoDescription: l10n.restorePurchasesStep2Description,
+      stepThreeTitle: l10n.restorePurchasesStep3Title,
+      stepThreeDescription: l10n.restorePurchasesStep3Description,
+      notice: _notice,
+      success: success,
+      primaryActionLabel: resolveRestorePurchasesPrimaryActionLabel(
+        l10n,
+        checkingStore: _checkingStore,
+        restoring: _restoring,
       ),
-      padding: const EdgeInsets.fromLTRB(24, 12, 24, 24),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const _SheetHandle(),
-          const SizedBox(height: 24),
-          Text(
-            title,
-            textAlign: TextAlign.center,
-            style: const TextStyle(
-              fontFamily: AppFont.family,
-              fontWeight: FontWeight.w800,
-              fontSize: 17,
-              color: AppColors.black,
-              height: 1.3,
-            ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            subtitle,
-            textAlign: TextAlign.center,
-            style: const TextStyle(
-              fontFamily: AppFont.family,
-              fontSize: 13.5,
-              height: 1.5,
-              color: Color(0xFF666666),
-            ),
-          ),
-          const SizedBox(height: 20),
-          PressableScale(
-            onTap: () async {
-              if (onConfirm != null) {
-                await onConfirm!.call();
-                return;
-              }
-              if (context.mounted) {
-                Navigator.of(context).maybePop();
-              }
-            },
-            child: Container(
-              height: 52,
-              width: double.infinity,
-              decoration: BoxDecoration(
-                color: confirmBg,
-                gradient: confirmGradient,
-                borderRadius: BorderRadius.circular(26),
-              ),
-              alignment: Alignment.center,
-              child: Text(
-                confirmLabel,
-                style: const TextStyle(
-                  fontFamily: AppFont.family,
-                  fontWeight: FontWeight.w700,
-                  fontSize: 15,
-                  color: AppColors.white,
-                ),
-              ),
-            ),
-          ),
-          const SizedBox(height: 8),
-          PressableScale(
-            onTap: () => Navigator.of(context).maybePop(),
-            scale: 0.99,
-            child: Container(
-              height: 52,
-              width: double.infinity,
-              decoration: BoxDecoration(
-                color: AppColors.grayField,
-                borderRadius: BorderRadius.circular(26),
-              ),
-              alignment: Alignment.center,
-              child: const Text(
-                'Vazgec',
-                style: TextStyle(
-                  fontFamily: AppFont.family,
-                  fontWeight: FontWeight.w600,
-                  fontSize: 15,
-                  color: AppColors.black,
-                ),
-              ),
-            ),
-          ),
-        ],
-      ),
+      onPrimaryAction: _checkingStore || _restoring ? null : _restorePurchases,
+      closeLabel: l10n.commonClose,
+      onClose: () => Navigator.of(context).maybePop(),
     );
   }
 }
@@ -1358,41 +850,162 @@ class _SignOutConfirmSheetState extends ConsumerState<SignOutConfirmSheet> {
 
   @override
   Widget build(BuildContext context) {
-    return _ConfirmSheet(
-      title: 'Cikis yapmak istiyor musunuz?',
-      subtitle:
-          'Tekrar giris yapmak icin Google veya Apple hesabinizi kullanabilirsiniz.',
-      confirmLabel: _submitting ? 'Cikis yapiliyor...' : 'Cikis Yap',
+    final l10n = AppLocalizations.of(context)!;
+    return ProfileConfirmSheet(
+      title: l10n.signOutConfirmTitle,
+      subtitle: l10n.signOutConfirmSubtitle,
+      confirmLabel: _submitting ? l10n.signOutProcessing : l10n.profileSignOut,
       destructive: true,
       onConfirm: _signOut,
     );
   }
 }
 
-class DeleteAccountConfirmSheet extends StatelessWidget {
+class DeleteAccountConfirmSheet extends ConsumerStatefulWidget {
   const DeleteAccountConfirmSheet({super.key});
 
   @override
+  ConsumerState<DeleteAccountConfirmSheet> createState() =>
+      _DeleteAccountConfirmSheetState();
+}
+
+class _DeleteAccountConfirmSheetState
+    extends ConsumerState<DeleteAccountConfirmSheet> {
+  Future<void> _showFinalConfirmation() async {
+    final rootNavigator = Navigator.of(context, rootNavigator: true);
+    rootNavigator.pop();
+    await showCupertinoModalPopup<void>(
+      context: rootNavigator.context,
+      builder: (_) => const DeleteAccountFinalConfirmSheet(),
+    );
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return const _ConfirmSheet(
-      title: 'Hesabinizi silmek istiyor musunuz?',
-      subtitle:
-          'Bu islem geri alinamaz. Tum verileriniz kalici olarak silinecektir.',
-      confirmLabel: 'Hesabi Sil',
-      destructive: true,
+    final l10n = AppLocalizations.of(context)!;
+    return ProfileConfirmSheet(
+      title: l10n.deleteAccountStartTitle,
+      subtitle: l10n.deleteAccountStartSubtitle,
+      confirmLabel: l10n.commonContinue,
+      confirmColor: const Color(0xFFD97706),
+      onConfirm: _showFinalConfirmation,
     );
   }
 }
 
-class UnblockConfirmSheet extends StatelessWidget {
-  const UnblockConfirmSheet({super.key});
+class DeleteAccountFinalConfirmSheet extends ConsumerStatefulWidget {
+  const DeleteAccountFinalConfirmSheet({super.key});
+
+  @override
+  ConsumerState<DeleteAccountFinalConfirmSheet> createState() =>
+      _DeleteAccountFinalConfirmSheetState();
+}
+
+class _DeleteAccountFinalConfirmSheetState
+    extends ConsumerState<DeleteAccountFinalConfirmSheet> {
+  bool _submitting = false;
+  String? _notice;
+
+  Future<void> _deleteAccount() async {
+    if (_submitting) return;
+
+    setState(() {
+      _submitting = true;
+      _notice = null;
+    });
+
+    try {
+      ref.read(onboardProvider.notifier).reset();
+      await ref.read(appAuthProvider.notifier).deleteAccount();
+      if (!mounted) return;
+
+      Navigator.of(context, rootNavigator: true).pushAndRemoveUntil(
+        cupertinoRoute(const OnboardScreen()),
+        (route) => false,
+      );
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _notice = AppAuthErrorFormatter.messageFrom(error);
+      });
+    } finally {
+      if (mounted) {
+        setState(() => _submitting = false);
+      }
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
-    return const _ConfirmSheet(
-      title: 'engelini kaldirmak istiyor musunuz?',
-      subtitle: 'Bu kisi tekrar size mesaj gonderebilecek.',
-      confirmLabel: 'Engeli Kaldir',
+    final l10n = AppLocalizations.of(context)!;
+    return ProfileConfirmSheet(
+      title: l10n.deleteAccountFinalTitle,
+      subtitle: _notice ?? l10n.deleteAccountFinalSubtitle,
+      confirmLabel: _submitting
+          ? l10n.deleteAccountDeleting
+          : l10n.profileDeleteAccount,
+      destructive: true,
+      onConfirm: _deleteAccount,
+    );
+  }
+}
+
+class UnblockConfirmSheet extends ConsumerStatefulWidget {
+  final BlockedUser user;
+
+  const UnblockConfirmSheet({super.key, required this.user});
+
+  @override
+  ConsumerState<UnblockConfirmSheet> createState() =>
+      _UnblockConfirmSheetState();
+}
+
+class _UnblockConfirmSheetState extends ConsumerState<UnblockConfirmSheet> {
+  bool _submitting = false;
+  String? _notice;
+
+  Future<void> _unblock() async {
+    if (_submitting) {
+      return;
+    }
+
+    setState(() {
+      _submitting = true;
+      _notice = null;
+    });
+
+    try {
+      await ref
+          .read(blockedUsersActionControllerProvider.notifier)
+          .unblockUser(widget.user.id);
+      if (!mounted) {
+        return;
+      }
+      Navigator.of(context).maybePop();
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _notice = AppAuthErrorFormatter.messageFrom(error);
+      });
+    } finally {
+      if (mounted) {
+        setState(() => _submitting = false);
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final displayName = widget.user.displayName.trim();
+    final l10n = AppLocalizations.of(context)!;
+
+    return ProfileConfirmSheet(
+      title: l10n.unblockConfirmTitle(displayName),
+      subtitle: _notice ?? l10n.unblockConfirmSubtitle,
+      confirmLabel: _submitting ? l10n.unblockProcessing : l10n.unblockAction,
+      onConfirm: _unblock,
     );
   }
 }
@@ -1417,15 +1030,13 @@ class _EditProfileSheetState extends ConsumerState<EditProfileSheet> {
     super.initState();
     final user = ref.read(appAuthProvider).asData?.value?.user;
     final data = ref.read(onboardProvider);
-    final name = data.name.isNotEmpty
-        ? data.name
-        : (user?.firstName ?? 'Mehmet');
+    final name = data.name.isNotEmpty ? data.name : (user?.firstName ?? '');
     final surname = data.surname.isNotEmpty
         ? data.surname
-        : (user?.surname ?? 'Kaya');
+        : (user?.surname ?? '');
     final username = data.username.isNotEmpty
         ? data.username
-        : (user?.username ?? 'mehmet.k');
+        : (user?.username ?? '');
     _name = TextEditingController(text: name);
     _surname = TextEditingController(text: surname);
     _username = TextEditingController(text: '@$username');
@@ -1443,6 +1054,7 @@ class _EditProfileSheetState extends ConsumerState<EditProfileSheet> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     final user = ref.watch(appAuthProvider).asData?.value?.user;
 
     Future<void> saveProfile() async {
@@ -1473,7 +1085,7 @@ class _EditProfileSheetState extends ConsumerState<EditProfileSheet> {
             );
         ref.read(onboardProvider.notifier).setName(_name.text);
         ref.read(onboardProvider.notifier).setSurname(_surname.text);
-        if (!mounted) return;
+        if (!context.mounted) return;
         Navigator.of(context).maybePop();
       } catch (error) {
         if (!mounted) return;
@@ -1487,1740 +1099,487 @@ class _EditProfileSheetState extends ConsumerState<EditProfileSheet> {
       }
     }
 
-    return Padding(
-      padding: EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(context).bottom),
-      child: Container(
-        decoration: const BoxDecoration(
-          color: AppColors.white,
-          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-        ),
-        padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const _SheetHandle(),
-            const SizedBox(height: 18),
-            const Text(
-              'Profili Duzenle',
-              style: TextStyle(
-                fontFamily: AppFont.family,
-                fontWeight: FontWeight.w800,
-                fontSize: 18,
-                color: AppColors.black,
-              ),
-            ),
-            const SizedBox(height: 16),
-            _MiniLabeledField(label: 'Isim', controller: _name),
-            const SizedBox(height: 12),
-            _MiniLabeledField(label: 'Soyisim', controller: _surname),
-            const SizedBox(height: 12),
-            _MiniLabeledField(
-              label: 'Kullanici Adi',
-              controller: _username,
-              readOnly: user != null,
-            ),
-            if (user != null) ...[
-              const SizedBox(height: 8),
-              const Text(
-                'Kullanici adi degisikligi henuz mobil uygulamadan desteklenmiyor.',
-                style: TextStyle(
-                  fontFamily: AppFont.family,
-                  fontSize: 12,
-                  height: 1.4,
-                  color: AppColors.gray,
-                ),
-              ),
-            ],
-            const SizedBox(height: 12),
-            _MiniLabeledField(
-              label: 'Biyografi',
-              controller: _bio,
-              placeholder: 'Kendinden bahset...',
-              height: 88,
-              maxLines: 3,
-            ),
-            if (_submitMessage != null) ...[
-              const SizedBox(height: 12),
-              Text(
-                _submitMessage!,
-                style: const TextStyle(
-                  fontFamily: AppFont.family,
-                  fontSize: 12,
-                  height: 1.4,
-                  color: Color(0xFFEF4444),
-                ),
-              ),
-            ],
-            const SizedBox(height: 20),
-            GradientButton(
-              label: _submitting ? 'Kaydediliyor...' : 'Kaydet',
-              onTap: _submitting ? null : saveProfile,
-            ),
-          ],
-        ),
+    return ProfileAdaptiveBottomSheet(
+      child: ProfileEditProfileSheetView(
+        title: l10n.profileEditProfile,
+        firstNameLabel: l10n.editProfileFirstName,
+        firstNameController: _name,
+        surnameLabel: l10n.editProfileSurname,
+        surnameController: _surname,
+        usernameLabel: l10n.editProfileUsername,
+        usernameController: _username,
+        isUsernameReadOnly: user != null,
+        usernameHint: l10n.editProfileUsernameUnsupported,
+        bioLabel: l10n.editProfileBio,
+        bioController: _bio,
+        bioPlaceholder: l10n.editProfileBioPlaceholder,
+        errorMessage: _submitMessage,
+        saveLabel: _submitting ? l10n.commonSaving : l10n.commonSave,
+        onSave: _submitting ? null : saveProfile,
       ),
     );
   }
 }
 
-class _MiniLabeledField extends StatelessWidget {
-  final String label;
-  final TextEditingController controller;
-  final String? placeholder;
-  final double height;
-  final int? maxLines;
-  final bool readOnly;
-
-  const _MiniLabeledField({
-    required this.label,
-    required this.controller,
-    this.placeholder,
-    this.height = 48,
-    this.maxLines = 1,
-    this.readOnly = false,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          label,
-          style: const TextStyle(
-            fontFamily: AppFont.family,
-            fontWeight: FontWeight.w500,
-            fontSize: 12,
-            color: Color(0xFF777777),
-          ),
-        ),
-        const SizedBox(height: 6),
-        Container(
-          height: height,
-          padding: const EdgeInsets.symmetric(horizontal: 14),
-          decoration: BoxDecoration(
-            color: AppColors.grayField,
-            borderRadius: BorderRadius.circular(12),
-          ),
-          child: Center(
-            child: CupertinoTextField(
-              controller: controller,
-              readOnly: readOnly,
-              placeholder: placeholder,
-              maxLines: maxLines,
-              placeholderStyle: const TextStyle(
-                fontFamily: AppFont.family,
-                color: Color(0xFF999999),
-                fontSize: 14,
-              ),
-              style: const TextStyle(
-                fontFamily: AppFont.family,
-                fontWeight: FontWeight.w500,
-                fontSize: 14,
-                color: AppColors.black,
-              ),
-              decoration: const BoxDecoration(color: Color(0x00000000)),
-              padding: const EdgeInsets.symmetric(vertical: 10),
-              cursorColor: AppColors.indigo,
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class LanguageSheet extends StatefulWidget {
+class LanguageSheet extends ConsumerStatefulWidget {
   const LanguageSheet({super.key});
 
   @override
-  State<LanguageSheet> createState() => _LanguageSheetState();
+  ConsumerState<LanguageSheet> createState() => _LanguageSheetState();
 }
 
-class _LanguageSheetState extends State<LanguageSheet> {
-  AppLanguage _selected = AppLanguage.tr;
+class _LanguageSheetState extends ConsumerState<LanguageSheet> {
+  late AppLanguage _selected;
+  bool _hasChanges = false;
+  bool _isSaving = false;
 
-  static const Map<AppLanguage, ({String flag, String label})> _opts = {
-    AppLanguage.tr: (flag: 'TR', label: 'Turkce'),
-    AppLanguage.en: (flag: 'EN', label: 'English'),
-    AppLanguage.de: (flag: 'DE', label: 'Deutsch'),
-    AppLanguage.fr: (flag: 'FR', label: 'Francais'),
-  };
+  @override
+  void initState() {
+    super.initState();
+    _selected =
+        ref.read(appLanguageProvider).asData?.value ??
+        AppPreferencesStorage.fallbackLanguage();
+  }
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      decoration: const BoxDecoration(
-        color: AppColors.white,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-      ),
-      padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const _SheetHandle(),
-          const SizedBox(height: 18),
-          const Text(
-            'Dil Secimi',
-            style: TextStyle(
-              fontFamily: AppFont.family,
-              fontWeight: FontWeight.w800,
-              fontSize: 18,
-              color: AppColors.black,
-            ),
-          ),
-          const SizedBox(height: 16),
-          ...AppLanguage.values.map((lang) {
-            final opt = _opts[lang]!;
-            return Padding(
-              padding: const EdgeInsets.only(bottom: 8),
-              child: _FlagLanguageRow(
-                flag: opt.flag,
-                label: opt.label,
-                selected: _selected == lang,
-                onTap: () => setState(() => _selected = lang),
-              ),
-            );
-          }),
-          const SizedBox(height: 8),
-          GradientButton(
-            label: 'Degistir',
-            onTap: () => Navigator.of(context).maybePop(),
-          ),
-        ],
+    final l10n = AppLocalizations.of(context)!;
+    final persistedLanguage = ref.watch(appLanguageProvider).asData?.value;
+    final selectedLanguage = _hasChanges
+        ? _selected
+        : (persistedLanguage ?? _selected);
+
+    return ProfileAdaptiveBottomSheet(
+      child: ProfileLanguageSheetView(
+        title: l10n.languageSheetTitle,
+        languages: AppLanguage.values,
+        selectedLanguage: selectedLanguage,
+        onSelect: (language) {
+          setState(() {
+            _selected = language;
+            _hasChanges = true;
+          });
+        },
+        saveLabel: _isSaving ? l10n.languageChanging : l10n.languageChange,
+        onSave: _isSaving
+            ? null
+            : () async {
+                setState(() => _isSaving = true);
+                try {
+                  await ref
+                      .read(appLanguageProvider.notifier)
+                      .setLanguage(selectedLanguage);
+                  if (!context.mounted) {
+                    return;
+                  }
+                  Navigator.of(context).maybePop();
+                } catch (error) {
+                  if (!mounted) {
+                    return;
+                  }
+                  await showCupertinoDialog<void>(
+                    context: context,
+                    builder: (dialogContext) => CupertinoAlertDialog(
+                      title: Text(
+                        l10n.languageUpdateFailedTitle,
+                        style: const TextStyle(fontFamily: AppFont.family),
+                      ),
+                      content: Padding(
+                        padding: const EdgeInsets.only(top: 8),
+                        child: Text(
+                          AppAuthErrorFormatter.messageFrom(error),
+                          style: const TextStyle(fontFamily: AppFont.family),
+                        ),
+                      ),
+                      actions: [
+                        CupertinoDialogAction(
+                          onPressed: () => Navigator.of(dialogContext).pop(),
+                          child: Text(
+                            l10n.commonOk,
+                            style: const TextStyle(fontFamily: AppFont.family),
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                } finally {
+                  if (mounted) {
+                    setState(() => _isSaving = false);
+                  }
+                }
+              },
       ),
     );
   }
 }
 
-class _FlagLanguageRow extends StatelessWidget {
-  final String flag;
-  final String label;
-  final bool selected;
-  final VoidCallback onTap;
-
-  const _FlagLanguageRow({
-    required this.flag,
-    required this.label,
-    required this.selected,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return PressableScale(
-      onTap: onTap,
-      scale: 0.99,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 160),
-        height: 56,
-        padding: const EdgeInsets.symmetric(horizontal: 16),
-        decoration: BoxDecoration(
-          color: AppColors.grayField,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(
-            color: selected ? AppColors.black : const Color(0x00000000),
-            width: 1.5,
-          ),
-        ),
-        child: Row(
-          children: [
-            Text(flag, style: const TextStyle(fontSize: 22)),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Text(
-                label,
-                style: const TextStyle(
-                  fontFamily: AppFont.family,
-                  fontWeight: FontWeight.w600,
-                  fontSize: 14.5,
-                  color: AppColors.black,
-                ),
-              ),
-            ),
-            AnimatedContainer(
-              duration: const Duration(milliseconds: 160),
-              width: 22,
-              height: 22,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: selected ? AppColors.black : const Color(0x00000000),
-                border: selected
-                    ? null
-                    : Border.all(color: const Color(0xFFD4D4D4), width: 1.5),
-              ),
-              alignment: Alignment.center,
-              child: selected
-                  ? const Icon(
-                      CupertinoIcons.check_mark,
-                      size: 12,
-                      color: AppColors.white,
-                    )
-                  : null,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class NotificationPrefsSheet extends ConsumerWidget {
+class NotificationPrefsSheet extends ConsumerStatefulWidget {
   const NotificationPrefsSheet({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final prefs = ref.watch(notifPrefsProvider);
-    final notifier = ref.read(notifPrefsProvider.notifier);
+  ConsumerState<NotificationPrefsSheet> createState() =>
+      _NotificationPrefsSheetState();
+}
 
-    Widget row(
-      String title,
-      String desc,
-      bool value,
-      NotificationPrefs Function(bool) update,
-    ) {
-      return Padding(
-        padding: const EdgeInsets.symmetric(vertical: 12),
-        child: Row(
-          children: [
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    title,
-                    style: const TextStyle(
-                      fontFamily: AppFont.family,
-                      fontWeight: FontWeight.w700,
-                      fontSize: 14,
-                      color: AppColors.black,
-                    ),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    desc,
-                    style: const TextStyle(
-                      fontFamily: AppFont.family,
-                      fontSize: 11.5,
-                      color: Color(0xFF999999),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            _SoftBlackSwitch(
-              value: value,
-              onChanged: (_) => notifier.set(update(!value)),
+class _NotificationPrefsSheetState
+    extends ConsumerState<NotificationPrefsSheet> {
+  late NotificationPrefs _prefs;
+  bool _isInitialized = false;
+  bool _isSaving = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_isInitialized) {
+      return;
+    }
+
+    final user = ref.read(appAuthProvider).asData?.value?.user;
+    _prefs = NotificationPrefs.fromUser(user);
+    _isInitialized = true;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
+    final authState = ref.watch(appAuthProvider);
+    final user = authState.asData?.value?.user;
+    final serverPrefs = NotificationPrefs.fromUser(user);
+    final hasChanges =
+        _prefs.notificationsEnabled != serverPrefs.notificationsEnabled ||
+        _prefs.vibrationEnabled != serverPrefs.vibrationEnabled;
+
+    return ProfileAdaptiveBottomSheet(
+      child: ProfileNotificationPrefsSheetView(
+        title: l10n.profileNotifications,
+        notificationsTitle: l10n.profileNotifications,
+        notificationsDescription: l10n.notificationsDescription,
+        notificationsEnabled: _prefs.notificationsEnabled,
+        onNotificationsChanged: (_) {
+          setState(() {
+            _prefs = _prefs.copyWith(
+              notificationsEnabled: !_prefs.notificationsEnabled,
+            );
+          });
+        },
+        vibrationTitle: l10n.notificationsVibration,
+        vibrationDescription: l10n.notificationsVibrationDescription,
+        vibrationEnabled: _prefs.vibrationEnabled,
+        onVibrationChanged: (_) {
+          setState(() {
+            _prefs = _prefs.copyWith(
+              vibrationEnabled: !_prefs.vibrationEnabled,
+            );
+          });
+        },
+        saveLabel: _isSaving ? l10n.commonSaving : l10n.commonSave,
+        onSave: _isSaving
+            ? null
+            : () => _savePreferences(context, hasChanges: hasChanges),
+      ),
+    );
+  }
+
+  Future<void> _savePreferences(
+    BuildContext context, {
+    required bool hasChanges,
+  }) async {
+    final l10n = AppLocalizations.of(context)!;
+    if (!hasChanges) {
+      Navigator.of(context).maybePop();
+      return;
+    }
+
+    setState(() {
+      _isSaving = true;
+    });
+
+    try {
+      await ref
+          .read(appAuthProvider.notifier)
+          .updateNotificationPreferences(
+            notificationsEnabled: _prefs.notificationsEnabled,
+            vibrationEnabled: _prefs.vibrationEnabled,
+          );
+      if (!context.mounted) {
+        return;
+      }
+      Navigator.of(context).maybePop();
+    } catch (error) {
+      if (!context.mounted) {
+        return;
+      }
+
+      showCupertinoDialog<void>(
+        context: context,
+        builder: (context) => CupertinoAlertDialog(
+          title: Text(l10n.saveFailedTitle),
+          content: Text(AppAuthErrorFormatter.messageFrom(error)),
+          actions: [
+            CupertinoDialogAction(
+              onPressed: () => Navigator.of(context).pop(),
+              child: Text(l10n.commonOk),
             ),
           ],
         ),
       );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isSaving = false;
+        });
+      }
     }
-
-    return Container(
-      decoration: const BoxDecoration(
-        color: AppColors.white,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-      ),
-      padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const _SheetHandle(),
-          const SizedBox(height: 18),
-          const Text(
-            'Bildirimler',
-            style: TextStyle(
-              fontFamily: AppFont.family,
-              fontWeight: FontWeight.w800,
-              fontSize: 18,
-              color: AppColors.black,
-            ),
-          ),
-          const SizedBox(height: 8),
-          row(
-            'Mesaj Bildirimleri',
-            'Yeni mesaj geldiginde',
-            prefs.messages,
-            (v) => prefs.copyWith(messages: v),
-          ),
-          _divider(),
-          row(
-            'Eslesme Bildirimleri',
-            'Yeni eslesmelerde',
-            prefs.matches,
-            (v) => prefs.copyWith(matches: v),
-          ),
-          _divider(),
-          row(
-            'Begeni Bildirimleri',
-            'Birisi seni begendiginde',
-            prefs.likes,
-            (v) => prefs.copyWith(likes: v),
-          ),
-          _divider(),
-          row(
-            'Kampanya',
-            'Indirim ve firsatlar',
-            prefs.campaigns,
-            (v) => prefs.copyWith(campaigns: v),
-          ),
-          const SizedBox(height: 16),
-          GradientButton(
-            label: 'Kaydet',
-            onTap: () => Navigator.of(context).maybePop(),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _divider() => Container(height: 1, color: const Color(0xFFF0F0F0));
-}
-
-class _SoftBlackSwitch extends StatelessWidget {
-  final bool value;
-  final ValueChanged<bool> onChanged;
-
-  const _SoftBlackSwitch({required this.value, required this.onChanged});
-
-  @override
-  Widget build(BuildContext context) {
-    return PressableScale(
-      onTap: () => onChanged(!value),
-      scale: 0.95,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 200),
-        width: 46,
-        height: 26,
-        padding: const EdgeInsets.all(3),
-        decoration: BoxDecoration(
-          color: value ? AppColors.black : const Color(0xFFE5E5E5),
-          borderRadius: BorderRadius.circular(24),
-        ),
-        child: AnimatedAlign(
-          duration: const Duration(milliseconds: 220),
-          curve: Curves.easeOutCubic,
-          alignment: value ? Alignment.centerRight : Alignment.centerLeft,
-          child: Container(
-            width: 20,
-            height: 20,
-            decoration: const BoxDecoration(
-              color: AppColors.white,
-              shape: BoxShape.circle,
-              boxShadow: [
-                BoxShadow(
-                  color: Color(0x1F000000),
-                  blurRadius: 4,
-                  offset: Offset(0, 2),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
   }
 }
 
-class HelpSheet extends StatefulWidget {
-  const HelpSheet({super.key});
-
-  @override
-  State<HelpSheet> createState() => _HelpSheetState();
-}
-
-class _HelpSheetState extends State<HelpSheet> {
-  bool _expanded = true;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(context).bottom),
-      child: Container(
-        decoration: const BoxDecoration(
-          color: AppColors.white,
-          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-        ),
-        padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const _SheetHandle(),
-            const SizedBox(height: 18),
-            const Text(
-              'Yardim',
-              style: TextStyle(
-                fontFamily: AppFont.family,
-                fontWeight: FontWeight.w800,
-                fontSize: 18,
-                color: AppColors.black,
-              ),
-            ),
-            const SizedBox(height: 12),
-            PressableScale(
-              onTap: () => setState(() => _expanded = !_expanded),
-              scale: 0.99,
-              child: Container(
-                padding: const EdgeInsets.symmetric(vertical: 12),
-                child: Row(
-                  children: [
-                    const Expanded(
-                      child: Text(
-                        'Sikca Sorulan Sorular',
-                        style: TextStyle(
-                          fontFamily: AppFont.family,
-                          fontWeight: FontWeight.w700,
-                          fontSize: 14.5,
-                          color: AppColors.black,
-                        ),
-                      ),
-                    ),
-                    AnimatedRotation(
-                      turns: _expanded ? 0.5 : 0.0,
-                      duration: const Duration(milliseconds: 200),
-                      child: const Icon(
-                        CupertinoIcons.chevron_down,
-                        size: 16,
-                        color: Color(0xFF666666),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            AnimatedCrossFade(
-              duration: const Duration(milliseconds: 220),
-              firstChild: const SizedBox.shrink(),
-              secondChild: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: const [
-                  _FaqItem(
-                    question: 'Tas nedir, nasil kullanilir?',
-                    answer:
-                        'Tas, uygulama ici sanal para birimidir. Ozel emoji gondermek ve ek ozellikler icin kullanilir.',
-                  ),
-                  _FaqItem(
-                    question: 'Eslesme nasil calisir?',
-                    answer:
-                        'Kesfet bolumunden esles butonuna basarak rastgele birisiyle eslesebilirsiniz. Iki taraf da kabul ederse mesajlasma baslar.',
-                  ),
-                  _FaqItem(
-                    question: 'Premium ne saglar?',
-                    answer:
-                        'Sinirsiz mesaj, seni kimin begendigini gorme, sesli arama ve haftalik boost gibi ozellikler sunar.',
-                  ),
-                ],
-              ),
-              crossFadeState: _expanded
-                  ? CrossFadeState.showSecond
-                  : CrossFadeState.showFirst,
-            ),
-            Container(
-              height: 1,
-              color: const Color(0xFFF0F0F0),
-              margin: const EdgeInsets.symmetric(vertical: 12),
-            ),
-            const Text(
-              'Bize Yazin',
-              style: TextStyle(
-                fontFamily: AppFont.family,
-                fontWeight: FontWeight.w700,
-                fontSize: 14,
-                color: AppColors.black,
-              ),
-            ),
-            const SizedBox(height: 8),
-            Container(
-              height: 96,
-              padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(
-                color: AppColors.grayField,
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: const CupertinoTextField(
-                maxLines: 3,
-                placeholder: 'Mesajinizi yazin...',
-                placeholderStyle: TextStyle(
-                  fontFamily: AppFont.family,
-                  color: Color(0xFF999999),
-                  fontSize: 14,
-                ),
-                style: TextStyle(
-                  fontFamily: AppFont.family,
-                  fontSize: 14,
-                  color: AppColors.black,
-                ),
-                decoration: BoxDecoration(color: Color(0x00000000)),
-                padding: EdgeInsets.zero,
-              ),
-            ),
-            const SizedBox(height: 12),
-            GradientButton(
-              label: 'Gonder',
-              onTap: () => Navigator.of(context).maybePop(),
-            ),
-            const SizedBox(height: 12),
-            Container(
-              height: 1,
-              color: const Color(0xFFF0F0F0),
-              margin: const EdgeInsets.only(bottom: 12),
-            ),
-            Row(
-              children: [
-                Container(
-                  width: 24,
-                  height: 24,
-                  decoration: const BoxDecoration(
-                    color: Color(0xFF25D366),
-                    shape: BoxShape.circle,
-                  ),
-                  alignment: Alignment.center,
-                  child: const Icon(
-                    CupertinoIcons.chat_bubble_fill,
-                    size: 13,
-                    color: AppColors.white,
-                  ),
-                ),
-                const SizedBox(width: 10),
-                const Text(
-                  'WhatsApp ile Ulasin',
-                  style: TextStyle(
-                    fontFamily: AppFont.family,
-                    fontWeight: FontWeight.w600,
-                    fontSize: 14,
-                    color: AppColors.black,
-                  ),
-                ),
-              ],
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _FaqItem extends StatelessWidget {
-  final String question;
-  final String answer;
-
-  const _FaqItem({required this.question, required this.answer});
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 14),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            question,
-            style: const TextStyle(
-              fontFamily: AppFont.family,
-              fontWeight: FontWeight.w700,
-              fontSize: 13.5,
-              color: AppColors.black,
-            ),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            answer,
-            style: const TextStyle(
-              fontFamily: AppFont.family,
-              fontSize: 13,
-              height: 1.4,
-              color: Color(0xFF555555),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class BlockedUsersSheet extends StatelessWidget {
+class BlockedUsersSheet extends ConsumerWidget {
   const BlockedUsersSheet({super.key});
 
   @override
-  Widget build(BuildContext context) {
-    return Container(
-      decoration: const BoxDecoration(
-        color: AppColors.white,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+  Widget build(BuildContext context, WidgetRef ref) {
+    final l10n = AppLocalizations.of(context)!;
+    final blockedUsersAsync = ref.watch(blockedUsersProvider);
+
+    return ProfileAdaptiveBottomSheet(
+      scrollable: false,
+      maxHeightFactor: 0.78,
+      child: ProfileBlockedUsersSheetView(
+        title: l10n.profileBlockedUsers,
+        emptyMessage: l10n.blockedUsersEmpty,
+        retryLabel: l10n.commonRetry,
+        blockedUsersAsync: blockedUsersAsync,
+        onRetry: () => ref.invalidate(blockedUsersProvider),
+        onUnblock: (user) {
+          showCupertinoModalPopup<void>(
+            context: context,
+            builder: (_) => UnblockConfirmSheet(user: user),
+          );
+        },
+        errorMessageBuilder: AppAuthErrorFormatter.messageFrom,
       ),
-      padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const _SheetHandle(),
-          const SizedBox(height: 18),
-          const Text(
-            'Engellenen Kullanicilar',
-            style: TextStyle(
-              fontFamily: AppFont.family,
-              fontWeight: FontWeight.w800,
-              fontSize: 18,
-              color: AppColors.black,
-            ),
-          ),
-          const SizedBox(height: 16),
-          ..._mockBlocked.map(
-            (u) => Padding(
-              padding: const EdgeInsets.only(bottom: 12),
-              child: _BlockedUserRow(
-                user: u,
-                onUnblock: () {
-                  Navigator.of(context).maybePop();
-                  showCupertinoModalPopup<void>(
-                    context: context,
-                    builder: (_) => const UnblockConfirmSheet(),
-                  );
-                },
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _BlockedUserRow extends StatelessWidget {
-  final BlockedUser user;
-  final VoidCallback onUnblock;
-
-  const _BlockedUserRow({required this.user, required this.onUnblock});
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      children: [
-        ClipOval(
-          child: user.avatarAsset != null
-              ? Image.asset(
-                  user.avatarAsset!,
-                  width: 44,
-                  height: 44,
-                  fit: BoxFit.cover,
-                )
-              : AvatarCircle(name: user.name, size: 44),
-        ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                user.name,
-                style: const TextStyle(
-                  fontFamily: AppFont.family,
-                  fontWeight: FontWeight.w700,
-                  fontSize: 14,
-                  color: AppColors.black,
-                ),
-              ),
-              Text(
-                user.handle,
-                style: const TextStyle(
-                  fontFamily: AppFont.family,
-                  fontSize: 12,
-                  color: Color(0xFF999999),
-                ),
-              ),
-            ],
-          ),
-        ),
-        PressableScale(
-          onTap: onUnblock,
-          scale: 0.96,
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-            decoration: BoxDecoration(
-              color: const Color(0x1AEF4444),
-              borderRadius: BorderRadius.circular(20),
-            ),
-            child: const Text(
-              'Engeli Kaldir',
-              style: TextStyle(
-                fontFamily: AppFont.family,
-                fontWeight: FontWeight.w700,
-                fontSize: 12.5,
-                color: Color(0xFFEF4444),
-              ),
-            ),
-          ),
-        ),
-      ],
     );
   }
 }
 
 // ------ Paywall ---------------------------------------------------------------
 
-class PaywallScreen extends StatefulWidget {
+class PaywallScreen extends ConsumerStatefulWidget {
   const PaywallScreen({super.key});
 
   @override
-  State<PaywallScreen> createState() => _PaywallScreenState();
+  ConsumerState<PaywallScreen> createState() => _PaywallScreenState();
 }
 
-class _PaywallScreenState extends State<PaywallScreen> {
-  bool _submitting = false;
-  String? _submitMessage;
+class _PaywallScreenState extends ConsumerState<PaywallScreen> {
   int _selected = 1;
+  final StorePurchaseService _purchaseService = StorePurchaseService();
+  bool _isPurchasing = false;
 
-  @override
-  Widget build(BuildContext context) {
-    return CupertinoPageScaffold(
-      backgroundColor: const Color(0xFF0A0A12),
-      child: Stack(
-        children: [
-          const Positioned.fill(child: _PaywallAmbient()),
-          SafeArea(
-            child: Column(
-              children: [
-                _PaywallHeader(onClose: () => Navigator.of(context).maybePop()),
-                const SizedBox(height: 8),
-                Expanded(
-                  child: SingleChildScrollView(
-                    physics: const BouncingScrollPhysics(),
-                    child: Column(
-                      children: [
-                        const SizedBox(height: 32),
-                        Container(
-                          width: 160,
-                          height: 160,
-                          decoration: const BoxDecoration(
-                            shape: BoxShape.circle,
-                            gradient: RadialGradient(
-                              colors: [Color(0x40FF3C78), Color(0x00FF3C78)],
-                            ),
-                          ),
-                          alignment: Alignment.center,
-                          child: const Icon(
-                            CupertinoIcons.videocam_fill,
-                            size: 64,
-                            color: AppColors.white,
-                          ),
-                        ),
-                        const SizedBox(height: 28),
-                        const Text(
-                          'Goruntulu ve Sesli Arama.\nHizlica Tanisma Firsati',
-                          textAlign: TextAlign.center,
-                          style: TextStyle(
-                            fontFamily: AppFont.family,
-                            fontWeight: FontWeight.w800,
-                            fontSize: 21,
-                            height: 1.28,
-                            color: AppColors.white,
-                            letterSpacing: -0.5,
-                          ),
-                        ),
-                        const SizedBox(height: 12),
-                        const Text(
-                          'Ister goruntulu, ister sesli gorus.\nMesajlasmanin otesine gec.',
-                          textAlign: TextAlign.center,
-                          style: TextStyle(
-                            fontFamily: AppFont.family,
-                            fontSize: 13,
-                            height: 1.55,
-                            color: Color(0x99FFFFFF),
-                          ),
-                        ),
-                        const SizedBox(height: 24),
-                        _CarouselDots(selected: 0, count: 9),
-                        const SizedBox(height: 32),
-                        Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 16),
-                          child: Row(
-                            crossAxisAlignment: CrossAxisAlignment.end,
-                            children: [
-                              Expanded(
-                                child: _PlanCard(
-                                  title: '1 Hafta',
-                                  priceMajor: '249',
-                                  priceMinor: ',99',
-                                  periodLabel: 'haftalik',
-                                  oldPrice: '349,99 TL',
-                                  saveLabel: '%29 tasarruf',
-                                  selected: _selected == 0,
-                                  onTap: () => setState(() => _selected = 0),
-                                ),
-                              ),
-                              const SizedBox(width: 8),
-                              Expanded(
-                                child: _PlanCard(
-                                  title: '1 Ay',
-                                  priceMajor: '599',
-                                  priceMinor: ',99',
-                                  periodLabel: 'aylik',
-                                  oldPrice: '1.199,96 TL',
-                                  badge: 'EN COK SATAN',
-                                  saveLabel: '%50 tasarruf',
-                                  featured: true,
-                                  selected: _selected == 1,
-                                  onTap: () => setState(() => _selected = 1),
-                                ),
-                              ),
-                              const SizedBox(width: 8),
-                              Expanded(
-                                child: _PlanCard(
-                                  title: '3 Ay',
-                                  priceMajor: '1.199',
-                                  priceMinor: ',99',
-                                  periodLabel: '3 aylik',
-                                  oldPrice: '3.599,88 TL',
-                                  badge: 'EN AVANTAJLI',
-                                  saveLabel: '%67 tasarruf',
-                                  selected: _selected == 2,
-                                  onTap: () => setState(() => _selected = 2),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        const SizedBox(height: 20),
-                        const Padding(
-                          padding: EdgeInsets.symmetric(horizontal: 24),
-                          child: Text(
-                            'Planinizi istediginiz zaman iptal edebilirsiniz, taahhut yoktur. Gizli ucret veya ekstra masraf yoktur.',
-                            textAlign: TextAlign.center,
-                            style: TextStyle(
-                              fontFamily: AppFont.family,
-                              fontSize: 12,
-                              height: 1.55,
-                              color: Color(0x66FFFFFF),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(height: 20),
-                      ],
-                    ),
-                  ),
-                ),
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
-                  child: _PaywallCTA(
-                    onTap: () => Navigator.of(context).maybePop(),
-                  ),
-                ),
-                const _PaywallLegal(),
-                SizedBox(height: MediaQuery.paddingOf(context).bottom + 8),
-              ],
-            ),
-          ),
-        ],
-      ),
+  Future<void> _purchaseSubscription(
+    AppSubscriptionPackage selectedPackage,
+  ) async {
+    final authState = ref.read(appAuthProvider).asData?.value;
+    final token = authState?.token;
+    final l10n = AppLocalizations.of(context)!;
+    final productLabel =
+        'Premium ${subscriptionPlanTitle(selectedPackage, l10n)}';
+
+    if (token == null || token.trim().isEmpty) {
+      openPremiumPurchaseResultScreen(
+        context,
+        copy: premiumPurchaseAuthRequiredCopy(l10n),
+        productLabel: productLabel,
+        amountLabel: selectedPackage.displayPrice,
+        l10n: l10n,
+      );
+      return;
+    }
+
+    setState(() => _isPurchasing = true);
+    final result = await _purchaseService.purchase(
+      token: token,
+      productCode: selectedPackage.storeProductCode ?? '',
+      kind: StorePurchaseKind.subscription,
+      amount: selectedPackage.price,
+      currency: selectedPackage.currency,
+    );
+    if (!mounted) {
+      return;
+    }
+
+    setState(() => _isPurchasing = false);
+
+    if (result.isSuccess) {
+      await ref.read(appAuthProvider.notifier).refreshCurrentUser();
+      if (!mounted) {
+        return;
+      }
+      openPremiumPurchaseResultScreen(
+        context,
+        copy: premiumPurchaseSuccessCopy(l10n),
+        productLabel: productLabel,
+        amountLabel: selectedPackage.displayPrice,
+        l10n: l10n,
+      );
+      return;
+    }
+
+    if (result.status == StorePurchaseStatus.cancelled) {
+      return;
+    }
+
+    openPremiumPurchaseResultScreen(
+      context,
+      copy: premiumPurchaseFailureCopy(l10n, message: result.message),
+      productLabel: productLabel,
+      amountLabel: selectedPackage.displayPrice,
+      l10n: l10n,
     );
   }
-}
-
-class _PaywallAmbient extends StatelessWidget {
-  const _PaywallAmbient();
 
   @override
   Widget build(BuildContext context) {
-    return IgnorePointer(
-      child: Stack(
-        children: [
-          Positioned(
-            left: -120,
-            top: -160,
-            child: Container(
-              width: 480,
-              height: 420,
-              decoration: const BoxDecoration(
-                shape: BoxShape.circle,
-                gradient: RadialGradient(
-                  colors: [Color(0x66FF3C78), Color(0x005C6BFF)],
-                ),
-              ),
-            ),
-          ),
-          Positioned(
-            right: -120,
-            top: -180,
-            child: Container(
-              width: 460,
-              height: 420,
-              decoration: const BoxDecoration(
-                shape: BoxShape.circle,
-                gradient: RadialGradient(
-                  colors: [Color(0x405C6BFF), Color(0x00FFFFFF)],
-                ),
-              ),
-            ),
-          ),
-          Positioned(
-            left: -60,
-            bottom: -140,
-            child: Container(
-              width: 380,
-              height: 380,
-              decoration: const BoxDecoration(
-                shape: BoxShape.circle,
-                gradient: RadialGradient(
-                  colors: [Color(0x33FDB384), Color(0x00FFFFFF)],
-                ),
-              ),
-            ),
-          ),
-        ],
-      ),
+    final l10n = AppLocalizations.of(context)!;
+    final packagesAsync = ref.watch(appSubscriptionPackagesProvider);
+    final packages =
+        packagesAsync.asData?.value ?? const <AppSubscriptionPackage>[];
+    final selectedIndex = resolveRecommendedSelectionIndex(
+      packages,
+      _selected,
+      isRecommended: (package) => package.isRecommended,
     );
-  }
-}
+    final selectedPackage = packages.isEmpty ? null : packages[selectedIndex];
 
-class _PaywallHeader extends StatelessWidget {
-  final VoidCallback onClose;
-
-  const _PaywallHeader({required this.onClose});
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 8, 20, 8),
-      child: Row(
-        children: [
-          PressableScale(
-            onTap: onClose,
-            scale: 0.9,
-            child: Container(
-              width: 34,
-              height: 34,
-              decoration: BoxDecoration(
-                color: AppColors.white.withValues(alpha: 0.08),
-                shape: BoxShape.circle,
-              ),
-              alignment: Alignment.center,
-              child: const Icon(
-                CupertinoIcons.xmark,
-                size: 16,
-                color: AppColors.white,
-              ),
-            ),
-          ),
-          const Spacer(),
-          const Text(
-            'magmug',
-            style: TextStyle(
-              fontFamily: AppFont.family,
-              fontWeight: FontWeight.w800,
-              fontSize: 19,
-              color: AppColors.white,
-              letterSpacing: -0.5,
-            ),
-          ),
-          const SizedBox(width: 10),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(8),
-              gradient: const LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: [Color(0xFFFF3C78), Color(0xFFFF6B9D)],
-              ),
-            ),
-            child: const Text(
-              'PREMIUM',
-              style: TextStyle(
-                fontFamily: AppFont.family,
-                fontWeight: FontWeight.w800,
-                fontSize: 11,
-                color: AppColors.white,
-                letterSpacing: 0.5,
-              ),
-            ),
-          ),
-          const Spacer(),
-          const SizedBox(width: 34),
-        ],
-      ),
-    );
-  }
-}
-
-class _CarouselDots extends StatelessWidget {
-  final int selected;
-  final int count;
-
-  const _CarouselDots({required this.selected, required this.count});
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: List.generate(count, (i) {
-        final active = i == selected;
-        return AnimatedContainer(
-          duration: const Duration(milliseconds: 220),
-          width: active ? 22 : 6,
-          height: 6,
-          margin: const EdgeInsets.symmetric(horizontal: 2.5),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(3),
-            color: active
-                ? AppColors.white
-                : AppColors.white.withValues(alpha: 0.15),
-          ),
-        );
-      }),
-    );
-  }
-}
-
-class _PlanCard extends StatelessWidget {
-  final String title;
-  final String priceMajor;
-  final String priceMinor;
-  final String periodLabel;
-  final String? oldPrice;
-  final String? badge;
-  final String? saveLabel;
-  final bool featured;
-  final bool selected;
-  final VoidCallback onTap;
-
-  const _PlanCard({
-    required this.title,
-    required this.priceMajor,
-    required this.priceMinor,
-    required this.periodLabel,
-    required this.onTap,
-    required this.selected,
-    this.oldPrice,
-    this.badge,
-    this.saveLabel,
-    this.featured = false,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final bg = featured
-        ? const Color(0xFFFF3C78)
-        : AppColors.white.withValues(alpha: 0.04);
-    final border = featured
-        ? const Color(0x80FF3C78)
-        : AppColors.white.withValues(alpha: 0.08);
-
-    return PressableScale(
-      onTap: onTap,
-      scale: 0.97,
-      child: Stack(
-        clipBehavior: Clip.none,
-        children: [
-          Container(
-            padding: const EdgeInsets.fromLTRB(12, 16, 12, 14),
-            decoration: BoxDecoration(
-              color: bg,
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(
-                color: selected && !featured
-                    ? AppColors.white.withValues(alpha: 0.35)
-                    : border,
-                width: featured ? 2 : 1,
-              ),
-              boxShadow: featured
-                  ? const [
-                      BoxShadow(
-                        color: Color(0x1AFF3C78),
-                        blurRadius: 28,
-                        offset: Offset(0, 4),
-                      ),
-                    ]
-                  : null,
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  title,
-                  style: const TextStyle(
-                    fontFamily: AppFont.family,
-                    fontWeight: FontWeight.w800,
-                    fontSize: 15,
-                    color: AppColors.white,
-                  ),
-                ),
-                if (saveLabel != null) ...[
-                  const SizedBox(height: 8),
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 8,
-                      vertical: 3,
-                    ),
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(8),
-                      color: featured
-                          ? AppColors.white.withValues(alpha: 0.22)
-                          : const Color(0x1FFF9794),
-                    ),
-                    child: Text(
-                      saveLabel!,
-                      style: TextStyle(
-                        fontFamily: AppFont.family,
-                        fontWeight: FontWeight.w800,
-                        fontSize: 10.5,
-                        color: featured
-                            ? AppColors.white
-                            : const Color(0xFFFF9794),
-                      ),
-                    ),
-                  ),
-                ] else
-                  const SizedBox(height: 8),
-                const SizedBox(height: 14),
-                if (oldPrice != null) ...[
-                  Text(
-                    oldPrice!,
-                    style: TextStyle(
-                      fontFamily: AppFont.family,
-                      fontSize: 12,
-                      color: AppColors.white.withValues(alpha: 0.4),
-                      decoration: TextDecoration.lineThrough,
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                ],
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text(
-                      'TL',
-                      style: TextStyle(
-                        fontFamily: AppFont.family,
-                        fontWeight: FontWeight.w800,
-                        fontSize: 16,
-                        color: AppColors.white,
-                      ),
-                    ),
-                    Text(
-                      priceMajor,
-                      style: const TextStyle(
-                        fontFamily: AppFont.family,
-                        fontWeight: FontWeight.w800,
-                        fontSize: 24,
-                        color: AppColors.white,
-                        height: 1.0,
-                      ),
-                    ),
-                    Text(
-                      priceMinor,
-                      style: const TextStyle(
-                        fontFamily: AppFont.family,
-                        fontWeight: FontWeight.w700,
-                        fontSize: 15,
-                        color: AppColors.white,
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  periodLabel,
-                  style: TextStyle(
-                    fontFamily: AppFont.family,
-                    fontWeight: FontWeight.w600,
-                    fontSize: 11,
-                    color: AppColors.white.withValues(alpha: 0.3),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          if (badge != null)
-            Positioned(
-              top: -10,
-              left: 12,
-              right: 12,
-              child: Container(
-                height: 20,
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(10),
-                  gradient: featured
-                      ? const LinearGradient(
-                          begin: Alignment.topLeft,
-                          end: Alignment.bottomRight,
-                          colors: [Color(0xFFFF3C78), Color(0xFFFF6B9D)],
-                        )
-                      : const LinearGradient(
-                          begin: Alignment.topLeft,
-                          end: Alignment.bottomRight,
-                          colors: [Color(0xFFFF9794), Color(0xFFFF6B8A)],
-                        ),
-                ),
-                alignment: Alignment.center,
-                child: Text(
-                  badge!,
-                  style: const TextStyle(
-                    fontFamily: AppFont.family,
-                    fontWeight: FontWeight.w800,
-                    fontSize: 9,
-                    color: AppColors.white,
-                    letterSpacing: 0.3,
-                  ),
-                ),
-              ),
-            ),
-        ],
-      ),
-    );
-  }
-}
-
-class _PaywallCTA extends StatelessWidget {
-  final VoidCallback onTap;
-
-  const _PaywallCTA({required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    return PressableScale(
-      onTap: onTap,
-      child: Container(
-        height: 56,
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(54),
-          gradient: const LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [Color(0xFFFF3C78), Color(0xFFFF6B9D)],
-          ),
-          boxShadow: const [
-            BoxShadow(
-              color: Color(0x4DFF3C78),
-              blurRadius: 28,
-              offset: Offset(0, 6),
-            ),
-          ],
-        ),
-        alignment: Alignment.center,
-        child: const Text(
-          'Devam Et',
-          style: TextStyle(
-            fontFamily: AppFont.family,
-            fontWeight: FontWeight.w800,
-            fontSize: 16,
-            color: AppColors.white,
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _PaywallLegal extends StatelessWidget {
-  const _PaywallLegal();
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 24),
-      child: Text.rich(
-        TextSpan(
-          style: TextStyle(
-            fontFamily: AppFont.family,
-            fontSize: 11,
-            color: AppColors.white.withValues(alpha: 0.4),
-          ),
-          children: [
-            const TextSpan(text: 'Detayli bilgi icin '),
-            TextSpan(
-              text: 'Gizlilik Politikasi',
-              style: TextStyle(
-                color: AppColors.white.withValues(alpha: 0.6),
-                decoration: TextDecoration.underline,
-              ),
-            ),
-            const TextSpan(text: ' ve '),
-            TextSpan(
-              text: 'Kullanim Kosullari',
-              style: TextStyle(
-                color: AppColors.white.withValues(alpha: 0.6),
-                decoration: TextDecoration.underline,
-              ),
-            ),
-          ],
-        ),
-        textAlign: TextAlign.center,
-      ),
+    return ProfilePaywallScreenView(
+      onClose: () => Navigator.of(context).maybePop(),
+      heroBadge: l10n.paywallBadgePremium,
+      heroTitle: l10n.paywallHeroTitle,
+      heroSubtitle: l10n.paywallHeroSubtitle,
+      voiceFeatureLabel: l10n.paywallFeatureVoice,
+      videoFeatureLabel: l10n.paywallFeatureVideo,
+      boostFeatureLabel: l10n.paywallFeatureBoost,
+      plansTitle: l10n.paywallPlansTitle,
+      isLoading: packagesAsync.isLoading && packages.isEmpty,
+      hasError: packagesAsync.hasError && packages.isEmpty,
+      isEmpty: packages.isEmpty,
+      loadingErrorMessage: 'Premium planlari su anda yuklenemiyor.',
+      emptyMessage: 'Su anda aktif premium plani bulunmuyor.',
+      packages: packages,
+      selectedIndex: selectedIndex,
+      onSelectPackage: (index) => setState(() => _selected = index),
+      ctaLabel: _isPurchasing
+          ? 'Satin alma isleniyor...'
+          : selectedPackage == null
+          ? 'Plan bulunamadi'
+          : l10n.paywallContinueWith(selectedPackage.displayPrice),
+      onCtaTap: _isPurchasing || selectedPackage == null
+          ? null
+          : () => _purchaseSubscription(selectedPackage),
     );
   }
 }
 
 // ------ Jeton purchase sheet --------------------------------------------------
 
-class JetonPurchaseSheet extends StatefulWidget {
+class JetonPurchaseSheet extends ConsumerStatefulWidget {
   const JetonPurchaseSheet({super.key});
 
   @override
-  State<JetonPurchaseSheet> createState() => _JetonPurchaseSheetState();
+  ConsumerState<JetonPurchaseSheet> createState() => _JetonPurchaseSheetState();
 }
 
-class _JetonPurchaseSheetState extends State<JetonPurchaseSheet> {
+class _JetonPurchaseSheetState extends ConsumerState<JetonPurchaseSheet> {
   int _selected = 1;
+  final StorePurchaseService _purchaseService = StorePurchaseService();
+  bool _isPurchasing = false;
 
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      decoration: const BoxDecoration(
-        color: AppColors.white,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(32)),
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const SizedBox(height: 12),
-          const _SheetHandle(),
-          SizedBox(
-            height: 180,
-            child: Stack(
-              alignment: Alignment.center,
-              children: [
-                Positioned.fill(
-                  child: Container(
-                    decoration: const BoxDecoration(
-                      gradient: RadialGradient(
-                        center: Alignment.center,
-                        radius: 0.8,
-                        colors: [Color(0xFFFFD0DE), Color(0xFFFFFFFF)],
-                        stops: [0.0, 1.0],
-                      ),
-                    ),
-                  ),
-                ),
-                Positioned(
-                  top: 14,
-                  child: Image.asset(
-                    'assets/images/jeton_mascot.png',
-                    width: 140,
-                    height: 150,
-                    fit: BoxFit.contain,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const Text(
-            'Sohbete devam et',
-            style: TextStyle(
-              fontFamily: AppFont.family,
-              fontWeight: FontWeight.w800,
-              fontSize: 21,
-              color: AppColors.black,
-              letterSpacing: -0.5,
-            ),
-          ),
-          const SizedBox(height: 6),
-          const Text(
-            'Mesaj kredisi al ve konusmalarini surdur',
-            style: TextStyle(
-              fontFamily: AppFont.family,
-              fontSize: 13,
-              color: Color(0xFF666666),
-            ),
-          ),
-          const SizedBox(height: 22),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(
-                  child: _JetonPack(
-                    amount: '100',
-                    oldPrice: '149.99 TL',
-                    priceMajor: '89',
-                    priceMinor: '.99',
-                    discount: '-40%',
-                    accent: const Color(0xFFFF9794),
-                    selected: _selected == 0,
-                    onTap: () => setState(() => _selected = 0),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: _JetonPack(
-                    amount: '500',
-                    oldPrice: '699.99 TL',
-                    priceMajor: '349',
-                    priceMinor: '.99',
-                    discount: '-50%',
-                    accent: const Color(0xFF2B7FFF),
-                    featured: true,
-                    selected: _selected == 1,
-                    onTap: () => setState(() => _selected = 1),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: _JetonPack(
-                    amount: '1000',
-                    oldPrice: '1499.99 TL',
-                    priceMajor: '599',
-                    priceMinor: '.99',
-                    discount: '-60%',
-                    accent: const Color(0xFFFDB384),
-                    selected: _selected == 2,
-                    onTap: () => setState(() => _selected = 2),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 20),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 20),
-            child: GradientButton(
-              label: 'Satin Al',
-              onTap: () => Navigator.of(context).maybePop(),
-            ),
-          ),
-          const SizedBox(height: 12),
-          const Text(
-            'Istedigin zaman kullanabilirsin, suresi dolmaz',
-            style: TextStyle(
-              fontFamily: AppFont.family,
-              fontSize: 11,
-              color: Color(0xFFCCCCCC),
-            ),
-          ),
-          const SizedBox(height: 12),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: const [
-              Icon(
-                CupertinoIcons.shield_lefthalf_fill,
-                size: 12,
-                color: Color(0xFF999999),
-              ),
-              SizedBox(width: 4),
-              Text(
-                'Guvenli Odeme',
-                style: TextStyle(
-                  fontFamily: AppFont.family,
-                  fontSize: 10,
-                  color: Color(0xFF999999),
-                ),
-              ),
-              SizedBox(width: 20),
-              Icon(
-                CupertinoIcons.lock_fill,
-                size: 12,
-                color: Color(0xFF999999),
-              ),
-              SizedBox(width: 4),
-              Text(
-                '256-bit SSL',
-                style: TextStyle(
-                  fontFamily: AppFont.family,
-                  fontSize: 10,
-                  color: Color(0xFF999999),
-                ),
-              ),
-            ],
-          ),
-          SizedBox(height: MediaQuery.paddingOf(context).bottom + 16),
-        ],
-      ),
+  Future<void> _purchaseCredits(AppCreditPackage selectedPackage) async {
+    final authState = ref.read(appAuthProvider).asData?.value;
+    final token = authState?.token;
+    final l10n = AppLocalizations.of(context)!;
+
+    if (token == null || token.trim().isEmpty) {
+      showJetonPurchaseResultSheet(
+        context,
+        copy: jetonPurchaseAuthRequiredCopy(l10n),
+        selectedPackage: selectedPackage,
+        l10n: l10n,
+      );
+      return;
+    }
+
+    setState(() => _isPurchasing = true);
+    final result = await _purchaseService.purchase(
+      token: token,
+      productCode: selectedPackage.storeProductCode ?? '',
+      kind: StorePurchaseKind.creditPack,
+      amount: selectedPackage.price,
+      currency: selectedPackage.currency,
+    );
+    if (!mounted) {
+      return;
+    }
+
+    setState(() => _isPurchasing = false);
+
+    if (result.isSuccess) {
+      await ref.read(appAuthProvider.notifier).refreshCurrentUser();
+      if (!mounted) {
+        return;
+      }
+      Navigator.of(context, rootNavigator: true).pop();
+      showJetonPurchaseResultSheet(
+        context,
+        copy: jetonPurchaseSuccessCopy(l10n),
+        selectedPackage: selectedPackage,
+        l10n: l10n,
+      );
+      return;
+    }
+
+    if (result.status == StorePurchaseStatus.cancelled) {
+      return;
+    }
+
+    showJetonPurchaseResultSheet(
+      context,
+      copy: jetonPurchaseFailureCopy(l10n, message: result.message),
+      selectedPackage: selectedPackage,
+      l10n: l10n,
     );
   }
-}
-
-class _JetonPack extends StatelessWidget {
-  final String amount;
-  final String oldPrice;
-  final String priceMajor;
-  final String priceMinor;
-  final String discount;
-  final Color accent;
-  final bool featured;
-  final bool selected;
-  final VoidCallback onTap;
-
-  const _JetonPack({
-    required this.amount,
-    required this.oldPrice,
-    required this.priceMajor,
-    required this.priceMinor,
-    required this.discount,
-    required this.accent,
-    required this.onTap,
-    required this.selected,
-    this.featured = false,
-  });
 
   @override
   Widget build(BuildContext context) {
-    return PressableScale(
-      onTap: onTap,
-      scale: 0.97,
-      child: Stack(
-        clipBehavior: Clip.none,
-        children: [
-          AnimatedContainer(
-            duration: const Duration(milliseconds: 180),
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 14),
-            decoration: BoxDecoration(
-              color: featured ? const Color(0x1A2B7FFF) : AppColors.white,
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(
-                color: featured
-                    ? const Color(0xFF2B7FFF)
-                    : const Color(0xFFEFEFEF),
-                width: featured ? 2 : 1,
-              ),
-              boxShadow: featured
-                  ? const [
-                      BoxShadow(
-                        color: Color(0x1A5C6BFF),
-                        blurRadius: 24,
-                        offset: Offset(0, 4),
-                      ),
-                    ]
-                  : null,
-            ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 10,
-                    vertical: 2,
-                  ),
-                  decoration: BoxDecoration(
-                    color: accent.withValues(alpha: 0.12),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Text(
-                    discount,
-                    style: TextStyle(
-                      fontFamily: AppFont.family,
-                      fontWeight: FontWeight.w800,
-                      fontSize: 10,
-                      color: accent,
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 10),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Image.asset(
-                      'assets/images/icon_diamond.png',
-                      width: 18,
-                      height: 18,
-                    ),
-                    const SizedBox(width: 4),
-                    Text(
-                      amount,
-                      style: TextStyle(
-                        fontFamily: AppFont.family,
-                        fontWeight: FontWeight.w800,
-                        fontSize: featured ? 32 : 28,
-                        color: AppColors.black,
-                        height: 1.0,
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 4),
-                const Text(
-                  'tas',
-                  style: TextStyle(
-                    fontFamily: AppFont.family,
-                    fontWeight: FontWeight.w600,
-                    fontSize: 11,
-                    color: Color(0xFF999999),
-                  ),
-                ),
-                const SizedBox(height: 10),
-                Container(
-                  height: 1,
-                  color: featured
-                      ? const Color(0x1F5C6BFF)
-                      : const Color(0xFFEFEFEF),
-                ),
-                const SizedBox(height: 10),
-                Text(
-                  oldPrice,
-                  style: const TextStyle(
-                    fontFamily: AppFont.family,
-                    fontSize: 11,
-                    color: Color(0xFFCCCCCC),
-                    decoration: TextDecoration.lineThrough,
-                  ),
-                ),
-                const SizedBox(height: 6),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      priceMajor,
-                      style: TextStyle(
-                        fontFamily: AppFont.family,
-                        fontWeight: FontWeight.w800,
-                        fontSize: 17,
-                        color: featured
-                            ? const Color(0xFF2B7FFF)
-                            : AppColors.black,
-                      ),
-                    ),
-                    Padding(
-                      padding: const EdgeInsets.only(top: 4),
-                      child: Text(
-                        priceMinor,
-                        style: TextStyle(
-                          fontFamily: AppFont.family,
-                          fontWeight: FontWeight.w700,
-                          fontSize: 12,
-                          color: featured
-                              ? const Color(0xFF2B7FFF)
-                              : AppColors.black,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-          if (featured)
-            Positioned(
-              top: -10,
-              left: 8,
-              right: 8,
-              child: Container(
-                height: 20,
-                decoration: BoxDecoration(
-                  color: const Color(0xFF2B7FFF),
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                alignment: Alignment.center,
-                child: const Text(
-                  'EN POPULER',
-                  style: TextStyle(
-                    fontFamily: AppFont.family,
-                    fontWeight: FontWeight.w800,
-                    fontSize: 9,
-                    color: AppColors.white,
-                    letterSpacing: 0.3,
-                  ),
-                ),
-              ),
-            ),
-        ],
-      ),
+    final l10n = AppLocalizations.of(context)!;
+    final packagesAsync = ref.watch(appCreditPackagesProvider);
+    final packages = packagesAsync.asData?.value ?? const <AppCreditPackage>[];
+    final selectedIndex = resolveRecommendedSelectionIndex(
+      packages,
+      _selected,
+      isRecommended: (package) => package.isRecommended,
+    );
+    final selectedPackage = packages.isEmpty ? null : packages[selectedIndex];
+
+    return ProfileJetonPurchaseSheetView(
+      title: l10n.jetonOfferTitle,
+      subtitle: l10n.jetonOfferSubtitle,
+      packagesAsync: packagesAsync,
+      packages: packages,
+      selectedIndex: selectedIndex,
+      onSelectPackage: (index) => setState(() => _selected = index),
+      loadingErrorMessage: 'Kredi paketleri su anda yuklenemiyor.',
+      emptyMessage: 'Su anda satin alinabilir kredi paketi bulunmuyor.',
+      primaryActionLabel: _isPurchasing
+          ? 'Satin alma isleniyor...'
+          : selectedPackage == null
+          ? 'Paket bulunamadi'
+          : l10n.jetonBuyWith(selectedPackage.displayPrice),
+      onPrimaryAction: _isPurchasing || selectedPackage == null
+          ? null
+          : () => _purchaseCredits(selectedPackage),
+      infoText: l10n.jetonInstantCreditInfo,
     );
   }
 }

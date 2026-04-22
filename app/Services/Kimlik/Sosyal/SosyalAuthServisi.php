@@ -119,6 +119,7 @@ class SosyalAuthServisi
             'dogum_yili' => $veri['dogum_yili'],
             'ulke' => $veri['ulke'] ?? null,
             'il' => $veri['il'] ?? null,
+            'profil_resmi' => $this->sosyalAvatarUrl($oturum),
         ]);
 
         $this->authPuanServisi->kayitBonusuUygula($user);
@@ -187,6 +188,19 @@ class SosyalAuthServisi
         }
 
         $user->forceFill($guncellenecekAlanlar)->save();
+    }
+
+    private function sosyalAvatarUrl(array $oturum): ?string
+    {
+        $avatarUrl = $oturum['avatar_url'] ?? null;
+
+        if (!is_string($avatarUrl)) {
+            return null;
+        }
+
+        $avatarUrl = trim($avatarUrl);
+
+        return $avatarUrl !== '' ? $avatarUrl : null;
     }
 
     private function providerKolonu(string $provider): string

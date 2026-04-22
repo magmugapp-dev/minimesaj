@@ -8,7 +8,6 @@
         $aktifOrani = $toplamHesap > 0 ? round(($kullanici['aktif'] / $toplamHesap) * 100) : 0;
         $premiumOrani = $kullanici['toplam'] > 0 ? round(($kullanici['premium'] / $kullanici['toplam']) * 100) : 0;
         $eslesmeTamamlanmaOrani = $eslesme['toplam'] > 0 ? round(($eslesme['bitti'] / $eslesme['toplam']) * 100) : 0;
-        $begeniDonusumOrani = $begeni['toplam'] > 0 ? round(($begeni['karsilikli'] / $begeni['toplam']) * 100) : 0;
         $aiMesajOrani = $mesaj['toplam'] > 0 ? round(($mesaj['ai_uretilmis'] / $mesaj['toplam']) * 100) : 0;
         $instagramBaglantiOrani =
             $instagram['hesap_toplam'] > 0 ? round(($instagram['hesap_bagli'] / $instagram['hesap_toplam']) * 100) : 0;
@@ -365,15 +364,6 @@
                         </div>
                         <div class="board-progress__track">
                             <div class="board-progress__fill" style="width: {{ $premiumOrani }}%"></div>
-                        </div>
-                    </div>
-                    <div class="board-progress-card">
-                        <div class="board-progress__top">
-                            <span class="board-progress__label">Beğeni dönüşümü</span>
-                            <span class="board-progress__value">%{{ $begeniDonusumOrani }}</span>
-                        </div>
-                        <div class="board-progress__track">
-                            <div class="board-progress__fill" style="width: {{ $begeniDonusumOrani }}%"></div>
                         </div>
                     </div>
                     <div class="board-progress-card">

@@ -148,7 +148,7 @@ class InfluencerController extends Controller
         abort_unless($kullanici->hesap_tipi === 'ai', 404);
 
         $kullanici->load(['aiAyar', 'instagramHesaplari']);
-        $kullanici->loadCount(['eslesmeler', 'begeniler', 'gelenBegeniler']);
+        $kullanici->loadCount(['eslesmeler']);
 
         // Instagram istatistikleri
         $instagramIstatistikleri = [];

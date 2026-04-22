@@ -187,10 +187,6 @@
                     <p class="text-xs text-gray-500">Eşleşme</p>
                 </div>
                 <div class="rounded-lg bg-white p-4 shadow text-center">
-                    <p class="text-2xl font-bold text-gray-900">{{ $kullanici->gelen_begeniler_count }}</p>
-                    <p class="text-xs text-gray-500">Gelen Beğeni</p>
-                </div>
-                <div class="rounded-lg bg-white p-4 shadow text-center">
                     <p class="text-2xl font-bold text-gray-900">{{ $kullanici->instagram_hesaplari_count }}</p>
                     <p class="text-xs text-gray-500">Instagram</p>
                 </div>

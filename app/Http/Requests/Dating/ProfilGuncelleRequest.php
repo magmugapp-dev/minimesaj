@@ -26,6 +26,7 @@ class ProfilGuncelleRequest extends FormRequest
             'ses_acik_mi' => 'sometimes|boolean',
             'bildirimler_acik_mi' => 'sometimes|boolean',
             'titresim_acik_mi' => 'sometimes|boolean',
+            'dil' => 'sometimes|nullable|in:tr,en,de,fr',
         ];
     }
 }

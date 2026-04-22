@@ -22,8 +22,6 @@ tags:
     description: Kullanıcı profili görüntüleme ve güncelleme
   - name: Fotoğraf
     description: Profil fotoğrafı yönetimi
-  - name: Beğeni
-    description: Kullanıcı beğeni işlemleri
   - name: Eşleşme
     description: Eşleşme listeleme ve sonlandırma
   - name: Sohbet
@@ -293,24 +291,6 @@ components:
         created_at:
           type: string
           format: date-time
-
-    BegeniResource:
-      type: object
-      properties:
-        id:
-          type: integer
-        begenen:
-          $ref: '#/components/schemas/KullaniciOzetResource'
-        begenilen:
-          $ref: '#/components/schemas/KullaniciOzetResource'
-        eslesmeye_donustu_mu:
-          type: boolean
-        goruldu_mu:
-          type: boolean
-        created_at:
-          type: string
-          format: date-time
-
     FotografResource:
       type: object
       properties:
@@ -961,73 +941,7 @@ paths:
           $ref: '#/components/responses/Unauthorized'
 
   # ══════════════════════════════════════════════════════════════════
-  # BEĞENİ
-  # ══════════════════════════════════════════════════════════════════
-  /dating/begeni/{kullanici}:
-    post:
-      tags: [Beğeni]
-      summary: Kullanıcıyı beğen
-      description: >
-        Hedef kullanıcıyı beğenir. Karşılıklı beğeni varsa otomatik eşleşme oluşur.
-      parameters:
-        - name: kullanici
-          in: path
-          required: true
-          schema:
-            type: integer
-          description: Beğenilecek kullanıcı ID
-      responses:
-        '200':
-          description: Beğeni sonucu
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  durum:
-                    type: string
-                    enum: [begenildi, eslesme]
-                  eslesme_id:
-                    type: integer
-                    description: Eşleşme oluşmuşsa ID
-        '422':
-          description: Kendinizi beğenemezsiniz
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HataMesaji'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
 
-  /dating/begeniler:
-    get:
-      tags: [Beğeni]
-      summary: Gelen beğenileri listele
-      description: Henüz eşleşmeye dönüşmemiş, gelen beğenileri sayfalı döner.
-      parameters:
-        - name: page
-          in: query
-          schema:
-            type: integer
-            default: 1
-      responses:
-        '200':
-          description: Gelen beğeniler
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  data:
-                    type: array
-                    items:
-                      $ref: '#/components/schemas/BegeniResource'
-                  links:
-                    $ref: '#/components/schemas/SayfaLinkleri'
-                  meta:
-                    $ref: '#/components/schemas/SayfaMeta'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
 
   # ══════════════════════════════════════════════════════════════════
   # EŞLEŞME

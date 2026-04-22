@@ -1,5 +1,21 @@
-﻿import 'package:magmug/app_core.dart';
+import 'dart:async';
+import 'dart:io';
+
+import 'package:flutter/services.dart';
+import 'package:magmug/app_core.dart';
+import 'package:magmug/features/chat/chat_local_store.dart';
+import 'package:magmug/features/chat/chat_realtime.dart';
 import 'package:magmug/features/match/match_flow.dart';
+import 'package:magmug/features/profile/widgets/profile_overview_widgets.dart'
+    show openProfileMediaViewer;
+import 'package:shared_preferences/shared_preferences.dart';
+
+const Duration _conversationRefreshCooldown = Duration(seconds: 12);
+final Map<int, DateTime> _lastConversationRefreshAt = <int, DateTime>{};
+final Set<int> _conversationRefreshInFlight = <int>{};
+final Map<int, AppMatchCandidate> _chatPeerProfileCache =
+    <int, AppMatchCandidate>{};
+final Map<int, int> _chatThemeSelectionCache = <int, int>{};
 
 // =============================================================================
 
@@ -7,8 +23,18 @@ enum ChatBubbleSide { me, them }
 
 enum ChatMessageType { text, image, audio, typing }
 
+enum ReportTargetType { user, message }
+
+const ChatPeer _emptyChatPeer = ChatPeer(
+  name: 'Sohbet',
+  handle: '',
+  status: '',
+  online: false,
+);
+
 @immutable
 class ChatMessage {
+  final int? id;
   final ChatBubbleSide side;
   final ChatMessageType type;
   final String? text;
@@ -17,6 +43,7 @@ class ChatMessage {
   final String time;
 
   const ChatMessage({
+    this.id,
     required this.side,
     required this.type,
     required this.time,
@@ -26,7 +53,8 @@ class ChatMessage {
   });
 
   const ChatMessage.typing({this.side = ChatBubbleSide.them})
-    : type = ChatMessageType.typing,
+    : id = null,
+      type = ChatMessageType.typing,
       text = null,
       asset = null,
       duration = null,
@@ -38,88 +66,551 @@ class ChatPeer {
   final String name;
   final String handle;
   final String status;
-  final String avatarAsset;
+  final String? avatarAsset;
+  final String? avatarUrl;
   final bool online;
 
   const ChatPeer({
     required this.name,
     required this.handle,
     required this.status,
-    required this.avatarAsset,
+    this.avatarAsset,
+    this.avatarUrl,
     this.online = true,
+  });
+
+  factory ChatPeer.fromConversation(AppConversationPreview conversation) {
+    final username = conversation.peerUsername.trim();
+    final normalizedHandle = username.isEmpty
+        ? ''
+        : (username.startsWith('@') ? username : '@$username');
+
+    return ChatPeer(
+      name: conversation.peerName,
+      handle: normalizedHandle,
+      status: conversation.online ? 'Cevrimici' : 'Aktif degil',
+      avatarUrl: conversation.peerProfileImageUrl,
+      online: conversation.online,
+    );
+  }
+}
+
+ChatPeer _chatPeerFromCandidate(AppMatchCandidate candidate) {
+  final username = candidate.username.trim();
+  return ChatPeer(
+    name: candidate.displayName,
+    handle: username.isEmpty
+        ? ''
+        : (username.startsWith('@') ? username : '@$username'),
+    status: candidate.online ? 'Cevrimici' : 'Aktif degil',
+    avatarUrl: candidate.primaryImageUrl,
+    online: candidate.online,
+  );
+}
+
+final conversationMessagesProvider = FutureProvider.autoDispose
+    .family<List<AppConversationMessage>, int>((ref, conversationId) async {
+      final session = await ref.watch(appAuthProvider.future);
+      final token = session?.token;
+      if (token == null || token.trim().isEmpty) {
+        return const [];
+      }
+
+      final localStore = ChatLocalStore.instance;
+      final cachedMessages = await localStore.getConversationMessages(
+        conversationId,
+      );
+      if (cachedMessages.isNotEmpty) {
+        if (_shouldRefreshConversation(conversationId)) {
+          unawaited(
+            _refreshConversationMessagesFromApi(
+              ref,
+              token: token,
+              conversationId: conversationId,
+              previous: cachedMessages,
+            ),
+          );
+        }
+        return cachedMessages;
+      }
+
+      final api = AppAuthApi();
+      try {
+        final messages = await api.fetchConversationMessages(
+          token,
+          conversationId: conversationId,
+        );
+        await localStore.upsertConversationMessages(messages);
+        try {
+          await api.markConversationRead(token, conversationId: conversationId);
+          ref.read(conversationFeedRefreshProvider.notifier).state++;
+        } catch (_) {}
+        return messages;
+      } catch (_) {
+        if (cachedMessages.isNotEmpty) {
+          return cachedMessages;
+        }
+        rethrow;
+      } finally {
+        api.close();
+      }
+    });
+
+final chatPeerProfileProvider = FutureProvider.autoDispose
+    .family<AppMatchCandidate, int>((ref, userId) async {
+      ref.keepAlive();
+      final cached = _chatPeerProfileCache[userId];
+      if (cached != null) {
+        return cached;
+      }
+
+      final session = await ref.watch(appAuthProvider.future);
+      final token = session?.token;
+      if (token == null || token.trim().isEmpty) {
+        throw const ApiException(
+          'Bu profili gormek icin once giris yapmalisin.',
+        );
+      }
+
+      final api = AppAuthApi();
+      try {
+        final profile = await api.fetchDatingPeerProfile(token, userId: userId);
+        _chatPeerProfileCache[userId] = profile;
+        return profile;
+      } finally {
+        api.close();
+      }
+    });
+
+@immutable
+class _ChatThemePalette {
+  final String label;
+  final Color background;
+  final Color incomingBubble;
+  final Color incomingText;
+  final LinearGradient outgoingGradient;
+
+  const _ChatThemePalette({
+    required this.label,
+    required this.background,
+    required this.incomingBubble,
+    required this.incomingText,
+    required this.outgoingGradient,
   });
 }
 
-const ChatPeer _edaSoyral = ChatPeer(
-  name: 'Eda Soyral',
-  handle: '@eda.s',
-  status: 'Cevrimici',
-  avatarAsset: 'assets/images/portrait_eda.png',
-  online: true,
-);
-
-const List<ChatMessage> _mockChatMessages = [
-  ChatMessage(
-    side: ChatBubbleSide.them,
-    type: ChatMessageType.text,
-    text: 'Selam! Dunku gezi nasil gecti?',
-    time: '11:37',
+const List<_ChatThemePalette> _chatThemes = [
+  _ChatThemePalette(
+    label: 'Varsayilan',
+    background: AppColors.white,
+    incomingBubble: AppColors.grayField,
+    incomingText: AppColors.black,
+    outgoingGradient: LinearGradient(
+      begin: Alignment.topLeft,
+      end: Alignment.bottomRight,
+      colors: [Color(0xFF5C6BFF), Color(0xFF7B6FFF)],
+    ),
   ),
-  ChatMessage(
-    side: ChatBubbleSide.me,
-    type: ChatMessageType.text,
-    text: 'Cok guzeldi! Kesinlikle tekrar gitmek istiyorum',
-    time: '11:38',
+  _ChatThemePalette(
+    label: 'Gece',
+    background: Color(0xFF111118),
+    incomingBubble: Color(0xFF222230),
+    incomingText: AppColors.white,
+    outgoingGradient: LinearGradient(
+      begin: Alignment.topLeft,
+      end: Alignment.bottomRight,
+      colors: [Color(0xFF6EE7F9), Color(0xFF8B5CF6)],
+    ),
   ),
-  ChatMessage(
-    side: ChatBubbleSide.them,
-    type: ChatMessageType.text,
-    text: 'Ben de cok gitmek istiyorum! Fotograflar var mi?',
-    time: '11:39',
+  _ChatThemePalette(
+    label: 'Gunbatimi',
+    background: Color(0xFFFFF4ED),
+    incomingBubble: Color(0xFFFFE0D2),
+    incomingText: Color(0xFF4B2A22),
+    outgoingGradient: LinearGradient(
+      begin: Alignment.topLeft,
+      end: Alignment.bottomRight,
+      colors: [Color(0xFFFF7A59), Color(0xFFFFB86B)],
+    ),
   ),
-  ChatMessage(
-    side: ChatBubbleSide.me,
-    type: ChatMessageType.image,
-    asset: 'assets/images/chat_photo.png',
-    time: '11:40',
+  _ChatThemePalette(
+    label: 'Orman',
+    background: Color(0xFFF0F8F1),
+    incomingBubble: Color(0xFFDDEFE1),
+    incomingText: Color(0xFF173322),
+    outgoingGradient: LinearGradient(
+      begin: Alignment.topLeft,
+      end: Alignment.bottomRight,
+      colors: [Color(0xFF16A34A), Color(0xFF84CC16)],
+    ),
   ),
-  ChatMessage(
-    side: ChatBubbleSide.them,
-    type: ChatMessageType.text,
-    text: 'Gecen haftadan, harika yerlerdi!',
-    time: '11:41',
+  _ChatThemePalette(
+    label: 'Pamuk',
+    background: Color(0xFFFFF7FB),
+    incomingBubble: Color(0xFFFFE4F1),
+    incomingText: Color(0xFF4A1931),
+    outgoingGradient: LinearGradient(
+      begin: Alignment.topLeft,
+      end: Alignment.bottomRight,
+      colors: [Color(0xFFEC4899), Color(0xFFF9A8D4)],
+    ),
   ),
-  ChatMessage(
-    side: ChatBubbleSide.me,
-    type: ChatMessageType.text,
-    text: 'Vay be cok guzel! Bu hafta sonu gidelim mi?',
-    time: '11:42',
+  _ChatThemePalette(
+    label: 'Deniz',
+    background: Color(0xFFEFF9FF),
+    incomingBubble: Color(0xFFDDF1FF),
+    incomingText: Color(0xFF123044),
+    outgoingGradient: LinearGradient(
+      begin: Alignment.topLeft,
+      end: Alignment.bottomRight,
+      colors: [Color(0xFF0EA5E9), Color(0xFF22D3EE)],
+    ),
   ),
-  ChatMessage(
-    side: ChatBubbleSide.them,
-    type: ChatMessageType.audio,
-    duration: Duration(seconds: 23),
-    time: '11:43',
-  ),
-  ChatMessage(
-    side: ChatBubbleSide.me,
-    type: ChatMessageType.audio,
-    duration: Duration(seconds: 8),
-    time: '11:44',
-  ),
-  ChatMessage.typing(),
 ];
+
+_ChatThemePalette _chatThemeForPeer(int? peerId) {
+  if (peerId == null) {
+    return _chatThemes.first;
+  }
+  final selected = _chatThemeSelectionCache[peerId];
+  if (selected != null && selected >= 0 && selected < _chatThemes.length) {
+    return _chatThemes[selected];
+  }
+  return _chatThemes[_defaultChatThemeIndex(peerId)];
+}
+
+int _defaultChatThemeIndex(int peerId) => peerId.abs() % _chatThemes.length;
+
+Color _readableColorOn(Color background) {
+  return background.computeLuminance() > 0.55
+      ? AppColors.black
+      : AppColors.white;
+}
+
+Color _mutedReadableColorOn(Color background) {
+  return _readableColorOn(background).withValues(alpha: 0.64);
+}
+
+SystemUiOverlayStyle _systemOverlayForTheme(_ChatThemePalette theme) {
+  final chromeColor = theme.incomingBubble;
+  final isLightChrome = chromeColor.computeLuminance() > 0.55;
+
+  return SystemUiOverlayStyle(
+    statusBarColor: chromeColor,
+    systemNavigationBarColor: chromeColor,
+    statusBarIconBrightness: isLightChrome ? Brightness.dark : Brightness.light,
+    statusBarBrightness: isLightChrome ? Brightness.light : Brightness.dark,
+    systemNavigationBarIconBrightness: isLightChrome
+        ? Brightness.dark
+        : Brightness.light,
+  );
+}
+
+String _chatThemePreferenceKey(int peerId) => 'chat_theme_peer_$peerId';
+
+Future<int> _loadChatThemeIndex(int peerId) async {
+  final cached = _chatThemeSelectionCache[peerId];
+  if (cached != null && cached >= 0 && cached < _chatThemes.length) {
+    return cached;
+  }
+
+  final prefs = await SharedPreferences.getInstance();
+  final stored = prefs.getInt(_chatThemePreferenceKey(peerId));
+  final value = stored != null && stored >= 0 && stored < _chatThemes.length
+      ? stored
+      : _defaultChatThemeIndex(peerId);
+  _chatThemeSelectionCache[peerId] = value;
+  return value;
+}
+
+Future<void> _saveChatThemeIndex(int peerId, int index) async {
+  if (index < 0 || index >= _chatThemes.length) {
+    return;
+  }
+  _chatThemeSelectionCache[peerId] = index;
+  final prefs = await SharedPreferences.getInstance();
+  await prefs.setInt(_chatThemePreferenceKey(peerId), index);
+}
+
+List<AppProfilePhoto> _galleryMediaForProfile(
+  AppMatchCandidate? profile,
+  String? fallbackAvatarUrl,
+) {
+  final media = profile?.photos ?? const <AppProfilePhoto>[];
+  final visibleMedia = media
+      .where((item) => item.isActive && item.displayUrl.trim().isNotEmpty)
+      .toList();
+  if (visibleMedia.isNotEmpty) {
+    return visibleMedia;
+  }
+
+  final fallback = fallbackAvatarUrl?.trim();
+  if (fallback == null || fallback.isEmpty) {
+    return const <AppProfilePhoto>[];
+  }
+
+  return [
+    AppProfilePhoto(
+      id: 0,
+      url: fallback,
+      order: 0,
+      isPrimary: true,
+      isActive: true,
+      mediaType: 'fotograf',
+    ),
+  ];
+}
+
+bool _shouldRefreshConversation(int conversationId) {
+  if (_conversationRefreshInFlight.contains(conversationId)) {
+    return false;
+  }
+
+  final lastRefresh = _lastConversationRefreshAt[conversationId];
+  if (lastRefresh == null) {
+    return true;
+  }
+
+  return DateTime.now().difference(lastRefresh) >= _conversationRefreshCooldown;
+}
+
+Future<void> _refreshConversationMessagesFromApi(
+  Ref ref, {
+  required String token,
+  required int conversationId,
+  required List<AppConversationMessage> previous,
+}) async {
+  _conversationRefreshInFlight.add(conversationId);
+  final api = AppAuthApi();
+  try {
+    final messages = await api.fetchConversationMessages(
+      token,
+      conversationId: conversationId,
+    );
+    await ChatLocalStore.instance.upsertConversationMessages(messages);
+    _lastConversationRefreshAt[conversationId] = DateTime.now();
+    try {
+      await api.markConversationRead(token, conversationId: conversationId);
+      ref.read(conversationFeedRefreshProvider.notifier).state++;
+    } catch (_) {}
+    if (!_sameMessageList(previous, messages)) {
+      ref.invalidate(conversationMessagesProvider(conversationId));
+    }
+  } catch (_) {
+    // Keep cached messages visible when refresh fails.
+  } finally {
+    _conversationRefreshInFlight.remove(conversationId);
+    api.close();
+  }
+}
+
+bool _sameMessageList(
+  List<AppConversationMessage> left,
+  List<AppConversationMessage> right,
+) {
+  if (left.length != right.length) {
+    return false;
+  }
+
+  for (var index = 0; index < left.length; index++) {
+    final a = left[index];
+    final b = right[index];
+    if (a.id != b.id ||
+        a.senderId != b.senderId ||
+        a.senderName != b.senderName ||
+        a.type != b.type ||
+        a.text != b.text ||
+        a.fileDuration != b.fileDuration ||
+        a.isRead != b.isRead ||
+        a.isAiGenerated != b.isAiGenerated ||
+        !_sameMessageMoment(a.createdAt, b.createdAt)) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+bool _sameMessageMoment(DateTime? left, DateTime? right) {
+  if (left == null || right == null) {
+    return left == right;
+  }
+
+  return left.millisecondsSinceEpoch == right.millisecondsSinceEpoch;
+}
+
+String _initialsOfName(String fullName) {
+  final parts = fullName
+      .trim()
+      .split(RegExp(r'\s+'))
+      .where((part) => part.isNotEmpty)
+      .toList();
+  if (parts.isEmpty) {
+    return '?';
+  }
+  if (parts.length == 1) {
+    final value = parts.first;
+    return value.substring(0, value.length >= 2 ? 2 : 1).toUpperCase();
+  }
+  return (parts.first.substring(0, 1) + parts.last.substring(0, 1))
+      .toUpperCase();
+}
+
+Color _peerAvatarColor(String name) {
+  const palette = [
+    Color(0xFFA594F9),
+    Color(0xFFFFB4C6),
+    Color(0xFFFDB384),
+    Color(0xFFFF9794),
+    Color(0xFFAEDFF7),
+    Color(0xFFB6E0B8),
+    Color(0xFFFFE4A5),
+    Color(0xFFC4C9FF),
+    Color(0xFF9AA2B1),
+  ];
+
+  var hash = 0;
+  for (final rune in name.runes) {
+    hash = (hash * 31 + rune) & 0x7fffffff;
+  }
+  return palette[hash % palette.length];
+}
+
+class _ChatPeerAvatar extends StatelessWidget {
+  final ChatPeer peer;
+  final double size;
+  final bool showOnline;
+
+  const _ChatPeerAvatar({
+    required this.peer,
+    required this.size,
+    this.showOnline = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    Widget avatar;
+    final avatarUrl = peer.avatarUrl;
+    final avatarAsset = peer.avatarAsset;
+
+    if (avatarUrl != null && avatarUrl.isNotEmpty) {
+      avatar = ClipOval(
+        child: avatarUrl.startsWith('http')
+            ? Image.network(
+                avatarUrl,
+                width: size,
+                height: size,
+                fit: BoxFit.cover,
+                gaplessPlayback: true,
+              )
+            : Image.file(
+                File(avatarUrl),
+                width: size,
+                height: size,
+                fit: BoxFit.cover,
+                errorBuilder: (_, _, _) {
+                  final base = _peerAvatarColor(peer.name);
+                  return Container(
+                    width: size,
+                    height: size,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      gradient: LinearGradient(
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                        colors: [base.withValues(alpha: 0.65), base],
+                      ),
+                    ),
+                    alignment: Alignment.center,
+                    child: Text(
+                      _initialsOfName(peer.name),
+                      style: TextStyle(
+                        fontFamily: AppFont.family,
+                        fontWeight: FontWeight.w700,
+                        fontSize: size * 0.34,
+                        color: AppColors.white,
+                      ),
+                    ),
+                  );
+                },
+              ),
+      );
+    } else if (avatarAsset != null && avatarAsset.isNotEmpty) {
+      avatar = ClipOval(
+        child: Image.asset(
+          avatarAsset,
+          width: size,
+          height: size,
+          fit: BoxFit.cover,
+        ),
+      );
+    } else {
+      final base = _peerAvatarColor(peer.name);
+      avatar = Container(
+        width: size,
+        height: size,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [base.withValues(alpha: 0.65), base],
+          ),
+        ),
+        alignment: Alignment.center,
+        child: Text(
+          _initialsOfName(peer.name),
+          style: TextStyle(
+            fontFamily: AppFont.family,
+            fontWeight: FontWeight.w700,
+            fontSize: size * 0.36,
+            color: AppColors.white,
+          ),
+        ),
+      );
+    }
+
+    if (!showOnline || !peer.online) {
+      return SizedBox(width: size, height: size, child: avatar);
+    }
+
+    return SizedBox(
+      width: size,
+      height: size,
+      child: Stack(
+        children: [
+          avatar,
+          Positioned(
+            right: 0,
+            bottom: 0,
+            child: Container(
+              width: size * 0.3,
+              height: size * 0.3,
+              decoration: BoxDecoration(
+                color: const Color(0xFF2DD4A0),
+                shape: BoxShape.circle,
+                border: Border.all(color: AppColors.white, width: 2),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
 
 // ------ Chat header / app bar -------------------------------------------------
 
 class _ChatAppBar extends StatelessWidget {
   final ChatPeer peer;
+  final _ChatThemePalette theme;
   final VoidCallback? onAvatarTap;
   final VoidCallback? onGiftTap;
   final VoidCallback? onMoreTap;
 
   const _ChatAppBar({
     required this.peer,
+    required this.theme,
     this.onAvatarTap,
     this.onGiftTap,
     this.onMoreTap,
@@ -127,24 +618,34 @@ class _ChatAppBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final hasStatus = peer.status.trim().isNotEmpty;
+    final chromeColor = theme.incomingBubble;
+    final iconColor = _readableColorOn(chromeColor);
+    final subtleIconColor = _mutedReadableColorOn(chromeColor);
+
     return Container(
       height: 64,
       padding: const EdgeInsets.symmetric(horizontal: 12),
-      decoration: const BoxDecoration(
-        color: AppColors.white,
-        border: Border(bottom: BorderSide(color: Color(0xFFF0F0F0), width: 1)),
+      decoration: BoxDecoration(
+        color: chromeColor,
+        border: Border(
+          bottom: BorderSide(
+            color: iconColor.withValues(alpha: 0.08),
+            width: 1,
+          ),
+        ),
       ),
       child: Row(
         children: [
           PressableScale(
             onTap: () => Navigator.of(context).maybePop(),
             scale: 0.9,
-            child: const Padding(
-              padding: EdgeInsets.all(6),
+            child: Padding(
+              padding: const EdgeInsets.all(6),
               child: Icon(
                 CupertinoIcons.chevron_back,
                 size: 22,
-                color: AppColors.black,
+                color: iconColor,
               ),
             ),
           ),
@@ -152,36 +653,7 @@ class _ChatAppBar extends StatelessWidget {
           PressableScale(
             onTap: onAvatarTap ?? () {},
             scale: 0.95,
-            child: SizedBox(
-              width: 40,
-              height: 40,
-              child: Stack(
-                children: [
-                  ClipOval(
-                    child: Image.asset(
-                      peer.avatarAsset,
-                      width: 40,
-                      height: 40,
-                      fit: BoxFit.cover,
-                    ),
-                  ),
-                  if (peer.online)
-                    Positioned(
-                      right: 0,
-                      bottom: 0,
-                      child: Container(
-                        width: 12,
-                        height: 12,
-                        decoration: BoxDecoration(
-                          color: const Color(0xFF2DD4A0),
-                          shape: BoxShape.circle,
-                          border: Border.all(color: AppColors.white, width: 2),
-                        ),
-                      ),
-                    ),
-                ],
-              ),
-            ),
+            child: _ChatPeerAvatar(peer: peer, size: 40, showOnline: true),
           ),
           const SizedBox(width: 12),
           Expanded(
@@ -194,46 +666,52 @@ class _ChatAppBar extends StatelessWidget {
                 children: [
                   Text(
                     peer.name,
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontFamily: AppFont.family,
                       fontWeight: FontWeight.w800,
                       fontSize: 16,
-                      color: AppColors.black,
+                      color: iconColor,
                     ),
                   ),
-                  Text(
-                    peer.status,
-                    style: const TextStyle(
-                      fontFamily: AppFont.family,
-                      fontWeight: FontWeight.w600,
-                      fontSize: 11.5,
-                      color: Color(0xFF2DD4A0),
+                  if (hasStatus)
+                    Text(
+                      peer.status,
+                      style: TextStyle(
+                        fontFamily: AppFont.family,
+                        fontWeight: FontWeight.w600,
+                        fontSize: 11.5,
+                        color: peer.online
+                            ? const Color(0xFF2DD4A0)
+                            : subtleIconColor,
+                      ),
                     ),
-                  ),
                 ],
               ),
             ),
           ),
-          _GiftStarChip(onTap: onGiftTap ?? () {}),
-          const SizedBox(width: 8),
-          PressableScale(
-            onTap: onMoreTap ?? () {},
-            scale: 0.92,
-            child: Container(
-              width: 38,
-              height: 38,
-              decoration: BoxDecoration(
-                color: AppColors.grayField,
-                borderRadius: BorderRadius.circular(19),
-              ),
-              alignment: Alignment.center,
-              child: const Icon(
-                CupertinoIcons.ellipsis_vertical,
-                size: 18,
-                color: AppColors.black,
+          if (onGiftTap != null) ...[
+            _GiftStarChip(onTap: onGiftTap!),
+            const SizedBox(width: 8),
+          ],
+          if (onMoreTap != null)
+            PressableScale(
+              onTap: onMoreTap!,
+              scale: 0.92,
+              child: Container(
+                width: 38,
+                height: 38,
+                decoration: BoxDecoration(
+                  color: theme.background,
+                  borderRadius: BorderRadius.circular(19),
+                ),
+                alignment: Alignment.center,
+                child: Icon(
+                  CupertinoIcons.ellipsis_vertical,
+                  size: 18,
+                  color: _readableColorOn(theme.background),
+                ),
               ),
             ),
-          ),
         ],
       ),
     );
@@ -253,25 +731,16 @@ class _GiftStarChip extends StatelessWidget {
       child: Container(
         width: 38,
         height: 38,
-        decoration: const BoxDecoration(
-          shape: BoxShape.circle,
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [Color(0xFFA594F9), Color(0xFF7C6DF5)],
-          ),
-          boxShadow: [
-            BoxShadow(
-              color: Color(0x3C7C6DF5),
-              blurRadius: 10,
-              offset: Offset(0, 3),
-            ),
-          ],
+        decoration: BoxDecoration(
+          color: const Color(0xFFFFF7E8),
+          borderRadius: BorderRadius.circular(19),
+          border: Border.all(color: const Color(0xFFFFE7BA)),
         ),
         alignment: Alignment.center,
-        child: Transform.rotate(
-          angle: -0.35,
-          child: const Text('⭐', style: TextStyle(fontSize: 19, height: 1.0)),
+        child: const Icon(
+          CupertinoIcons.gift_fill,
+          size: 19,
+          color: Color(0xFFFF9F0A),
         ),
       ),
     );
@@ -282,9 +751,16 @@ class _GiftStarChip extends StatelessWidget {
 
 class _MessageBubble extends StatelessWidget {
   final ChatMessage message;
-  final String avatarAsset;
+  final ChatPeer peer;
+  final _ChatThemePalette theme;
+  final VoidCallback? onReport;
 
-  const _MessageBubble({required this.message, required this.avatarAsset});
+  const _MessageBubble({
+    required this.message,
+    required this.peer,
+    required this.theme,
+    this.onReport,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -302,76 +778,137 @@ class _MessageBubble extends StatelessWidget {
           duration: message.duration ?? const Duration(),
         );
       case ChatMessageType.text:
-        content = _TextBubble(isMe: isMe, text: message.text ?? '');
+        content = _TextBubble(
+          isMe: isMe,
+          text: message.text ?? '',
+          theme: theme,
+        );
     }
+
+    final bubble = Row(
+      crossAxisAlignment: CrossAxisAlignment.end,
+      mainAxisAlignment: isMe ? MainAxisAlignment.end : MainAxisAlignment.start,
+      children: [
+        if (!isMe) ...[
+          _ChatPeerAvatar(peer: peer, size: 30),
+          const SizedBox(width: 8),
+        ],
+        Flexible(
+          child: Column(
+            crossAxisAlignment: isMe
+                ? CrossAxisAlignment.end
+                : CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              content,
+              if (message.time.isNotEmpty) ...[
+                const SizedBox(height: 4),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 4),
+                  child: Text(
+                    message.time,
+                    style: const TextStyle(
+                      fontFamily: AppFont.family,
+                      fontSize: 10,
+                      color: Color(0xFFCCCCCC),
+                    ),
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ],
+    );
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 6, 16, 6),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.end,
-        mainAxisAlignment: isMe
-            ? MainAxisAlignment.end
-            : MainAxisAlignment.start,
-        children: [
-          if (!isMe) ...[
-            ClipOval(
-              child: Image.asset(
-                avatarAsset,
-                width: 30,
-                height: 30,
-                fit: BoxFit.cover,
-              ),
+      child: onReport == null
+          ? bubble
+          : GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onLongPress: onReport,
+              child: bubble,
             ),
-            const SizedBox(width: 8),
-          ],
-          Flexible(
-            child: Column(
-              crossAxisAlignment: isMe
-                  ? CrossAxisAlignment.end
-                  : CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                content,
-                if (message.time.isNotEmpty) ...[
-                  const SizedBox(height: 4),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 4),
-                    child: Text(
-                      message.time,
-                      style: const TextStyle(
-                        fontFamily: AppFont.family,
-                        fontSize: 10,
-                        color: Color(0xFFCCCCCC),
-                      ),
-                    ),
-                  ),
-                ],
-              ],
-            ),
-          ),
-        ],
-      ),
     );
   }
+}
+
+void _openMessageReportSheet(
+  BuildContext context, {
+  required int messageId,
+  required String peerName,
+}) {
+  showCupertinoModalPopup<void>(
+    context: context,
+    builder: (_) => ReportSheet(
+      targetType: ReportTargetType.message,
+      targetId: messageId,
+      targetDisplayName: peerName,
+    ),
+  );
+}
+
+void _showMessageActions(
+  BuildContext context, {
+  required AppConversationMessage message,
+  required ChatPeer peer,
+}) {
+  showCupertinoModalPopup<void>(
+    context: context,
+    builder: (sheetContext) => CupertinoActionSheet(
+      title: Text(
+        peer.name,
+        style: const TextStyle(fontFamily: AppFont.family),
+      ),
+      message: const Text(
+        'Bu mesajla ilgili islem secin.',
+        style: TextStyle(fontFamily: AppFont.family),
+      ),
+      actions: [
+        CupertinoActionSheetAction(
+          isDestructiveAction: true,
+          onPressed: () {
+            Navigator.of(sheetContext).pop();
+            _openMessageReportSheet(
+              context,
+              messageId: message.id,
+              peerName: peer.name,
+            );
+          },
+          child: const Text(
+            'Bu Mesaji Sikayet Et',
+            style: TextStyle(fontFamily: AppFont.family),
+          ),
+        ),
+      ],
+      cancelButton: CupertinoActionSheetAction(
+        onPressed: () => Navigator.of(sheetContext).pop(),
+        child: const Text(
+          'Vazgec',
+          style: TextStyle(fontFamily: AppFont.family),
+        ),
+      ),
+    ),
+  );
 }
 
 class _TextBubble extends StatelessWidget {
   final bool isMe;
   final String text;
+  final _ChatThemePalette theme;
 
-  const _TextBubble({required this.isMe, required this.text});
+  const _TextBubble({
+    required this.isMe,
+    required this.text,
+    required this.theme,
+  });
 
   @override
   Widget build(BuildContext context) {
     final bg = isMe
-        ? const BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [Color(0xFF5C6BFF), Color(0xFF7B6FFF)],
-            ),
-          )
-        : const BoxDecoration(color: AppColors.grayField);
+        ? BoxDecoration(gradient: theme.outgoingGradient)
+        : BoxDecoration(color: theme.incomingBubble);
     final radius = isMe
         ? const BorderRadius.only(
             topLeft: Radius.circular(20),
@@ -385,20 +922,20 @@ class _TextBubble extends StatelessWidget {
             bottomLeft: Radius.circular(6),
             bottomRight: Radius.circular(20),
           );
+    final textColor = isMe ? AppColors.white : theme.incomingText;
+
     return Container(
-      constraints: BoxConstraints(
-        maxWidth: MediaQuery.sizeOf(context).width * 0.68,
-      ),
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      constraints: const BoxConstraints(maxWidth: 258),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
       decoration: bg.copyWith(borderRadius: radius),
       child: Text(
         text,
         style: TextStyle(
           fontFamily: AppFont.family,
           fontWeight: FontWeight.w500,
-          fontSize: 15,
-          height: 1.35,
-          color: isMe ? AppColors.white : AppColors.black,
+          fontSize: 14,
+          height: 1.45,
+          color: textColor,
         ),
       ),
     );
@@ -412,13 +949,32 @@ class _ImageBubble extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final imageWidget = asset.startsWith('http')
+        ? Image.network(
+            asset,
+            fit: BoxFit.cover,
+            gaplessPlayback: true,
+            errorBuilder: (_, _, _) => _imagePlaceholder(),
+          )
+        : asset.startsWith('assets/')
+        ? Image.asset(asset, fit: BoxFit.cover)
+        : Image.file(
+            File(asset),
+            fit: BoxFit.cover,
+            errorBuilder: (_, _, _) => _imagePlaceholder(),
+          );
+
     return ClipRRect(
       borderRadius: BorderRadius.circular(20),
-      child: Image.asset(
-        asset,
-        width: MediaQuery.sizeOf(context).width * 0.62,
-        fit: BoxFit.cover,
-      ),
+      child: SizedBox(width: 198, height: 220, child: imageWidget),
+    );
+  }
+
+  Widget _imagePlaceholder() {
+    return Container(
+      color: AppColors.grayField,
+      alignment: Alignment.center,
+      child: const Icon(CupertinoIcons.photo, size: 28, color: AppColors.gray),
     );
   }
 }
@@ -626,91 +1182,152 @@ class _TypingBubbleState extends State<_TypingBubble>
   }
 }
 
-class _DaySeparator extends StatelessWidget {
-  final String label;
-
-  const _DaySeparator({required this.label});
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8),
-      child: Center(
-        child: Text(
-          label,
-          style: const TextStyle(
-            fontFamily: AppFont.family,
-            fontWeight: FontWeight.w600,
-            fontSize: 11,
-            color: Color(0xFFCCCCCC),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-// ------ Input bar -------------------------------------------------------------
-
 enum ChatInputVariant { empty, full }
 
 class _ChatInputBar extends StatelessWidget {
   final ChatInputVariant variant;
+  final _ChatThemePalette theme;
+  final TextEditingController? controller;
+  final VoidCallback? onSend;
+  final VoidCallback? onLeadingTap;
+  final VoidCallback? onMicTap;
+  final bool canSend;
+  final bool isSending;
+  final String? errorText;
 
-  const _ChatInputBar({this.variant = ChatInputVariant.empty});
+  const _ChatInputBar({
+    this.variant = ChatInputVariant.empty,
+    required this.theme,
+    this.controller,
+    this.onSend,
+    this.onLeadingTap,
+    this.onMicTap,
+    this.canSend = false,
+    this.isSending = false,
+    this.errorText,
+  });
 
   @override
   Widget build(BuildContext context) {
     final isEmpty = variant == ChatInputVariant.empty;
+    final hasComposer = controller != null;
+    final canUseSend = hasComposer && canSend;
+    final barColor = theme.incomingBubble;
+    final fieldColor = theme.background;
+    final barIconColor = _readableColorOn(barColor);
+    final fieldTextColor = _readableColorOn(fieldColor);
+    final placeholderColor = _mutedReadableColorOn(fieldColor);
+    final sendColor = canUseSend || onMicTap != null
+        ? theme.outgoingGradient.colors.first
+        : fieldColor;
+    final sendIconColor = _readableColorOn(sendColor);
+
     return Container(
       padding: const EdgeInsets.fromLTRB(14, 12, 14, 16),
-      decoration: const BoxDecoration(color: AppColors.white),
-      child: Row(
+      decoration: BoxDecoration(color: barColor),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          _circleButton(
-            icon: isEmpty ? CupertinoIcons.camera : CupertinoIcons.photo,
-            bg: AppColors.grayField,
-            iconColor: AppColors.black,
-          ),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Container(
-              height: 44,
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              decoration: BoxDecoration(
-                color: AppColors.grayField,
-                borderRadius: BorderRadius.circular(24),
-              ),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      isEmpty ? 'Message...' : 'Mesaj yaz...',
-                      style: const TextStyle(
-                        fontFamily: AppFont.family,
-                        fontWeight: FontWeight.w500,
-                        fontSize: 14.5,
-                        color: Color(0xFF999999),
-                      ),
-                    ),
+          if (errorText != null && errorText!.trim().isNotEmpty) ...[
+            Padding(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  errorText!,
+                  style: const TextStyle(
+                    fontFamily: AppFont.family,
+                    fontSize: 12,
+                    color: Color(0xFFEF4444),
                   ),
-                  if (isEmpty) ...[
-                    const SizedBox(width: 8),
-                    const Icon(
-                      CupertinoIcons.paperclip,
-                      size: 18,
-                      color: Color(0xFF999999),
-                    ),
-                  ],
-                ],
+                ),
               ),
             ),
-          ),
-          const SizedBox(width: 8),
-          _circleButton(
-            icon: CupertinoIcons.mic_fill,
-            bg: const Color(0xFF1A1A1A),
-            iconColor: AppColors.white,
+          ],
+          Row(
+            children: [
+              _circleButton(
+                icon: isEmpty ? CupertinoIcons.camera : CupertinoIcons.photo,
+                bg: fieldColor,
+                iconColor: fieldTextColor,
+                onTap: onLeadingTap,
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: hasComposer
+                    ? CupertinoTextField(
+                        controller: controller,
+                        placeholder: 'Mesaj yaz...',
+                        textInputAction: TextInputAction.send,
+                        onSubmitted: (_) => onSend?.call(),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 12,
+                        ),
+                        decoration: BoxDecoration(
+                          color: fieldColor,
+                          borderRadius: BorderRadius.circular(24),
+                        ),
+                        style: TextStyle(
+                          fontFamily: AppFont.family,
+                          fontWeight: FontWeight.w500,
+                          fontSize: 14.5,
+                          color: fieldTextColor,
+                        ),
+                        placeholderStyle: TextStyle(
+                          fontFamily: AppFont.family,
+                          fontWeight: FontWeight.w500,
+                          fontSize: 14.5,
+                          color: placeholderColor,
+                        ),
+                      )
+                    : Container(
+                        height: 44,
+                        padding: const EdgeInsets.symmetric(horizontal: 16),
+                        decoration: BoxDecoration(
+                          color: fieldColor,
+                          borderRadius: BorderRadius.circular(24),
+                        ),
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                isEmpty ? 'Message...' : 'Mesaj yaz...',
+                                style: TextStyle(
+                                  fontFamily: AppFont.family,
+                                  fontWeight: FontWeight.w500,
+                                  fontSize: 14.5,
+                                  color: placeholderColor,
+                                ),
+                              ),
+                            ),
+                            if (isEmpty) ...[
+                              const SizedBox(width: 8),
+                              Icon(
+                                CupertinoIcons.paperclip,
+                                size: 18,
+                                color: placeholderColor,
+                              ),
+                            ],
+                          ],
+                        ),
+                      ),
+              ),
+              const SizedBox(width: 8),
+              _circleButton(
+                icon: canUseSend
+                    ? CupertinoIcons.arrow_up
+                    : CupertinoIcons.mic_fill,
+                bg: sendColor,
+                iconColor: canUseSend || onMicTap != null
+                    ? sendIconColor
+                    : barIconColor,
+                onTap: canUseSend && !isSending ? onSend : onMicTap,
+                child: canUseSend && isSending
+                    ? const CupertinoActivityIndicator(radius: 9)
+                    : null,
+              ),
+            ],
           ),
         ],
       ),
@@ -721,16 +1338,22 @@ class _ChatInputBar extends StatelessWidget {
     required IconData icon,
     required Color bg,
     required Color iconColor,
+    VoidCallback? onTap,
+    Widget? child,
   }) {
-    return Container(
-      width: 44,
-      height: 44,
-      decoration: BoxDecoration(
-        color: bg,
-        borderRadius: BorderRadius.circular(22),
+    return PressableScale(
+      onTap: onTap,
+      scale: onTap == null ? 1 : 0.92,
+      child: Container(
+        width: 44,
+        height: 44,
+        decoration: BoxDecoration(
+          color: bg,
+          borderRadius: BorderRadius.circular(22),
+        ),
+        alignment: Alignment.center,
+        child: child ?? Icon(icon, size: 19, color: iconColor),
       ),
-      alignment: Alignment.center,
-      child: Icon(icon, size: 19, color: iconColor),
     );
   }
 }
@@ -739,25 +1362,299 @@ class _ChatInputBar extends StatelessWidget {
 
 enum ChatScreenMode { empty, messages }
 
-class ChatScreen extends StatelessWidget {
+class ChatScreen extends ConsumerStatefulWidget {
   final ChatScreenMode mode;
+  final AppConversationPreview? conversation;
 
-  const ChatScreen({super.key, this.mode = ChatScreenMode.messages});
+  const ChatScreen({
+    super.key,
+    this.mode = ChatScreenMode.messages,
+    this.conversation,
+  });
+
+  @override
+  ConsumerState<ChatScreen> createState() => _ChatScreenState();
+}
+
+class _ChatScreenState extends ConsumerState<ChatScreen> {
+  late final TextEditingController _messageController;
+  ChatRealtimeSubscription? _realtimeSubscription;
+  bool _isSending = false;
+  bool _isMuted = false;
+  int? _themeIndex;
+  String? _inputError;
+  int? _realtimeConversationId;
+  String? _realtimeToken;
+
+  @override
+  void initState() {
+    super.initState();
+    _messageController = TextEditingController()
+      ..addListener(_handleInputChange);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) {
+        return;
+      }
+      unawaited(_bindRealtimeSubscription());
+      unawaited(_loadThemeSelection());
+    });
+  }
+
+  @override
+  void didUpdateWidget(covariant ChatScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.conversation?.id != widget.conversation?.id) {
+      _themeIndex = null;
+      unawaited(_bindRealtimeSubscription(force: true));
+      unawaited(_loadThemeSelection());
+    }
+  }
+
+  @override
+  void dispose() {
+    final realtimeSubscription = _realtimeSubscription;
+    _realtimeSubscription = null;
+    if (realtimeSubscription != null) {
+      unawaited(realtimeSubscription.dispose());
+    }
+    _messageController
+      ..removeListener(_handleInputChange)
+      ..dispose();
+    super.dispose();
+  }
+
+  void _handleInputChange() {
+    if (mounted) {
+      setState(() {
+        if (_inputError != null && _messageController.text.trim().isNotEmpty) {
+          _inputError = null;
+        }
+      });
+    }
+  }
+
+  ChatPeer get _peer {
+    final conversation = widget.conversation;
+    if (conversation != null) {
+      return ChatPeer.fromConversation(conversation);
+    }
+    return _emptyChatPeer;
+  }
+
+  Future<void> _loadThemeSelection() async {
+    final peerId = widget.conversation?.peerId;
+    if (peerId == null) {
+      return;
+    }
+    final index = await _loadChatThemeIndex(peerId);
+    if (!mounted || widget.conversation?.peerId != peerId) {
+      return;
+    }
+    setState(() => _themeIndex = index);
+  }
+
+  Future<void> _selectTheme(int index) async {
+    final peerId = widget.conversation?.peerId;
+    if (peerId == null || index < 0 || index >= _chatThemes.length) {
+      return;
+    }
+    setState(() => _themeIndex = index);
+    await _saveChatThemeIndex(peerId, index);
+  }
+
+  Future<void> _bindRealtimeSubscription({bool force = false}) async {
+    if (!mounted) {
+      return;
+    }
+
+    final conversation = widget.conversation;
+    final authState = ref.read(appAuthProvider).asData?.value;
+    final token = authState?.token;
+
+    if (conversation == null || token == null || token.trim().isEmpty) {
+      await _disposeRealtimeSubscription();
+      return;
+    }
+
+    if (!force &&
+        _realtimeSubscription != null &&
+        _realtimeConversationId == conversation.id &&
+        _realtimeToken == token) {
+      return;
+    }
+
+    await _disposeRealtimeSubscription();
+
+    try {
+      final subscription = await ChatRealtimeService.instance
+          .subscribeToConversation(
+            token: token,
+            conversationId: conversation.id,
+            onEvent: _handleRealtimeEvent,
+          );
+
+      if (!mounted) {
+        await subscription?.dispose();
+        return;
+      }
+
+      _realtimeSubscription = subscription;
+      _realtimeConversationId = conversation.id;
+      _realtimeToken = token;
+    } catch (error) {
+      debugPrint('Chat realtime subscribe error: $error');
+    }
+  }
+
+  Future<void> _disposeRealtimeSubscription() async {
+    final realtimeSubscription = _realtimeSubscription;
+    _realtimeSubscription = null;
+    _realtimeConversationId = null;
+    _realtimeToken = null;
+    await realtimeSubscription?.dispose();
+  }
+
+  void _handleRealtimeEvent(ChatRealtimeEvent event) {
+    if (!mounted) {
+      return;
+    }
+
+    ref.invalidate(conversationMessagesProvider(event.conversationId));
+    ref.read(conversationFeedRefreshProvider.notifier).state++;
+  }
+
+  Future<void> _sendMessage() async {
+    final conversation = widget.conversation;
+    final authState = ref.read(appAuthProvider).asData?.value;
+    final text = _messageController.text.trim();
+
+    if (conversation == null ||
+        authState == null ||
+        text.isEmpty ||
+        _isSending) {
+      return;
+    }
+
+    setState(() {
+      _isSending = true;
+      _inputError = null;
+    });
+
+    final api = AppAuthApi();
+    try {
+      final sentMessage = await api.sendConversationMessage(
+        authState.token,
+        conversationId: conversation.id,
+        text: text,
+      );
+      await ChatLocalStore.instance.upsertConversationMessage(sentMessage);
+      _messageController.clear();
+      ref.invalidate(conversationMessagesProvider(conversation.id));
+      ref.read(conversationFeedRefreshProvider.notifier).state++;
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _inputError = AppAuthErrorFormatter.messageFrom(error);
+      });
+    } finally {
+      api.close();
+      if (mounted) {
+        setState(() {
+          _isSending = false;
+        });
+      }
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
+    final hasConversation = widget.conversation != null;
+    final theme = _themeIndex == null
+        ? _chatThemeForPeer(widget.conversation?.peerId)
+        : _chatThemes[_themeIndex!];
+
+    ref.listen<AsyncValue<AppAuthState?>>(appAuthProvider, (previous, next) {
+      if (!mounted) {
+        return;
+      }
+
+      final previousToken = previous?.asData?.value?.token;
+      final nextToken = next.asData?.value?.token;
+      if (previousToken != nextToken) {
+        unawaited(_bindRealtimeSubscription(force: true));
+      }
+    });
+
     void openProfile() {
-      Navigator.of(context).push(cupertinoRoute(const ChatProfileScreen()));
+      if (!hasConversation) {
+        return;
+      }
+      Navigator.of(context).push(
+        cupertinoRoute(
+          ChatProfileScreen(
+            peer: _peer,
+            conversation: widget.conversation,
+            selectedThemeIndex: _themeIndex,
+            onThemeSelected: _selectTheme,
+          ),
+        ),
+      );
     }
 
     void openGift() {
+      if (!hasConversation) {
+        return;
+      }
       showCupertinoModalPopup<void>(
         context: context,
-        builder: (_) => const GiftSheet(),
+        builder: (_) => GiftSheet(
+          targetUserId: widget.conversation!.peerId,
+          peerName: _peer.name,
+        ),
+      );
+    }
+
+    void openMute() {
+      if (!hasConversation) {
+        return;
+      }
+      showCupertinoModalPopup<void>(
+        context: context,
+        builder: (_) => MuteConversationSheet(
+          targetUserId: widget.conversation!.peerId,
+          peerName: _peer.name,
+          initiallyMuted: _isMuted,
+          onChanged: (muted) => setState(() => _isMuted = muted),
+        ),
+      );
+    }
+
+    void openAttachmentMenu() {
+      if (!hasConversation) {
+        return;
+      }
+      showCupertinoModalPopup<void>(
+        context: context,
+        builder: (_) => MediaAttachmentSheet(peerName: _peer.name),
+      );
+    }
+
+    void openRecorder() {
+      if (!hasConversation) {
+        return;
+      }
+      showCupertinoModalPopup<void>(
+        context: context,
+        builder: (_) => VoiceRecorderSheet(peerName: _peer.name),
       );
     }
 
     void openMore() {
+      if (!hasConversation) {
+        return;
+      }
       showCupertinoModalPopup<void>(
         context: context,
         builder: (ctx) => CupertinoActionSheet(
@@ -765,9 +1662,22 @@ class ChatScreen extends StatelessWidget {
             CupertinoActionSheetAction(
               onPressed: () {
                 Navigator.of(ctx).pop();
+                openMute();
+              },
+              child: Text(
+                _isMuted ? 'Sessizden Cikar' : 'Sessize Al',
+                style: const TextStyle(fontFamily: AppFont.family),
+              ),
+            ),
+            CupertinoActionSheetAction(
+              onPressed: () {
+                Navigator.of(ctx).pop();
                 showCupertinoModalPopup<void>(
                   context: context,
-                  builder: (_) => const ReportSheet(),
+                  builder: (_) => ReportSheet(
+                    targetId: widget.conversation?.peerId,
+                    targetDisplayName: _peer.name,
+                  ),
                 );
               },
               child: const Text(
@@ -784,7 +1694,10 @@ class ChatScreen extends StatelessWidget {
                 Navigator.of(ctx).pop();
                 showCupertinoModalPopup<void>(
                   context: context,
-                  builder: (_) => const BlockConfirmSheet(),
+                  builder: (_) => BlockConfirmSheet(
+                    targetUserId: widget.conversation?.peerId,
+                    targetDisplayName: _peer.name,
+                  ),
                 );
               },
               child: const Text(
@@ -804,30 +1717,55 @@ class ChatScreen extends StatelessWidget {
       );
     }
 
-    return CupertinoPageScaffold(
-      backgroundColor: AppColors.white,
-      child: SafeArea(
-        bottom: false,
-        child: Column(
-          children: [
-            _ChatAppBar(
-              peer: _edaSoyral,
-              onAvatarTap: openProfile,
-              onGiftTap: openGift,
-              onMoreTap: openMore,
-            ),
-            Expanded(
-              child: mode == ChatScreenMode.empty
-                  ? const _ChatEmptyBody()
-                  : const _ChatMessagesBody(),
-            ),
-            _ChatInputBar(
-              variant: mode == ChatScreenMode.empty
-                  ? ChatInputVariant.empty
-                  : ChatInputVariant.full,
-            ),
-            SizedBox(height: MediaQuery.paddingOf(context).bottom),
-          ],
+    return AnnotatedRegion<SystemUiOverlayStyle>(
+      value: _systemOverlayForTheme(theme),
+      child: CupertinoPageScaffold(
+        backgroundColor: theme.incomingBubble,
+        child: SafeArea(
+          bottom: false,
+          child: Column(
+            children: [
+              _ChatAppBar(
+                peer: _peer,
+                theme: theme,
+                onAvatarTap: hasConversation ? openProfile : null,
+                onGiftTap: hasConversation ? openGift : null,
+                onMoreTap: hasConversation ? openMore : null,
+              ),
+              Expanded(
+                child: ColoredBox(
+                  color: theme.background,
+                  child: widget.mode == ChatScreenMode.empty
+                      ? const _ChatEmptyBody()
+                      : _ChatMessagesBody(
+                          peer: _peer,
+                          conversation: widget.conversation,
+                          theme: theme,
+                        ),
+                ),
+              ),
+              _ChatInputBar(
+                variant: widget.mode == ChatScreenMode.empty
+                    ? ChatInputVariant.empty
+                    : ChatInputVariant.full,
+                theme: theme,
+                controller: widget.conversation == null
+                    ? null
+                    : _messageController,
+                onSend: _sendMessage,
+                onLeadingTap: openAttachmentMenu,
+                onMicTap: openRecorder,
+                canSend:
+                    _messageController.text.trim().isNotEmpty && !_isSending,
+                isSending: _isSending,
+                errorText: _inputError,
+              ),
+              ColoredBox(
+                color: theme.incomingBubble,
+                child: SizedBox(height: MediaQuery.paddingOf(context).bottom),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -839,196 +1777,381 @@ class _ChatEmptyBody extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: [
-        const Spacer(),
-        Image.asset(
-          'assets/images/hello_mascot.png',
-          width: 220,
-          height: 260,
-          fit: BoxFit.contain,
-        ),
-        const SizedBox(height: 8),
-        const Text(
-          'Bir Selam Ver!',
-          style: TextStyle(
-            fontFamily: AppFont.family,
-            fontWeight: FontWeight.w800,
-            fontSize: 17,
-            color: AppColors.black,
-          ),
-        ),
-        const SizedBox(height: 4),
-        const Text(
-          'Hadi bu firsati kacirma...',
-          style: TextStyle(
-            fontFamily: AppFont.family,
-            fontSize: 13.5,
-            height: 1.5,
-            color: Color(0xFF666666),
-          ),
-        ),
-        const Spacer(flex: 2),
-      ],
-    );
-  }
-}
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final compact = constraints.maxHeight < 620;
 
-class _ChatMessagesBody extends StatelessWidget {
-  const _ChatMessagesBody();
-
-  @override
-  Widget build(BuildContext context) {
-    return ListView.builder(
-      physics: const BouncingScrollPhysics(),
-      padding: const EdgeInsets.only(top: 16, bottom: 16),
-      itemCount: _mockChatMessages.length + 1,
-      itemBuilder: (context, i) {
-        if (i == 0) return const _DaySeparator(label: 'Bugun');
-        final msg = _mockChatMessages[i - 1];
-        return _MessageBubble(
-          message: msg,
-          avatarAsset: _edaSoyral.avatarAsset,
+        return Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Spacer(),
+            Image.asset(
+              'assets/images/hello_mascot.png',
+              width: compact ? 180 : 220,
+              height: compact ? 210 : 260,
+              fit: BoxFit.contain,
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              'Bir Selam Ver!',
+              style: TextStyle(
+                fontFamily: AppFont.family,
+                fontWeight: FontWeight.w800,
+                fontSize: 17,
+                color: AppColors.black,
+              ),
+            ),
+            const SizedBox(height: 4),
+            const Text(
+              'Hadi bu firsati kacirma...',
+              style: TextStyle(
+                fontFamily: AppFont.family,
+                fontSize: 13.5,
+                height: 1.5,
+                color: Color(0xFF666666),
+              ),
+            ),
+            const Spacer(flex: 2),
+          ],
         );
       },
     );
   }
 }
 
-// ------ Chat Profile Screen ---------------------------------------------------
+class _ChatMessagesBody extends StatelessWidget {
+  final ChatPeer peer;
+  final AppConversationPreview? conversation;
+  final _ChatThemePalette theme;
 
-class ChatProfileScreen extends StatefulWidget {
-  const ChatProfileScreen({super.key});
+  const _ChatMessagesBody({
+    required this.peer,
+    required this.theme,
+    this.conversation,
+  });
 
-  @override
-  State<ChatProfileScreen> createState() => _ChatProfileScreenState();
-}
-
-class _ChatProfileScreenState extends State<ChatProfileScreen> {
   @override
   Widget build(BuildContext context) {
+    if (conversation == null) {
+      return const _ChatEmptyBody();
+    }
+
+    return _LiveChatMessagesBody(
+      conversation: conversation!,
+      peer: peer,
+      theme: theme,
+    );
+  }
+}
+
+class _LiveChatMessagesBody extends ConsumerWidget {
+  final AppConversationPreview conversation;
+  final ChatPeer peer;
+  final _ChatThemePalette theme;
+
+  const _LiveChatMessagesBody({
+    required this.conversation,
+    required this.peer,
+    required this.theme,
+  });
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final currentUserId = ref.watch(appAuthProvider).asData?.value?.user?.id;
+    if (currentUserId == null) {
+      return const Center(child: CupertinoActivityIndicator(radius: 14));
+    }
+
+    final messagesAsync = ref.watch(
+      conversationMessagesProvider(conversation.id),
+    );
+
+    return messagesAsync.when(
+      data: (messages) {
+        if (messages.isEmpty) {
+          return const _ChatEmptyBody();
+        }
+
+        final uiMessages = messages
+            .map((message) => _chatMessageFromApi(message, currentUserId))
+            .toList();
+
+        return ListView.builder(
+          physics: const BouncingScrollPhysics(),
+          padding: const EdgeInsets.only(top: 16, bottom: 16),
+          itemCount: uiMessages.length,
+          itemBuilder: (context, index) {
+            final apiMessage = messages[index];
+            final uiMessage = uiMessages[index];
+            final canReportMessage =
+                !apiMessage.isFromUser(currentUserId) && uiMessage.id != null;
+
+            return _MessageBubble(
+              message: uiMessage,
+              peer: peer,
+              theme: theme,
+              onReport: canReportMessage
+                  ? () => _showMessageActions(
+                      context,
+                      message: apiMessage,
+                      peer: peer,
+                    )
+                  : null,
+            );
+          },
+        );
+      },
+      loading: () =>
+          const Center(child: CupertinoActivityIndicator(radius: 14)),
+      error: (error, _) => Center(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 24),
+          child: Text(
+            AppAuthErrorFormatter.messageFrom(error),
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+              fontFamily: AppFont.family,
+              fontSize: 13,
+              color: AppColors.neutral600,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+ChatMessage _chatMessageFromApi(
+  AppConversationMessage message,
+  int currentUserId,
+) {
+  final type = switch (message.type) {
+    'foto' || 'gorsel' => ChatMessageType.image,
+    'ses' => ChatMessageType.audio,
+    _ => ChatMessageType.text,
+  };
+
+  return ChatMessage(
+    id: message.id,
+    side: message.isFromUser(currentUserId)
+        ? ChatBubbleSide.me
+        : ChatBubbleSide.them,
+    type: type,
+    text: message.text,
+    asset: message.fileUrl,
+    duration: message.fileDuration,
+    time: _formatChatClock(message.createdAt),
+  );
+}
+
+String _formatChatClock(DateTime? value) {
+  if (value == null) {
+    return '';
+  }
+
+  final local = value.toLocal();
+  final hour = local.hour.toString().padLeft(2, '0');
+  final minute = local.minute.toString().padLeft(2, '0');
+  return '$hour:$minute';
+}
+
+// ------ Chat Profile Screen ---------------------------------------------------
+
+class ChatProfileScreen extends ConsumerStatefulWidget {
+  final ChatPeer? peer;
+  final AppConversationPreview? conversation;
+  final int? selectedThemeIndex;
+  final ValueChanged<int>? onThemeSelected;
+
+  const ChatProfileScreen({
+    super.key,
+    this.peer,
+    this.conversation,
+    this.selectedThemeIndex,
+    this.onThemeSelected,
+  });
+
+  @override
+  ConsumerState<ChatProfileScreen> createState() => _ChatProfileScreenState();
+}
+
+class _ChatProfileScreenState extends ConsumerState<ChatProfileScreen> {
+  bool? _mutedOverride;
+  bool? _blockedOverride;
+
+  @override
+  Widget build(BuildContext context) {
+    final peerId = widget.conversation?.peerId;
+    final profileAsync = peerId == null
+        ? null
+        : ref.watch(chatPeerProfileProvider(peerId));
+    final profile = profileAsync?.asData?.value;
+    final fallbackPeer =
+        widget.peer ??
+        (widget.conversation != null
+            ? ChatPeer.fromConversation(widget.conversation!)
+            : _emptyChatPeer);
+    final peer = profile != null
+        ? _chatPeerFromCandidate(profile)
+        : fallbackPeer;
+    final galleryMedia = _galleryMediaForProfile(profile, peer.avatarUrl);
+    final isMuted = _mutedOverride ?? profile?.muted ?? false;
+    final isBlocked = _blockedOverride ?? profile?.blocked ?? false;
+
+    void openMute() {
+      if (peerId == null) {
+        return;
+      }
+      showCupertinoModalPopup<void>(
+        context: context,
+        builder: (_) => MuteConversationSheet(
+          targetUserId: peerId,
+          peerName: peer.name,
+          initiallyMuted: isMuted,
+          onChanged: (muted) => setState(() => _mutedOverride = muted),
+        ),
+      );
+    }
+
     return CupertinoPageScaffold(
       backgroundColor: AppColors.neutral100,
       child: SafeArea(
-        child: ListView(
-          physics: const BouncingScrollPhysics(),
-          padding: const EdgeInsets.fromLTRB(12, 8, 12, 24),
+        child: Column(
           children: [
-            Row(
-              children: [
-                PressableScale(
-                  onTap: () => Navigator.of(context).maybePop(),
-                  scale: 0.9,
-                  child: const Padding(
-                    padding: EdgeInsets.all(8),
-                    child: Icon(
-                      CupertinoIcons.chevron_back,
-                      size: 22,
-                      color: AppColors.black,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 4),
-            Center(
-              child: Container(
-                width: 90,
-                height: 90,
-                decoration: const BoxDecoration(
-                  shape: BoxShape.circle,
-                  boxShadow: [
-                    BoxShadow(
-                      color: Color(0x14000000),
-                      blurRadius: 16,
-                      offset: Offset(0, 4),
-                    ),
-                  ],
-                ),
-                child: ClipOval(
-                  child: Image.asset(_edaSoyral.avatarAsset, fit: BoxFit.cover),
+            Container(
+              height: 52,
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              alignment: Alignment.centerLeft,
+              decoration: const BoxDecoration(
+                color: AppColors.neutral100,
+                border: Border(
+                  bottom: BorderSide(color: Color(0xFFE9E9EE), width: 1),
                 ),
               ),
-            ),
-            const SizedBox(height: 16),
-            Center(
-              child: Text(
-                _edaSoyral.name,
-                style: const TextStyle(
-                  fontFamily: AppFont.family,
-                  fontWeight: FontWeight.w800,
-                  fontSize: 20,
-                  color: AppColors.black,
-                  letterSpacing: -0.5,
-                ),
-              ),
-            ),
-            const SizedBox(height: 2),
-            Center(
-              child: Text(
-                _edaSoyral.handle,
-                style: const TextStyle(
-                  fontFamily: AppFont.family,
-                  fontSize: 13,
-                  color: Color(0xFF999999),
-                ),
-              ),
-            ),
-            const SizedBox(height: 4),
-            Center(
-              child: Text(
-                _edaSoyral.status,
-                style: const TextStyle(
-                  fontFamily: AppFont.family,
-                  fontWeight: FontWeight.w700,
-                  fontSize: 12,
-                  color: Color(0xFF2DD4A0),
-                ),
-              ),
-            ),
-            const SizedBox(height: 20),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                _ProfileActionChip(
-                  label: 'Ozel Emoji',
-                  gradient: true,
-                  icon: const Text('⭐', style: TextStyle(fontSize: 22)),
-                  onTap: () {},
-                ),
-                const SizedBox(width: 24),
-                _ProfileActionChip(
-                  label: 'Sessize Al',
-                  gradient: false,
-                  icon: const Icon(
-                    CupertinoIcons.bell,
-                    size: 20,
+              child: PressableScale(
+                onTap: () => Navigator.of(context).maybePop(),
+                scale: 0.9,
+                child: const Padding(
+                  padding: EdgeInsets.all(8),
+                  child: Icon(
+                    CupertinoIcons.chevron_back,
+                    size: 22,
                     color: AppColors.black,
                   ),
-                  onTap: () {},
                 ),
-              ],
-            ),
-            const SizedBox(height: 24),
-            const _MediaTabBar(),
-            const SizedBox(height: 12),
-            const _MediaGrid(),
-            const SizedBox(height: 12),
-            const _ShowAllButton(),
-            const SizedBox(height: 24),
-            const _ChatThemeSection(),
-            const SizedBox(height: 12),
-            const _ShowAllButton(),
-            const SizedBox(height: 24),
-            _DangerListCard(
-              onBlock: () => showCupertinoModalPopup<void>(
-                context: context,
-                builder: (_) => const BlockConfirmSheet(),
               ),
-              onReport: () => showCupertinoModalPopup<void>(
-                context: context,
-                builder: (_) => const ReportSheet(),
+            ),
+            Expanded(
+              child: ListView(
+                physics: const BouncingScrollPhysics(),
+                padding: const EdgeInsets.fromLTRB(12, 12, 12, 24),
+                children: [
+                  Center(
+                    child: Container(
+                      width: 90,
+                      height: 90,
+                      decoration: const BoxDecoration(
+                        shape: BoxShape.circle,
+                        boxShadow: [
+                          BoxShadow(
+                            color: Color(0x14000000),
+                            blurRadius: 16,
+                            offset: Offset(0, 4),
+                          ),
+                        ],
+                      ),
+                      child: ClipOval(
+                        child: _ChatPeerAvatar(peer: peer, size: 90),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  Center(
+                    child: Text(
+                      peer.name,
+                      style: const TextStyle(
+                        fontFamily: AppFont.family,
+                        fontWeight: FontWeight.w800,
+                        fontSize: 20,
+                        color: AppColors.black,
+                        letterSpacing: -0.5,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Center(
+                    child: Text(
+                      peer.handle,
+                      style: const TextStyle(
+                        fontFamily: AppFont.family,
+                        fontSize: 13,
+                        color: Color(0xFF999999),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Center(
+                    child: Text(
+                      peer.status,
+                      style: const TextStyle(
+                        fontFamily: AppFont.family,
+                        fontWeight: FontWeight.w700,
+                        fontSize: 12,
+                        color: Color(0xFF2DD4A0),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      _ProfileActionChip(
+                        label: isMuted ? 'Sessizden Cikar' : 'Sessize Al',
+                        gradient: false,
+                        icon: Icon(
+                          isMuted
+                              ? CupertinoIcons.bell_slash_fill
+                              : CupertinoIcons.bell,
+                          size: 20,
+                          color: AppColors.black,
+                        ),
+                        onTap: openMute,
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 24),
+                  _PeerProfileMediaSection(
+                    media: galleryMedia,
+                    loading: profileAsync?.isLoading == true,
+                  ),
+                  const SizedBox(height: 24),
+                  _ChatThemeSection(
+                    peerId: peerId,
+                    selectedIndex: widget.selectedThemeIndex,
+                    onThemeSelected: widget.onThemeSelected,
+                  ),
+                  const SizedBox(height: 24),
+                  _DangerListCard(
+                    isBlocked: isBlocked,
+                    onBlock: () => showCupertinoModalPopup<void>(
+                      context: context,
+                      builder: (_) => BlockConfirmSheet(
+                        targetUserId: widget.conversation?.peerId,
+                        targetDisplayName: peer.name,
+                        initiallyBlocked: isBlocked,
+                        onChanged: (blocked) =>
+                            setState(() => _blockedOverride = blocked),
+                      ),
+                    ),
+                    onReport: () => showCupertinoModalPopup<void>(
+                      context: context,
+                      builder: (_) => ReportSheet(
+                        targetId: widget.conversation?.peerId,
+                        targetDisplayName: peer.name,
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ),
           ],
@@ -1103,24 +2226,214 @@ class _ProfileActionChip extends StatelessWidget {
   }
 }
 
+enum _PeerMediaTab { all, photos, videos }
+
+class _PeerProfileMediaSection extends StatefulWidget {
+  final List<AppProfilePhoto> media;
+  final bool loading;
+
+  const _PeerProfileMediaSection({required this.media, required this.loading});
+
+  @override
+  State<_PeerProfileMediaSection> createState() =>
+      _PeerProfileMediaSectionState();
+}
+
+class _PeerProfileMediaSectionState extends State<_PeerProfileMediaSection> {
+  _PeerMediaTab _tab = _PeerMediaTab.all;
+
+  List<AppProfilePhoto> get _visibleMedia {
+    switch (_tab) {
+      case _PeerMediaTab.photos:
+        return widget.media.where((item) => item.isPhoto).toList();
+      case _PeerMediaTab.videos:
+        return widget.media.where((item) => item.isVideo).toList();
+      case _PeerMediaTab.all:
+        return widget.media;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final visibleMedia = _visibleMedia;
+    final tiles = visibleMedia.map(_networkMediaTile).toList();
+
+    return Column(
+      children: [
+        _MediaTabBar(
+          selected: _tab,
+          onChanged: (tab) => setState(() => _tab = tab),
+        ),
+        const SizedBox(height: 12),
+        Container(
+          padding: const EdgeInsets.all(8),
+          decoration: BoxDecoration(
+            color: AppColors.white,
+            borderRadius: BorderRadius.circular(20),
+          ),
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              if (widget.loading) {
+                return const SizedBox(
+                  height: 96,
+                  child: Center(child: CupertinoActivityIndicator(radius: 12)),
+                );
+              }
+
+              if (tiles.isEmpty) {
+                return Container(
+                  height: 96,
+                  alignment: Alignment.center,
+                  padding: const EdgeInsets.symmetric(horizontal: 24),
+                  decoration: BoxDecoration(
+                    color: AppColors.grayField,
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  child: const Text(
+                    'Bu sekmede medya yok.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontFamily: AppFont.family,
+                      fontWeight: FontWeight.w600,
+                      fontSize: 13,
+                      color: AppColors.gray,
+                    ),
+                  ),
+                );
+              }
+
+              final tileSize = (constraints.maxWidth - 16) / 3;
+              final rowCount = (tiles.length / 3).ceil();
+              final gridHeight = tileSize * rowCount + 8 * (rowCount - 1);
+              return SizedBox(
+                height: gridHeight,
+                child: GridView.count(
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  crossAxisCount: 3,
+                  crossAxisSpacing: 8,
+                  mainAxisSpacing: 8,
+                  children: tiles,
+                ),
+              );
+            },
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _networkMediaTile(AppProfilePhoto media) {
+    final currentMedia = _visibleMedia;
+    final initialIndex = currentMedia.indexWhere((item) => item.id == media.id);
+
+    return PressableScale(
+      onTap: () => openProfileMediaViewer(
+        context,
+        media: currentMedia,
+        initialIndex: initialIndex < 0 ? 0 : initialIndex,
+      ),
+      scale: 0.98,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(10),
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            if (media.isPhoto || media.previewUrl != null)
+              Image.network(
+                media.displayUrl,
+                fit: BoxFit.cover,
+                gaplessPlayback: true,
+                errorBuilder: (_, _, _) => _videoPlaceholder(),
+              )
+            else
+              _videoPlaceholder(),
+            if (media.isVideo) _videoBadge(),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _videoBadge() {
+    return Positioned(
+      left: 5,
+      bottom: 5,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+        decoration: BoxDecoration(
+          color: const Color(0xA6111111),
+          borderRadius: BorderRadius.circular(999),
+        ),
+        child: const Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              CupertinoIcons.videocam_fill,
+              size: 10,
+              color: AppColors.white,
+            ),
+            SizedBox(width: 4),
+            Text(
+              'Video',
+              style: TextStyle(
+                fontFamily: AppFont.family,
+                fontWeight: FontWeight.w700,
+                fontSize: 10,
+                color: AppColors.white,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _videoPlaceholder() {
+    return Container(
+      color: const Color(0xFFF3F4F6),
+      alignment: Alignment.center,
+      child: const Icon(
+        CupertinoIcons.videocam_fill,
+        size: 26,
+        color: Color(0xFF9CA3AF),
+      ),
+    );
+  }
+}
+
 class _MediaTabBar extends StatelessWidget {
-  const _MediaTabBar();
+  final _PeerMediaTab selected;
+  final ValueChanged<_PeerMediaTab> onChanged;
+
+  const _MediaTabBar({required this.selected, required this.onChanged});
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 32),
-      padding: const EdgeInsets.all(4),
-      height: 42,
+      height: 37,
+      padding: const EdgeInsets.all(3),
       decoration: BoxDecoration(
-        color: const Color(0xFFE8E8EA),
-        borderRadius: BorderRadius.circular(80),
+        color: const Color(0xFFF2F2F4),
+        borderRadius: BorderRadius.circular(12),
       ),
       child: Row(
-        children: const [
-          _MediaTabItem(label: 'Tumu', selected: true),
-          _MediaTabItem(label: 'Fotograflar', selected: false),
-          _MediaTabItem(label: 'Videolar', selected: false),
+        children: [
+          _MediaTabItem(
+            label: 'Tumu',
+            selected: selected == _PeerMediaTab.all,
+            onTap: () => onChanged(_PeerMediaTab.all),
+          ),
+          _MediaTabItem(
+            label: 'Fotograflar',
+            selected: selected == _PeerMediaTab.photos,
+            onTap: () => onChanged(_PeerMediaTab.photos),
+          ),
+          _MediaTabItem(
+            label: 'Videolar',
+            selected: selected == _PeerMediaTab.videos,
+            onTap: () => onChanged(_PeerMediaTab.videos),
+          ),
         ],
       ),
     );
@@ -1130,150 +2443,36 @@ class _MediaTabBar extends StatelessWidget {
 class _MediaTabItem extends StatelessWidget {
   final String label;
   final bool selected;
+  final VoidCallback onTap;
 
-  const _MediaTabItem({required this.label, required this.selected});
+  const _MediaTabItem({
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
     return Expanded(
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 180),
-        height: 34,
-        decoration: BoxDecoration(
-          color: selected ? AppColors.white : const Color(0x00000000),
-          borderRadius: BorderRadius.circular(80),
-          boxShadow: selected
-              ? const [
-                  BoxShadow(
-                    color: Color(0x0F000000),
-                    blurRadius: 4,
-                    offset: Offset(0, 1),
-                  ),
-                ]
-              : null,
-        ),
-        alignment: Alignment.center,
-        child: Text(
-          label,
-          style: TextStyle(
-            fontFamily: AppFont.family,
-            fontWeight: FontWeight.w600,
-            fontSize: 13,
-            color: selected ? AppColors.black : const Color(0xFF999999),
+      child: PressableScale(
+        onTap: onTap,
+        scale: 0.98,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 180),
+          decoration: BoxDecoration(
+            color: selected ? AppColors.black : const Color(0x00000000),
+            borderRadius: BorderRadius.circular(10),
           ),
-        ),
-      ),
-    );
-  }
-}
-
-class _MediaGrid extends StatelessWidget {
-  const _MediaGrid();
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(6),
-      decoration: BoxDecoration(
-        color: AppColors.white,
-        borderRadius: BorderRadius.circular(20),
-      ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(14),
-        child: GridView.count(
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          crossAxisCount: 3,
-          mainAxisSpacing: 2,
-          crossAxisSpacing: 2,
-          children: [
-            _galleryTile('assets/images/gallery_1.png'),
-            _galleryTile('assets/images/gallery_2.png'),
-            _galleryTile('assets/images/gallery_3.png', videoLabel: '0:34'),
-            _galleryTile('assets/images/gallery_4.png'),
-            _galleryTile('assets/images/gallery_5.png', videoLabel: '1:12'),
-            _galleryTile('assets/images/gallery_6.png'),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _galleryTile(String asset, {String? videoLabel}) {
-    return Stack(
-      fit: StackFit.expand,
-      children: [
-        Image.asset(asset, fit: BoxFit.cover),
-        if (videoLabel != null)
-          Positioned(
-            left: 6,
-            bottom: 6,
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-              decoration: BoxDecoration(
-                color: const Color(0x8C000000),
-                borderRadius: BorderRadius.circular(6),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Icon(
-                    CupertinoIcons.play_fill,
-                    size: 9,
-                    color: AppColors.white,
-                  ),
-                  const SizedBox(width: 4),
-                  Text(
-                    videoLabel,
-                    style: const TextStyle(
-                      fontFamily: AppFont.family,
-                      fontWeight: FontWeight.w500,
-                      fontSize: 10,
-                      color: AppColors.white,
-                    ),
-                  ),
-                ],
-              ),
+          alignment: Alignment.center,
+          child: Text(
+            label,
+            style: TextStyle(
+              fontFamily: AppFont.family,
+              fontWeight: FontWeight.w600,
+              fontSize: 12,
+              color: selected ? AppColors.white : const Color(0xFF999999),
             ),
           ),
-      ],
-    );
-  }
-}
-
-class _ShowAllButton extends StatelessWidget {
-  const _ShowAllButton();
-
-  @override
-  Widget build(BuildContext context) {
-    return PressableScale(
-      onTap: () {},
-      scale: 0.99,
-      child: Container(
-        height: 42,
-        decoration: BoxDecoration(
-          color: AppColors.grayField,
-          borderRadius: BorderRadius.circular(14),
-        ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: const [
-            Text(
-              'Tumunu Goster',
-              style: TextStyle(
-                fontFamily: AppFont.family,
-                fontWeight: FontWeight.w500,
-                fontSize: 13,
-                color: Color(0xFF555555),
-              ),
-            ),
-            SizedBox(width: 8),
-            Icon(
-              CupertinoIcons.chevron_down,
-              size: 14,
-              color: Color(0xFF555555),
-            ),
-          ],
         ),
       ),
     );
@@ -1281,14 +2480,46 @@ class _ShowAllButton extends StatelessWidget {
 }
 
 class _ChatThemeSection extends StatefulWidget {
-  const _ChatThemeSection();
+  final int? peerId;
+  final int? selectedIndex;
+  final ValueChanged<int>? onThemeSelected;
+
+  const _ChatThemeSection({
+    required this.peerId,
+    this.selectedIndex,
+    this.onThemeSelected,
+  });
 
   @override
   State<_ChatThemeSection> createState() => _ChatThemeSectionState();
 }
 
 class _ChatThemeSectionState extends State<_ChatThemeSection> {
-  int _selected = 0;
+  late int _selected;
+
+  @override
+  void initState() {
+    super.initState();
+    _selected =
+        widget.selectedIndex ??
+        (widget.peerId == null ? 0 : _defaultChatThemeIndex(widget.peerId!));
+  }
+
+  @override
+  void didUpdateWidget(covariant _ChatThemeSection oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.selectedIndex != widget.selectedIndex ||
+        oldWidget.peerId != widget.peerId) {
+      _selected =
+          widget.selectedIndex ??
+          (widget.peerId == null ? 0 : _defaultChatThemeIndex(widget.peerId!));
+    }
+  }
+
+  void _selectTheme(int index) {
+    setState(() => _selected = index);
+    widget.onThemeSelected?.call(index);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -1320,19 +2551,21 @@ class _ChatThemeSectionState extends State<_ChatThemeSection> {
             ),
           ),
           const SizedBox(height: 16),
-          Row(
-            children: List.generate(3, (i) {
-              return Expanded(
-                child: Padding(
-                  padding: EdgeInsets.only(right: i == 2 ? 0 : 8),
-                  child: _ThemeCard(
-                    index: i,
-                    selected: _selected == i,
-                    onTap: () => setState(() => _selected = i),
-                  ),
-                ),
-              );
-            }),
+          GridView.builder(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            itemCount: _chatThemes.length,
+            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: 3,
+              crossAxisSpacing: 8,
+              mainAxisSpacing: 8,
+              childAspectRatio: 0.72,
+            ),
+            itemBuilder: (context, i) => _ThemeCard(
+              index: i,
+              selected: _selected == i,
+              onTap: () => _selectTheme(i),
+            ),
           ),
         ],
       ),
@@ -1353,13 +2586,12 @@ class _ThemeCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final labels = ['Varsayilan', 'Karanlik', 'Gunbatimi'];
+    final theme = _chatThemes[index % _chatThemes.length];
     return PressableScale(
       onTap: onTap,
       scale: 0.97,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 180),
-        height: 150,
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(16),
           border: Border.all(
@@ -1384,26 +2616,22 @@ class _ThemeCard extends StatelessWidget {
                 child: CustomPaint(
                   painter: _ThemePreviewPainter(
                     index: index,
-                    showCheck: selected && index == 0,
+                    showCheck: selected,
                   ),
                   size: Size.infinite,
                 ),
               ),
               Container(
                 height: 26,
-                color: index == 1
-                    ? const Color(0xFF111118)
-                    : (index == 2 ? const Color(0xFFFFB8C6) : AppColors.white),
+                color: theme.background,
                 alignment: Alignment.center,
                 child: Text(
-                  labels[index],
+                  theme.label,
                   style: TextStyle(
                     fontFamily: AppFont.family,
                     fontWeight: FontWeight.w700,
                     fontSize: 10,
-                    color: index == 1
-                        ? const Color(0xB3FFFFFF)
-                        : (index == 2 ? AppColors.white : AppColors.black),
+                    color: theme.incomingText,
                   ),
                 ),
               ),
@@ -1423,30 +2651,13 @@ class _ThemePreviewPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
+    final theme = _chatThemes[index % _chatThemes.length];
     final bgPaint = Paint();
-    if (index == 1) {
-      bgPaint.color = const Color(0xFF111118);
-    } else if (index == 2) {
-      bgPaint.shader = const LinearGradient(
-        begin: Alignment.topCenter,
-        end: Alignment.bottomCenter,
-        colors: [Color(0xFF6C63FF), Color(0xFFFFB8C6)],
-      ).createShader(Offset.zero & size);
-    } else {
-      bgPaint.color = AppColors.white;
-    }
+    bgPaint.color = theme.background;
     canvas.drawRect(Offset.zero & size, bgPaint);
 
-    final leftBubbleColor = index == 1
-        ? const Color(0xFF222230)
-        : (index == 2
-              ? AppColors.white.withValues(alpha: 0.7)
-              : const Color(0xFFF0F0F0));
-    final rightBubbleShader = const LinearGradient(
-      begin: Alignment.topLeft,
-      end: Alignment.bottomRight,
-      colors: [Color(0xFF5C6BFF), Color(0xFF7B6FFF)],
-    );
+    final leftBubbleColor = theme.incomingBubble;
+    final rightBubbleShader = theme.outgoingGradient;
 
     final bar1 = Rect.fromLTWH(7, size.height - 46, size.width - 42, 10);
     canvas.drawRRect(
@@ -1515,10 +2726,15 @@ class _ThemePreviewPainter extends CustomPainter {
 }
 
 class _DangerListCard extends StatelessWidget {
+  final bool isBlocked;
   final VoidCallback onBlock;
   final VoidCallback onReport;
 
-  const _DangerListCard({required this.onBlock, required this.onReport});
+  const _DangerListCard({
+    required this.isBlocked,
+    required this.onBlock,
+    required this.onReport,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -1530,8 +2746,10 @@ class _DangerListCard extends StatelessWidget {
       child: Column(
         children: [
           _DangerListRow(
-            icon: CupertinoIcons.nosign,
-            label: 'Engelle',
+            icon: isBlocked
+                ? CupertinoIcons.check_mark_circled
+                : CupertinoIcons.nosign,
+            label: isBlocked ? 'Engelden Cikar' : 'Engelle',
             onTap: onBlock,
           ),
           Container(
@@ -1590,6 +2808,592 @@ class _DangerListRow extends StatelessWidget {
   }
 }
 
+class _ChatSheetHandle extends StatelessWidget {
+  const _ChatSheetHandle();
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Container(
+        width: 48,
+        height: 4,
+        decoration: BoxDecoration(
+          color: const Color(0xFFD4D4D4),
+          borderRadius: BorderRadius.circular(8),
+        ),
+      ),
+    );
+  }
+}
+
+class _AdaptiveChatSheet extends StatelessWidget {
+  final Widget child;
+  final EdgeInsets padding;
+
+  const _AdaptiveChatSheet({
+    required this.child,
+    this.padding = const EdgeInsets.fromLTRB(16, 12, 16, 24),
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final viewInsets = MediaQuery.viewInsetsOf(context);
+    final safeBottom = MediaQuery.paddingOf(context).bottom;
+    final screenHeight = MediaQuery.sizeOf(context).height;
+    final resolvedPadding = padding.copyWith(
+      bottom: padding.bottom + safeBottom,
+    );
+    final maxHeight = screenHeight * 0.86;
+
+    return Align(
+      alignment: Alignment.bottomCenter,
+      child: AnimatedPadding(
+        duration: const Duration(milliseconds: 220),
+        curve: Curves.easeOut,
+        padding: EdgeInsets.only(bottom: viewInsets.bottom),
+        child: Container(
+          width: double.infinity,
+          decoration: const BoxDecoration(
+            color: AppColors.white,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+          ),
+          child: ConstrainedBox(
+            constraints: BoxConstraints(maxHeight: maxHeight),
+            child: SingleChildScrollView(
+              physics: const BouncingScrollPhysics(),
+              padding: resolvedPadding,
+              child: child,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class MuteConversationSheet extends ConsumerStatefulWidget {
+  final int targetUserId;
+  final String peerName;
+  final bool initiallyMuted;
+  final ValueChanged<bool>? onChanged;
+
+  const MuteConversationSheet({
+    super.key,
+    required this.targetUserId,
+    required this.peerName,
+    this.initiallyMuted = false,
+    this.onChanged,
+  });
+
+  @override
+  ConsumerState<MuteConversationSheet> createState() =>
+      _MuteConversationSheetState();
+}
+
+class _MuteConversationSheetState extends ConsumerState<MuteConversationSheet> {
+  int _selected = 1;
+  bool _submitting = false;
+  String? _notice;
+
+  static const List<String> _options = [
+    '1 saat',
+    '8 saat',
+    '1 gun',
+    'Her zaman',
+  ];
+
+  static const List<String> _codes = ['1_saat', '8_saat', '1_gun', 'suresiz'];
+
+  Future<void> _applyMute() async {
+    if (_submitting) {
+      return;
+    }
+    final token = ref.read(appAuthProvider).asData?.value?.token;
+    if (token == null || token.trim().isEmpty) {
+      setState(() => _notice = 'Bu islemi yapmak icin once giris yapmalisin.');
+      return;
+    }
+
+    setState(() {
+      _submitting = true;
+      _notice = null;
+    });
+
+    final api = AppAuthApi();
+    try {
+      if (widget.initiallyMuted) {
+        await api.unmuteUser(token, userId: widget.targetUserId);
+        widget.onChanged?.call(false);
+      } else {
+        await api.muteUser(
+          token,
+          userId: widget.targetUserId,
+          durationCode: _codes[_selected],
+        );
+        widget.onChanged?.call(true);
+      }
+      if (!mounted) {
+        return;
+      }
+      Navigator.of(context).maybePop();
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() => _notice = AppAuthErrorFormatter.messageFrom(error));
+    } finally {
+      api.close();
+      if (mounted) {
+        setState(() => _submitting = false);
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (widget.initiallyMuted) {
+      return _AdaptiveChatSheet(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const _ChatSheetHandle(),
+            const SizedBox(height: 18),
+            const Text(
+              'Sessizden Cikar',
+              style: TextStyle(
+                fontFamily: AppFont.family,
+                fontWeight: FontWeight.w800,
+                fontSize: 20,
+                color: AppColors.black,
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              '${widget.peerName} icin bildirimleri yeniden acmak ister misin?',
+              style: const TextStyle(
+                fontFamily: AppFont.family,
+                fontSize: 12.5,
+                color: AppColors.neutral600,
+              ),
+            ),
+            if (_notice != null) ...[
+              const SizedBox(height: 12),
+              Text(
+                _notice!,
+                style: const TextStyle(
+                  fontFamily: AppFont.family,
+                  fontSize: 12,
+                  color: Color(0xFFEF4444),
+                ),
+              ),
+            ],
+            const SizedBox(height: 18),
+            GradientButton(
+              label: _submitting ? 'Kaldiriliyor...' : 'Sessizden cikar',
+              onTap: _submitting ? null : _applyMute,
+            ),
+          ],
+        ),
+      );
+    }
+
+    return _AdaptiveChatSheet(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const _ChatSheetHandle(),
+          const SizedBox(height: 18),
+          const Text(
+            'Sessize Al',
+            style: TextStyle(
+              fontFamily: AppFont.family,
+              fontWeight: FontWeight.w800,
+              fontSize: 20,
+              color: AppColors.black,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            '${widget.peerName} icin bildirimleri ne kadar susturmak istiyorsun?',
+            style: const TextStyle(
+              fontFamily: AppFont.family,
+              fontSize: 12.5,
+              color: AppColors.neutral600,
+            ),
+          ),
+          const SizedBox(height: 16),
+          ...List.generate(_options.length, (index) {
+            final selected = _selected == index;
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: PressableScale(
+                onTap: () => setState(() => _selected = index),
+                scale: 0.98,
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 160),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 14,
+                  ),
+                  decoration: BoxDecoration(
+                    color: AppColors.grayField,
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(
+                      color: selected
+                          ? AppColors.indigo
+                          : const Color(0x00000000),
+                      width: 1.5,
+                    ),
+                  ),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          _options[index],
+                          style: const TextStyle(
+                            fontFamily: AppFont.family,
+                            fontWeight: FontWeight.w700,
+                            fontSize: 14,
+                            color: AppColors.black,
+                          ),
+                        ),
+                      ),
+                      if (selected)
+                        const Icon(
+                          CupertinoIcons.check_mark_circled_solid,
+                          size: 18,
+                          color: AppColors.indigo,
+                        ),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          }),
+          const SizedBox(height: 10),
+          if (_notice != null) ...[
+            Text(
+              _notice!,
+              style: const TextStyle(
+                fontFamily: AppFont.family,
+                fontSize: 12,
+                color: Color(0xFFEF4444),
+              ),
+            ),
+            const SizedBox(height: 10),
+          ],
+          GradientButton(
+            label: _submitting ? 'Uygulaniyor...' : 'Sessize almayi uygula',
+            onTap: _submitting ? null : _applyMute,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class MediaAttachmentSheet extends StatelessWidget {
+  final String peerName;
+
+  const MediaAttachmentSheet({super.key, required this.peerName});
+
+  @override
+  Widget build(BuildContext context) {
+    Widget item({
+      required IconData icon,
+      required String title,
+      required String subtitle,
+    }) {
+      return Padding(
+        padding: const EdgeInsets.only(bottom: 10),
+        child: PressableScale(
+          onTap: () => Navigator.of(context).maybePop(),
+          scale: 0.98,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+            decoration: BoxDecoration(
+              color: AppColors.grayField,
+              borderRadius: BorderRadius.circular(18),
+            ),
+            child: Row(
+              children: [
+                Container(
+                  width: 42,
+                  height: 42,
+                  decoration: BoxDecoration(
+                    color: AppColors.white,
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  alignment: Alignment.center,
+                  child: Icon(icon, size: 20, color: AppColors.black),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        title,
+                        style: const TextStyle(
+                          fontFamily: AppFont.family,
+                          fontWeight: FontWeight.w700,
+                          fontSize: 14,
+                          color: AppColors.black,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        subtitle,
+                        style: const TextStyle(
+                          fontFamily: AppFont.family,
+                          fontSize: 12,
+                          color: AppColors.neutral600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
+    return _AdaptiveChatSheet(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const _ChatSheetHandle(),
+          const SizedBox(height: 18),
+          const Text(
+            'Medya Ekle',
+            style: TextStyle(
+              fontFamily: AppFont.family,
+              fontWeight: FontWeight.w800,
+              fontSize: 20,
+              color: AppColors.black,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            '$peerName ile sohbete bir sey ekle.',
+            style: const TextStyle(
+              fontFamily: AppFont.family,
+              fontSize: 12.5,
+              color: AppColors.neutral600,
+            ),
+          ),
+          const SizedBox(height: 16),
+          item(
+            icon: CupertinoIcons.camera_fill,
+            title: 'Kamera',
+            subtitle: 'Anlik fotograf cek ve gonder',
+          ),
+          item(
+            icon: CupertinoIcons.photo_fill_on_rectangle_fill,
+            title: 'Galeri',
+            subtitle: 'Fotograf veya ekran goruntusu sec',
+          ),
+          item(
+            icon: CupertinoIcons.videocam_fill,
+            title: 'Video',
+            subtitle: 'Kisa bir klip paylas',
+          ),
+          item(
+            icon: CupertinoIcons.paperclip,
+            title: 'Dosya',
+            subtitle: 'Belge veya baska bir icerik ekle',
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class VoiceRecorderSheet extends StatefulWidget {
+  final String peerName;
+
+  const VoiceRecorderSheet({super.key, required this.peerName});
+
+  @override
+  State<VoiceRecorderSheet> createState() => _VoiceRecorderSheetState();
+}
+
+class _VoiceRecorderSheetState extends State<VoiceRecorderSheet> {
+  Timer? _timer;
+  int _elapsed = 0;
+  bool _recordingStopped = false;
+  bool _sending = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _timer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (!mounted || _recordingStopped) {
+        return;
+      }
+      setState(() => _elapsed++);
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _sendRecording() async {
+    setState(() => _sending = true);
+    await Future<void>.delayed(const Duration(milliseconds: 900));
+    if (!mounted) {
+      return;
+    }
+    Navigator.of(context).maybePop();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final minutes = (_elapsed ~/ 60).toString().padLeft(1, '0');
+    final seconds = (_elapsed % 60).toString().padLeft(2, '0');
+
+    return _AdaptiveChatSheet(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const _ChatSheetHandle(),
+          const SizedBox(height: 18),
+          Text(
+            _recordingStopped ? 'Kayit Hazir' : 'Ses Kaydi',
+            style: const TextStyle(
+              fontFamily: AppFont.family,
+              fontWeight: FontWeight.w800,
+              fontSize: 20,
+              color: AppColors.black,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            _recordingStopped
+                ? '${widget.peerName} icin kaydi gonderebilirsin.'
+                : 'Konusmaya basla, kayit otomatik ilerliyor.',
+            style: const TextStyle(
+              fontFamily: AppFont.family,
+              fontSize: 12.5,
+              color: AppColors.neutral600,
+            ),
+          ),
+          const SizedBox(height: 18),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(18),
+            decoration: BoxDecoration(
+              color: AppColors.grayField,
+              borderRadius: BorderRadius.circular(22),
+            ),
+            child: Column(
+              children: [
+                Text(
+                  '$minutes:$seconds',
+                  style: const TextStyle(
+                    fontFamily: AppFont.family,
+                    fontWeight: FontWeight.w800,
+                    fontSize: 28,
+                    color: AppColors.black,
+                  ),
+                ),
+                const SizedBox(height: 14),
+                SizedBox(
+                  height: 36,
+                  child: CustomPaint(
+                    size: const Size(double.infinity, 36),
+                    painter: _WaveformPainter(
+                      bars: const [
+                        0.12,
+                        0.2,
+                        0.38,
+                        0.62,
+                        0.48,
+                        0.78,
+                        0.34,
+                        0.56,
+                        0.82,
+                        0.41,
+                        0.22,
+                        0.51,
+                        0.74,
+                        0.44,
+                        0.18,
+                        0.35,
+                        0.68,
+                        0.5,
+                      ],
+                      color: _recordingStopped
+                          ? AppColors.indigo
+                          : AppColors.coral,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 14),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Container(
+                      width: 10,
+                      height: 10,
+                      decoration: BoxDecoration(
+                        color: _recordingStopped
+                            ? AppColors.indigo
+                            : AppColors.coral,
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      _recordingStopped
+                          ? 'Kayit durduruldu'
+                          : 'Kayit devam ediyor',
+                      style: const TextStyle(
+                        fontFamily: AppFont.family,
+                        fontWeight: FontWeight.w600,
+                        fontSize: 12.5,
+                        color: AppColors.neutral600,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 18),
+          if (!_recordingStopped)
+            GradientButton(
+              label: 'Kaydi Durdur',
+              onTap: () {
+                _timer?.cancel();
+                setState(() => _recordingStopped = true);
+              },
+            )
+          else
+            GradientButton(
+              label: _sending ? 'Gonderiliyor...' : 'Kaydi Gonder',
+              onTap: _sending ? null : _sendRecording,
+            ),
+          const SizedBox(height: 8),
+          SecondaryButton(
+            label: 'Vazgec',
+            onTap: () => Navigator.of(context).maybePop(),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 // ------ Sheet: Gift -----------------------------------------------------------
 
 @immutable
@@ -1602,7 +3406,14 @@ class _GiftItem {
 }
 
 class GiftSheet extends ConsumerStatefulWidget {
-  const GiftSheet({super.key});
+  final int targetUserId;
+  final String peerName;
+
+  const GiftSheet({
+    super.key,
+    required this.targetUserId,
+    required this.peerName,
+  });
 
   @override
   ConsumerState<GiftSheet> createState() => _GiftSheetState();
@@ -1610,37 +3421,68 @@ class GiftSheet extends ConsumerStatefulWidget {
 
 class _GiftSheetState extends ConsumerState<GiftSheet> {
   int _selectedGift = 1;
-  int _selectedCategory = 0;
-
-  static const List<String> _categories = [
-    'Populer',
-    'Romantik',
-    'Eglenceli',
-    'Ozel',
-  ];
+  bool _sending = false;
+  String? _notice;
 
   static const List<_GiftItem> _gifts = [
-    _GiftItem('🌹', 'Gul', 5),
-    _GiftItem('💝', 'Kalp Kutu', 10),
-    _GiftItem('🧸', 'Ayi', 15),
-    _GiftItem('🍫', 'Cikolata', 8),
-    _GiftItem('💍', 'Yuzuk', 50),
-    _GiftItem('☕', 'Kahve', 3),
-    _GiftItem('💐', 'Buket', 20),
-    _GiftItem('⭐', 'Yildiz', 7),
-    _GiftItem('👑', 'Tac', 30),
+    _GiftItem('\u{1F339}', 'Gul', 5),
+    _GiftItem('\u{1F49D}', 'Kalp Kutu', 10),
+    _GiftItem('\u{1F9F8}', 'Ayi', 15),
+    _GiftItem('\u{1F36B}', 'Cikolata', 8),
+    _GiftItem('\u{1F48D}', 'Yuzuk', 50),
+    _GiftItem('\u{2615}', 'Kahve', 3),
+    _GiftItem('\u{1F490}', 'Buket', 20),
+    _GiftItem('\u{2B50}', 'Yildiz', 7),
+    _GiftItem('\u{1F451}', 'Tac', 30),
   ];
+
+  Future<void> _sendGift() async {
+    if (_sending) {
+      return;
+    }
+    final token = ref.read(appAuthProvider).asData?.value?.token;
+    if (token == null || token.trim().isEmpty) {
+      setState(() => _notice = 'Hediye gondermek icin once giris yapmalisin.');
+      return;
+    }
+
+    final gift = _gifts[_selectedGift];
+    setState(() {
+      _sending = true;
+      _notice = null;
+    });
+
+    final api = AppAuthApi();
+    try {
+      await api.sendGift(
+        token,
+        receiverUserId: widget.targetUserId,
+        giftType: gift.name,
+        pointValue: gift.cost,
+      );
+      if (!mounted) {
+        return;
+      }
+      Navigator.of(context).maybePop();
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() => _notice = AppAuthErrorFormatter.messageFrom(error));
+    } finally {
+      api.close();
+      if (mounted) {
+        setState(() => _sending = false);
+      }
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     final gem = ref.watch(matchProvider.select((s) => s.gemBalance));
     final selectedCost = _gifts[_selectedGift].cost;
 
-    return Container(
-      decoration: const BoxDecoration(
-        color: AppColors.white,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-      ),
+    return _AdaptiveChatSheet(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 20),
       child: Column(
         mainAxisSize: MainAxisSize.min,
@@ -1663,8 +3505,8 @@ class _GiftSheetState extends ConsumerState<GiftSheet> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   mainAxisSize: MainAxisSize.min,
-                  children: const [
-                    Text(
+                  children: [
+                    const Text(
                       'Hediye Gonder',
                       style: TextStyle(
                         fontFamily: AppFont.family,
@@ -1673,10 +3515,10 @@ class _GiftSheetState extends ConsumerState<GiftSheet> {
                         color: AppColors.black,
                       ),
                     ),
-                    SizedBox(height: 2),
+                    const SizedBox(height: 2),
                     Text(
-                      "Anna'ya ozel bir hediye sec",
-                      style: TextStyle(
+                      '${widget.peerName} icin bir hediye sec',
+                      style: const TextStyle(
                         fontFamily: AppFont.family,
                         fontSize: 12.5,
                         color: Color(0xFF999999),
@@ -1687,44 +3529,6 @@ class _GiftSheetState extends ConsumerState<GiftSheet> {
               ),
               BalanceChip(amount: gem),
             ],
-          ),
-          const SizedBox(height: 16),
-          SizedBox(
-            height: 36,
-            child: ListView.separated(
-              scrollDirection: Axis.horizontal,
-              itemCount: _categories.length,
-              separatorBuilder: (context, index) => const SizedBox(width: 8),
-              itemBuilder: (context, i) {
-                final selected = _selectedCategory == i;
-                return PressableScale(
-                  onTap: () => setState(() => _selectedCategory = i),
-                  scale: 0.95,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 16,
-                      vertical: 8,
-                    ),
-                    decoration: BoxDecoration(
-                      color: selected ? AppColors.black : AppColors.grayField,
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                    alignment: Alignment.center,
-                    child: Text(
-                      _categories[i],
-                      style: TextStyle(
-                        fontFamily: AppFont.family,
-                        fontWeight: FontWeight.w600,
-                        fontSize: 13,
-                        color: selected
-                            ? AppColors.white
-                            : const Color(0xFF666666),
-                      ),
-                    ),
-                  ),
-                );
-              },
-            ),
           ),
           const SizedBox(height: 16),
           GridView.builder(
@@ -1749,7 +3553,23 @@ class _GiftSheetState extends ConsumerState<GiftSheet> {
           const SizedBox(height: 20),
           Container(height: 1, color: const Color(0xFFF0F0F0)),
           const SizedBox(height: 16),
-          _SendGiftButton(cost: selectedCost),
+          if (_notice != null) ...[
+            const SizedBox(height: 10),
+            Text(
+              _notice!,
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                fontFamily: AppFont.family,
+                fontSize: 12,
+                color: Color(0xFFEF4444),
+              ),
+            ),
+          ],
+          _SendGiftButton(
+            cost: selectedCost,
+            sending: _sending,
+            onTap: _sending ? null : _sendGift,
+          ),
         ],
       ),
     );
@@ -1844,13 +3664,19 @@ class _GiftTile extends StatelessWidget {
 
 class _SendGiftButton extends StatelessWidget {
   final int cost;
+  final bool sending;
+  final VoidCallback? onTap;
 
-  const _SendGiftButton({required this.cost});
+  const _SendGiftButton({
+    required this.cost,
+    required this.sending,
+    required this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
     return PressableScale(
-      onTap: () => Navigator.of(context).maybePop(),
+      onTap: onTap,
       child: Container(
         height: 56,
         padding: const EdgeInsets.symmetric(horizontal: 12),
@@ -1868,9 +3694,9 @@ class _SendGiftButton extends StatelessWidget {
         child: Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            const Text(
-              'Gonder',
-              style: TextStyle(
+            Text(
+              sending ? 'Gonderiliyor...' : 'Gonder',
+              style: const TextStyle(
                 fontFamily: AppFont.family,
                 fontWeight: FontWeight.w800,
                 fontSize: 16,
@@ -1914,15 +3740,27 @@ class _SendGiftButton extends StatelessWidget {
 
 // ------ Sheet: Report ---------------------------------------------------------
 
-class ReportSheet extends StatefulWidget {
-  const ReportSheet({super.key});
+class ReportSheet extends ConsumerStatefulWidget {
+  final ReportTargetType targetType;
+  final int? targetId;
+  final String targetDisplayName;
+
+  const ReportSheet({
+    super.key,
+    this.targetType = ReportTargetType.user,
+    this.targetId,
+    this.targetDisplayName = 'Bu kullanici',
+  });
 
   @override
-  State<ReportSheet> createState() => _ReportSheetState();
+  ConsumerState<ReportSheet> createState() => _ReportSheetState();
 }
 
-class _ReportSheetState extends State<ReportSheet> {
+class _ReportSheetState extends ConsumerState<ReportSheet> {
   int? _selected;
+  bool _submitting = false;
+  String? _notice;
+  late final TextEditingController _descriptionController;
 
   static const List<String> _options = [
     'Uygunsuz icerik',
@@ -1932,13 +3770,100 @@ class _ReportSheetState extends State<ReportSheet> {
   ];
 
   @override
+  void initState() {
+    super.initState();
+    _descriptionController = TextEditingController();
+  }
+
+  @override
+  void dispose() {
+    _descriptionController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submitReport() async {
+    if (_submitting || _selected == null) {
+      return;
+    }
+
+    final targetId = widget.targetId;
+    if (targetId == null) {
+      setState(() {
+        _notice = widget.targetType == ReportTargetType.user
+            ? 'Bu kullaniciyi sikayet etmek icin aktif bir sohbet gerekli.'
+            : 'Bu mesaji sikayet etmek icin gecerli bir mesaj gerekli.';
+      });
+      return;
+    }
+
+    final token = ref.read(appAuthProvider).asData?.value?.token;
+    if (token == null || token.trim().isEmpty) {
+      setState(() {
+        _notice = 'Bu islemi yapmak icin once giris yapmalisin.';
+      });
+      return;
+    }
+
+    setState(() {
+      _submitting = true;
+      _notice = null;
+    });
+
+    final api = AppAuthApi();
+    try {
+      await api.submitReport(
+        token,
+        targetType: widget.targetType == ReportTargetType.user
+            ? 'user'
+            : 'mesaj',
+        targetId: targetId,
+        category: _options[_selected!],
+        description: _descriptionController.text,
+      );
+      if (!mounted) {
+        return;
+      }
+      await showCupertinoDialog<void>(
+        context: context,
+        builder: (dialogContext) => CupertinoAlertDialog(
+          title: const Text('Sikayet alindi'),
+          content: const Text('Bildiriminiz inceleme ekibine iletildi.'),
+          actions: [
+            CupertinoDialogAction(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: const Text('Tamam'),
+            ),
+          ],
+        ),
+      );
+      if (!mounted) {
+        return;
+      }
+      Navigator.of(context).maybePop();
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _notice = AppAuthErrorFormatter.messageFrom(error);
+      });
+    } finally {
+      api.close();
+      if (mounted) {
+        setState(() => _submitting = false);
+      }
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return Container(
-      decoration: const BoxDecoration(
-        color: AppColors.white,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-      ),
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+    final objectLabel = widget.targetType == ReportTargetType.user
+        ? widget.targetDisplayName
+        : 'secilen mesaj';
+    final subtitle =
+        '$objectLabel icin bir sebep secin. Aciklama alani istege baglidir.';
+
+    return _AdaptiveChatSheet(
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -1961,9 +3886,10 @@ class _ReportSheetState extends State<ReportSheet> {
             ),
           ),
           const SizedBox(height: 4),
-          const Text(
-            'Bir veya birden fazla sebep secin',
-            style: TextStyle(
+          Text(
+            subtitle,
+            textAlign: TextAlign.center,
+            style: const TextStyle(
               fontFamily: AppFont.family,
               fontSize: 13,
               color: Color(0xFF999999),
@@ -1981,27 +3907,63 @@ class _ReportSheetState extends State<ReportSheet> {
               ),
             ),
           ),
+          Container(
+            constraints: const BoxConstraints(minHeight: 92),
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: AppColors.grayField,
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: CupertinoTextField(
+              controller: _descriptionController,
+              maxLines: 3,
+              placeholder: 'Isterseniz kisa bir aciklama ekleyin...',
+              placeholderStyle: const TextStyle(
+                fontFamily: AppFont.family,
+                color: Color(0xFF999999),
+                fontSize: 14,
+              ),
+              style: const TextStyle(
+                fontFamily: AppFont.family,
+                fontSize: 14,
+                color: AppColors.black,
+              ),
+              decoration: const BoxDecoration(color: Color(0x00000000)),
+              padding: EdgeInsets.zero,
+            ),
+          ),
+          if (_notice != null) ...[
+            const SizedBox(height: 12),
+            Text(
+              _notice!,
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                fontFamily: AppFont.family,
+                fontSize: 12,
+                height: 1.4,
+                color: Color(0xFFEF4444),
+              ),
+            ),
+          ],
           const SizedBox(height: 16),
           PressableScale(
-            onTap: _selected == null
-                ? null
-                : () => Navigator.of(context).maybePop(),
+            onTap: _selected == null || _submitting ? null : _submitReport,
             child: Container(
               height: 52,
               decoration: BoxDecoration(
-                color: _selected == null
+                color: _selected == null || _submitting
                     ? const Color(0xFFEEEEEE)
                     : const Color(0xFFEF4444),
                 borderRadius: BorderRadius.circular(26),
               ),
               alignment: Alignment.center,
               child: Text(
-                'Sikayet Et',
+                _submitting ? 'Gonderiliyor...' : 'Sikayet Et',
                 style: TextStyle(
                   fontFamily: AppFont.family,
                   fontWeight: FontWeight.w700,
                   fontSize: 15,
-                  color: _selected == null
+                  color: _selected == null || _submitting
                       ? const Color(0xFF999999)
                       : AppColors.white,
                 ),
@@ -2115,16 +4077,92 @@ class _ReportOption extends StatelessWidget {
 
 // ------ Sheet: Block Confirm --------------------------------------------------
 
-class BlockConfirmSheet extends StatelessWidget {
-  const BlockConfirmSheet({super.key});
+class BlockConfirmSheet extends ConsumerStatefulWidget {
+  final int? targetUserId;
+  final String targetDisplayName;
+  final bool initiallyBlocked;
+  final ValueChanged<bool>? onChanged;
+
+  const BlockConfirmSheet({
+    super.key,
+    required this.targetUserId,
+    required this.targetDisplayName,
+    this.initiallyBlocked = false,
+    this.onChanged,
+  });
+
+  @override
+  ConsumerState<BlockConfirmSheet> createState() => _BlockConfirmSheetState();
+}
+
+class _BlockConfirmSheetState extends ConsumerState<BlockConfirmSheet> {
+  bool _submitting = false;
+  String? _notice;
+
+  Future<void> _toggleBlockUser() async {
+    final targetUserId = widget.targetUserId;
+    if (_submitting) {
+      return;
+    }
+    if (targetUserId == null) {
+      Navigator.of(context).maybePop();
+      return;
+    }
+
+    final token = ref.read(appAuthProvider).asData?.value?.token;
+    if (token == null || token.trim().isEmpty) {
+      setState(() {
+        _notice = 'Bu islemi yapmak icin once giris yapmalisin.';
+      });
+      return;
+    }
+
+    setState(() {
+      _submitting = true;
+      _notice = null;
+    });
+
+    final api = AppAuthApi();
+    try {
+      if (widget.initiallyBlocked) {
+        await api.unblockUser(token, userId: targetUserId);
+        widget.onChanged?.call(false);
+      } else {
+        await api.blockUser(token, userId: targetUserId);
+        widget.onChanged?.call(true);
+      }
+      ref.read(conversationFeedRefreshProvider.notifier).state++;
+      if (!mounted) {
+        return;
+      }
+      Navigator.of(context).maybePop();
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _notice = AppAuthErrorFormatter.messageFrom(error);
+      });
+    } finally {
+      api.close();
+      if (mounted) {
+        setState(() => _submitting = false);
+      }
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      decoration: const BoxDecoration(
-        color: AppColors.white,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-      ),
+    final canSubmit = widget.targetUserId != null;
+    final subtitle =
+        _notice ??
+        (canSubmit
+            ? (widget.initiallyBlocked
+                  ? '${widget.targetDisplayName} engeli kaldirilacak.'
+                  : '${widget.targetDisplayName} size mesaj gonderemeyecek ve profilinizi goremeyecek.')
+            : 'Bu kullaniciyi engellemek icin aktif bir sohbet gerekli.');
+
+    return _AdaptiveChatSheet(
       padding: const EdgeInsets.fromLTRB(24, 12, 24, 24),
       child: Column(
         mainAxisSize: MainAxisSize.min,
@@ -2153,10 +4191,12 @@ class BlockConfirmSheet extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 16),
-          const Text(
-            'Engellemek istediginize emin misiniz?',
+          Text(
+            widget.initiallyBlocked
+                ? 'Engeli kaldirmak istediginize emin misiniz?'
+                : 'Engellemek istediginize emin misiniz?',
             textAlign: TextAlign.center,
-            style: TextStyle(
+            style: const TextStyle(
               fontFamily: AppFont.family,
               fontWeight: FontWeight.w700,
               fontSize: 17,
@@ -2165,29 +4205,43 @@ class BlockConfirmSheet extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 8),
-          const Text(
-            'Eda Soyral size mesaj gonderemeyecek ve profilinizi goremeyecek.',
+          Text(
+            subtitle,
             textAlign: TextAlign.center,
             style: TextStyle(
               fontFamily: AppFont.family,
               fontSize: 13.5,
               height: 1.5,
-              color: Color(0xFF666666),
+              color: _notice == null
+                  ? const Color(0xFF666666)
+                  : const Color(0xFFEF4444),
             ),
           ),
           const SizedBox(height: 24),
           PressableScale(
-            onTap: () => Navigator.of(context).maybePop(),
+            onTap: canSubmit
+                ? _toggleBlockUser
+                : () => Navigator.of(context).maybePop(),
             child: Container(
               height: 52,
               width: double.infinity,
               decoration: BoxDecoration(
-                color: const Color(0xFFEF4444),
+                color: canSubmit
+                    ? const Color(0xFFEF4444)
+                    : const Color(0xFFBDBDBD),
                 borderRadius: BorderRadius.circular(14),
               ),
               alignment: Alignment.center,
-              child: const Text(
-                'Engelle',
+              child: Text(
+                _submitting
+                    ? (widget.initiallyBlocked
+                          ? 'Kaldiriliyor...'
+                          : 'Engelleniyor...')
+                    : (canSubmit
+                          ? (widget.initiallyBlocked
+                                ? 'Engelden Cikar'
+                                : 'Engelle')
+                          : 'Tamam'),
                 style: TextStyle(
                   fontFamily: AppFont.family,
                   fontWeight: FontWeight.w700,
@@ -2227,4 +4281,4 @@ class BlockConfirmSheet extends StatelessWidget {
 }
 
 // =============================================================================
-// Notifications module â€” 2 varyasyon (empty / dolu)
+// Notifications module ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â 2 varyasyon (empty / dolu)

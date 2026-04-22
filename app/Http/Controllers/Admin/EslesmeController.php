@@ -3,7 +3,6 @@
 namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
-use App\Models\Begeni;
 use App\Models\Eslesme;
 use App\Models\User;
 use App\Services\Admin\AiHafizaPanelServisi;
@@ -55,8 +54,6 @@ class EslesmeController extends Controller
             'bekliyor'  => Eslesme::where('durum', 'bekliyor')->count(),
             'bitti'     => Eslesme::where('durum', 'bitti')->count(),
             'bugun'     => Eslesme::whereDate('created_at', today())->count(),
-            'begeni'    => Begeni::count(),
-            'karsilikli' => Begeni::where('eslesmeye_donustu_mu', true)->count(),
         ];
 
         $eslesmeler = $sorgu->latest()->paginate(25)->withQueryString();
@@ -78,18 +75,9 @@ class EslesmeController extends Controller
             ];
         }
 
-        // Karşılıklı beğeniler
-        $begeniler = Begeni::where(function ($q) use ($eslesme) {
-            $q->where('begenen_user_id', $eslesme->user_id)
-                ->where('begenilen_user_id', $eslesme->eslesen_user_id);
-        })->orWhere(function ($q) use ($eslesme) {
-            $q->where('begenen_user_id', $eslesme->eslesen_user_id)
-                ->where('begenilen_user_id', $eslesme->user_id);
-        })->with(['begenen', 'begenilen'])->get();
-
         $hafizaOzetleri = $aiHafizaPanelServisi->eslesmeHafizaOzetleri($eslesme);
 
-        return view('admin.eslesmeler.goster', compact('eslesme', 'sohbetBilgisi', 'begeniler', 'hafizaOzetleri'));
+        return view('admin.eslesmeler.goster', compact('eslesme', 'sohbetBilgisi', 'hafizaOzetleri'));
     }
 
     public function durumGuncelle(Request $request, Eslesme $eslesme)
@@ -141,44 +129,5 @@ class EslesmeController extends Controller
         $paneller = $aiHafizaPanelServisi->eslesmeKisiPanelleri($eslesme, $kullanici);
 
         return view('admin.eslesmeler.kisi-hafiza', compact('eslesme', 'kullanici', 'paneller'));
-    }
-
-    public function begeniler(Request $request)
-    {
-        $sorgu = Begeni::with(['begenen', 'begenilen']);
-
-        // Arama
-        if ($arama = $request->input('arama')) {
-            $sorgu->where(function ($q) use ($arama) {
-                $q->whereHas('begenen', function ($q2) use ($arama) {
-                    $q2->where('ad', 'like', "%{$arama}%")
-                        ->orWhere('soyad', 'like', "%{$arama}%")
-                        ->orWhere('email', 'like', "%{$arama}%");
-                })
-                    ->orWhereHas('begenilen', function ($q2) use ($arama) {
-                        $q2->where('ad', 'like', "%{$arama}%")
-                            ->orWhere('soyad', 'like', "%{$arama}%")
-                            ->orWhere('email', 'like', "%{$arama}%");
-                    });
-            });
-        }
-
-        // Durum filtresi
-        if ($request->input('eslesme') === 'evet') {
-            $sorgu->where('eslesmeye_donustu_mu', true);
-        } elseif ($request->input('eslesme') === 'hayir') {
-            $sorgu->where('eslesmeye_donustu_mu', false);
-        }
-
-        $istatistikler = [
-            'toplam'      => Begeni::count(),
-            'karsilikli'  => Begeni::where('eslesmeye_donustu_mu', true)->count(),
-            'gorulmemis'  => Begeni::where('goruldu_mu', false)->count(),
-            'bugun'       => Begeni::whereDate('created_at', today())->count(),
-        ];
-
-        $begeniler = $sorgu->latest()->paginate(25)->withQueryString();
-
-        return view('admin.eslesmeler.begeniler', compact('begeniler', 'istatistikler'));
     }
 }

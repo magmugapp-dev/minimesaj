@@ -37,6 +37,7 @@ class OdemeController extends Controller
             $veri['platform'],
             $veri['fis_verisi'],
             $veri['urun_kodu'],
+            $urunTipi,
         );
 
         if (!$dogrulamaSonucu['gecerli']) {

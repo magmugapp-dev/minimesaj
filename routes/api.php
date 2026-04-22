@@ -1,5 +1,7 @@
 <?php
 
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Broadcast;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -30,9 +32,15 @@ Route::prefix('auth')->middleware('throttle:auth')->group(function () {
 // ── Korumalı Route'lar ───────────────────────────────────────────────
 Route::middleware(['auth:sanctum', 'throttle:api'])->group(function () {
 
+    Route::post('broadcasting/auth', function (Request $request) {
+        return Broadcast::auth($request);
+    });
+
     // Kimlik
     Route::post('auth/cikis', [\App\Http\Controllers\Kimlik\KimlikController::class, 'cikis']);
     Route::get('auth/ben', [\App\Http\Controllers\Kimlik\KimlikController::class, 'ben']);
+    Route::delete('auth/hesap', [\App\Http\Controllers\Kimlik\KimlikController::class, 'hesapSil']);
+    Route::post('uygulama/destek-talebi', [\App\Http\Controllers\Api\DestekTalebiController::class, 'gonder']);
 
     // ── Dating (Flutter) ─────────────────────────────────────────────
     Route::prefix('dating')->group(function () {
@@ -40,15 +48,15 @@ Route::middleware(['auth:sanctum', 'throttle:api'])->group(function () {
         Route::get('eslesme-merkezi', [\App\Http\Controllers\Dating\EslesmeMerkeziController::class, 'merkez']);
         Route::patch('eslesme-tercihleri', [\App\Http\Controllers\Dating\EslesmeMerkeziController::class, 'tercihleriGuncelle']);
         Route::post('eslesme-baslat', [\App\Http\Controllers\Dating\EslesmeMerkeziController::class, 'baslat']);
+        Route::post('eslesme-gec/{kullanici}', [\App\Http\Controllers\Dating\EslesmeMerkeziController::class, 'gec']);
+        Route::post('eslesme-sohbet/{kullanici}', [\App\Http\Controllers\Dating\EslesmeMerkeziController::class, 'sohbetBaslat']);
         Route::get('profil', [\App\Http\Controllers\Dating\ProfilController::class, 'goster']);
+        Route::get('profil/{kullanici}', [\App\Http\Controllers\Dating\ProfilController::class, 'kullanici']);
         Route::patch('profil', [\App\Http\Controllers\Dating\ProfilController::class, 'guncelle']);
 
         Route::apiResource('fotograflar', \App\Http\Controllers\Dating\FotografController::class)
-            ->only(['index', 'store', 'destroy'])
+            ->only(['index', 'store', 'update', 'destroy'])
             ->parameters(['fotograflar' => 'fotograf']);
-
-        Route::post('begeni/{kullanici}', [\App\Http\Controllers\Dating\BegeniController::class, 'begen']);
-        Route::get('begeniler', [\App\Http\Controllers\Dating\BegeniController::class, 'gelenler']);
 
         Route::get('eslesmeler', [\App\Http\Controllers\Dating\EslesmeController::class, 'listele']);
         Route::post('eslesmeler/{eslesme}/bitir', [\App\Http\Controllers\Dating\EslesmeController::class, 'bitir']);
@@ -58,7 +66,10 @@ Route::middleware(['auth:sanctum', 'throttle:api'])->group(function () {
         Route::post('sohbetler/{sohbet}/mesajlar', [\App\Http\Controllers\Dating\MesajController::class, 'gonder']);
         Route::patch('sohbetler/{sohbet}/oku', [\App\Http\Controllers\Dating\MesajController::class, 'okuduIsaretle']);
         Route::post('medya-yukle', [\App\Http\Controllers\Dating\MedyaController::class, 'yukle']);
+        Route::post('sessize-al/{kullanici}', [\App\Http\Controllers\Dating\SessizeAlmaController::class, 'sessizeAl']);
+        Route::delete('sessize-al/{kullanici}', [\App\Http\Controllers\Dating\SessizeAlmaController::class, 'kaldir']);
 
+        Route::get('engeller', [\App\Http\Controllers\Moderasyon\EngellemeController::class, 'listele']);
         Route::post('engelle/{kullanici}', [\App\Http\Controllers\Moderasyon\EngellemeController::class, 'engelle']);
         Route::delete('engelle/{kullanici}', [\App\Http\Controllers\Moderasyon\EngellemeController::class, 'kaldir']);
         Route::post('sikayet', [\App\Http\Controllers\Moderasyon\SikayetController::class, 'olustur']);

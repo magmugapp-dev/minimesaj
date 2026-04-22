@@ -3,7 +3,6 @@
 namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
-use App\Models\Begeni;
 use App\Models\Engelleme;
 use App\Models\Eslesme;
 use App\Models\InstagramAiGorevi;
@@ -21,47 +20,7 @@ class IstatistikController extends Controller
 {
     public function index()
     {
-        // ── Kullanıcı İstatistikleri ──
-        $kullanici = [
-            'toplam'       => User::where('hesap_tipi', 'user')->count(),
-            'ai'           => User::where('hesap_tipi', 'ai')->count(),
-            'aktif'        => User::where('hesap_durumu', 'aktif')->count(),
-            'pasif'        => User::where('hesap_durumu', 'pasif')->count(),
-            'yasakli'      => User::where('hesap_durumu', 'yasakli')->count(),
-            'premium'      => User::where('premium_aktif_mi', true)->count(),
-            'cevrimici'    => User::where('cevrim_ici_mi', true)->count(),
-            'bugun'        => User::whereDate('created_at', today())->count(),
-            'bu_hafta'     => User::where('created_at', '>=', now()->startOfWeek())->count(),
-            'bu_ay'        => User::where('created_at', '>=', now()->startOfMonth())->count(),
-            'erkek'        => User::where('hesap_tipi', 'user')->where('cinsiyet', 'erkek')->count(),
-            'kadin'        => User::where('hesap_tipi', 'user')->where('cinsiyet', 'kadin')->count(),
-        ];
-
-        // ── Eşleşme İstatistikleri ──
-        $eslesme = [
-            'toplam'       => Eslesme::count(),
-            'aktif'        => Eslesme::where('durum', 'aktif')->count(),
-            'bekliyor'     => Eslesme::where('durum', 'bekliyor')->count(),
-            'bitti'        => Eslesme::where('durum', 'bitti')->count(),
-            'iptal'        => Eslesme::where('durum', 'iptal')->count(),
-            'bugun'        => Eslesme::whereDate('created_at', today())->count(),
-            'bu_hafta'     => Eslesme::where('created_at', '>=', now()->startOfWeek())->count(),
-            'rastgele'     => Eslesme::where('eslesme_turu', 'rastgele')->count(),
-            'otomatik'     => Eslesme::where('eslesme_turu', 'otomatik')->count(),
-            'premium'      => Eslesme::where('eslesme_turu', 'premium')->count(),
-            'ai_kaynakli'  => Eslesme::where('eslesme_kaynagi', 'yapay_zeka')->count(),
-            'gercek'       => Eslesme::where('eslesme_kaynagi', 'gercek_kullanici')->count(),
-        ];
-
-        // ── Beğeni İstatistikleri ──
-        $begeni = [
-            'toplam'       => Begeni::count(),
-            'karsilikli'   => Begeni::where('eslesmeye_donustu_mu', true)->count(),
-            'bugun'        => Begeni::whereDate('created_at', today())->count(),
-            'bu_hafta'     => Begeni::where('created_at', '>=', now()->startOfWeek())->count(),
-        ];
-
-        // ── Mesaj İstatistikleri ──
+// ── Mesaj İstatistikleri ──
         $mesaj = [
             'toplam'       => Mesaj::count(),
             'bugun'        => Mesaj::whereDate('created_at', today())->count(),
@@ -128,7 +87,6 @@ class IstatistikController extends Controller
         return view('admin.istatistik.index', compact(
             'kullanici',
             'eslesme',
-            'begeni',
             'mesaj',
             'moderasyon',
             'finansal',

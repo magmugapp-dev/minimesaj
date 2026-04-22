@@ -57,10 +57,11 @@
         </div>
 
         {{-- Navigasyon --}}
-        <nav class="flex-1 overflow-y-auto px-3 py-4">
+        <nav data-admin-sidebar-nav class="flex-1 overflow-y-auto px-3 py-4">
             <p class="mb-2 px-3 text-[11px] font-semibold uppercase tracking-wider text-gray-500">Ana Menü</p>
 
             @php
+                $ayarMenuGruplari = \App\Support\AdminAyarlari::kategorilerSidebarGruplu();
                 $menuler = [
                     [
                         'route' => 'admin.pano',
@@ -91,9 +92,15 @@
                 $moderasyonMenuler = [
                     [
                         'route' => 'admin.moderasyon.sikayetler',
-                        'etiket' => 'Moderasyon',
+                        'etiket' => 'Şikayetler',
                         'svg' =>
                             '<path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z"/>',
+                    ],
+                    [
+                        'route' => 'admin.moderasyon.destek-talepleri',
+                        'etiket' => 'Destek Talepleri',
+                        'svg' =>
+                            '<path stroke-linecap="round" stroke-linejoin="round" d="M7.5 8.25h9m-9 3h5.25M6.375 3h11.25A2.625 2.625 0 0120.25 5.625v12.75A2.625 2.625 0 0117.625 21H6.375A2.625 2.625 0 013.75 18.375V5.625A2.625 2.625 0 016.375 3z"/>',
                     ],
                     [
                         'route' => 'admin.eslesmeler.index',
@@ -143,12 +150,6 @@
                         'svg' =>
                             '<path stroke-linecap="round" stroke-linejoin="round" d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 013 19.875v-6.75zM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V8.625zM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V4.125z"/>',
                     ],
-                    [
-                        'route' => 'admin.ayarlar',
-                        'etiket' => 'Ayarlar',
-                        'svg' =>
-                            '<path stroke-linecap="round" stroke-linejoin="round" d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.324.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 011.37.49l1.296 2.247a1.125 1.125 0 01-.26 1.431l-1.003.827c-.293.24-.438.613-.431.992a6.759 6.759 0 010 .255c-.007.378.138.75.43.99l1.005.828c.424.35.534.954.26 1.43l-1.298 2.247a1.125 1.125 0 01-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.57 6.57 0 01-.22.128c-.331.183-.581.495-.644.869l-.213 1.28c-.09.543-.56.941-1.11.941h-2.594c-.55 0-1.02-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 01-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 01-1.369-.49l-1.297-2.247a1.125 1.125 0 01.26-1.431l1.004-.827c.292-.24.437-.613.43-.992a6.932 6.932 0 010-.255c.007-.378-.138-.75-.43-.99l-1.004-.828a1.125 1.125 0 01-.26-1.43l1.297-2.247a1.125 1.125 0 011.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.087.22-.128.332-.183.582-.495.644-.869l.214-1.281z"/><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>',
-                    ],
                 ];
             @endphp
 
@@ -157,7 +158,7 @@
                 <a href="{{ Route::has($menu['route']) ? route($menu['route']) : '#' }}"
                     class="group mb-0.5 flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all duration-150
                       {{ $aktif ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-500/25' : (Route::has($menu['route']) ? 'text-gray-300 hover:bg-white/10 hover:text-white' : 'text-gray-500 cursor-default') }}">
-                    <svg class="h-5 w-5 flex-shrink-0 {{ $aktif ? 'text-white' : (Route::has($menu['route']) ? 'text-gray-400 group-hover:text-gray-300' : 'text-gray-600') }}"
+                    <svg class="h-5 w-5 shrink-0 {{ $aktif ? 'text-white' : (Route::has($menu['route']) ? 'text-gray-400 group-hover:text-gray-300' : 'text-gray-600') }}"
                         fill="none" viewBox="0 0 24 24" stroke-width="1.5"
                         stroke="currentColor">{!! $menu['svg'] !!}</svg>
                     {{ $menu['etiket'] }}
@@ -174,7 +175,7 @@
                 <a href="{{ Route::has($menu['route']) ? route($menu['route']) : '#' }}"
                     class="group mb-0.5 flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all duration-150
                       {{ $aktif ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-500/25' : (Route::has($menu['route']) ? 'text-gray-300 hover:bg-white/10 hover:text-white' : 'text-gray-500 cursor-default') }}">
-                    <svg class="h-5 w-5 flex-shrink-0 {{ $aktif ? 'text-white' : (Route::has($menu['route']) ? 'text-gray-400 group-hover:text-gray-300' : 'text-gray-600') }}"
+                    <svg class="h-5 w-5 shrink-0 {{ $aktif ? 'text-white' : (Route::has($menu['route']) ? 'text-gray-400 group-hover:text-gray-300' : 'text-gray-600') }}"
                         fill="none" viewBox="0 0 24 24" stroke-width="1.5"
                         stroke="currentColor">{!! $menu['svg'] !!}</svg>
                     {{ $menu['etiket'] }}
@@ -192,7 +193,7 @@
                 <a href="{{ Route::has($menu['route']) ? route($menu['route']) : '#' }}"
                     class="group mb-0.5 flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all duration-150
                       {{ $aktif ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-500/25' : (Route::has($menu['route']) ? 'text-gray-300 hover:bg-white/10 hover:text-white' : 'text-gray-500 cursor-default') }}">
-                    <svg class="h-5 w-5 flex-shrink-0 {{ $aktif ? 'text-white' : (Route::has($menu['route']) ? 'text-gray-400 group-hover:text-gray-300' : 'text-gray-600') }}"
+                    <svg class="h-5 w-5 shrink-0 {{ $aktif ? 'text-white' : (Route::has($menu['route']) ? 'text-gray-400 group-hover:text-gray-300' : 'text-gray-600') }}"
                         fill="none" viewBox="0 0 24 24" stroke-width="1.5"
                         stroke="currentColor">{!! $menu['svg'] !!}</svg>
                     {{ $menu['etiket'] }}
@@ -209,7 +210,7 @@
                 <a href="{{ Route::has($menu['route']) ? route($menu['route']) : '#' }}"
                     class="group mb-0.5 flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all duration-150
                       {{ $aktif ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-500/25' : (Route::has($menu['route']) ? 'text-gray-300 hover:bg-white/10 hover:text-white' : 'text-gray-500 cursor-default') }}">
-                    <svg class="h-5 w-5 flex-shrink-0 {{ $aktif ? 'text-white' : (Route::has($menu['route']) ? 'text-gray-400 group-hover:text-gray-300' : 'text-gray-600') }}"
+                    <svg class="h-5 w-5 shrink-0 {{ $aktif ? 'text-white' : (Route::has($menu['route']) ? 'text-gray-400 group-hover:text-gray-300' : 'text-gray-600') }}"
                         fill="none" viewBox="0 0 24 24" stroke-width="1.5"
                         stroke="currentColor">{!! $menu['svg'] !!}</svg>
                     {{ $menu['etiket'] }}
@@ -217,6 +218,27 @@
                         <span class="ml-auto rounded bg-white/10 px-1.5 py-0.5 text-[10px] text-gray-500">Yakında</span>
                     @endunless
                 </a>
+            @endforeach
+
+            @foreach ($ayarMenuGruplari as $grupEtiketi => $grupMenuleri)
+                <p class="mb-2 mt-5 px-3 text-[11px] font-semibold uppercase tracking-wider text-gray-500">
+                    {{ $grupEtiketi }}</p>
+
+                @foreach ($grupMenuleri as $menu)
+                    @php
+                        $aktif =
+                            request()->routeIs('admin.ayarlar.kategori') &&
+                            request()->route('kategori') === $menu['slug'];
+                    @endphp
+                    <a href="{{ route('admin.ayarlar.kategori', ['kategori' => $menu['slug']]) }}"
+                        class="group mb-0.5 flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all duration-150
+                        {{ $aktif ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-500/25' : 'text-gray-300 hover:bg-white/10 hover:text-white' }}">
+                        <svg class="h-5 w-5 shrink-0 {{ $aktif ? 'text-white' : 'text-gray-400 group-hover:text-gray-300' }}"
+                            fill="none" viewBox="0 0 24 24" stroke-width="1.5"
+                            stroke="currentColor">{!! $menu['svg'] !!}</svg>
+                        {{ $menu['etiket'] }}
+                    </a>
+                @endforeach
             @endforeach
         </nav>
 
@@ -354,6 +376,36 @@
         </main>
     </div>
 
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const sidebarNav = document.querySelector('[data-admin-sidebar-nav]');
+
+            if (!sidebarNav) {
+                return;
+            }
+
+            const storageKey = 'admin-sidebar-scroll-top';
+            const savedScrollTop = window.sessionStorage.getItem(storageKey);
+
+            if (savedScrollTop !== null) {
+                sidebarNav.scrollTop = Number.parseInt(savedScrollTop, 10) || 0;
+            }
+
+            const persistSidebarScroll = () => {
+                window.sessionStorage.setItem(storageKey, String(sidebarNav.scrollTop));
+            };
+
+            sidebarNav.addEventListener('scroll', persistSidebarScroll, {
+                passive: true
+            });
+            sidebarNav.addEventListener('click', (event) => {
+                if (event.target.closest('a[href]')) {
+                    persistSidebarScroll();
+                }
+            });
+            window.addEventListener('beforeunload', persistSidebarScroll);
+        });
+    </script>
 </body>
 
 </html>

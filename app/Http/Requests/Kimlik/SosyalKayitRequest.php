@@ -15,6 +15,7 @@ class SosyalKayitRequest extends FormRequest
     {
         return [
             'social_session' => 'required|string',
+            'uygulama_versiyonu' => 'nullable|string|max:32',
             'ad' => 'required|string|max:255',
             'kullanici_adi' => 'required|string|max:255',
             'cinsiyet' => 'required|in:erkek,kadin,belirtmek_istemiyorum',

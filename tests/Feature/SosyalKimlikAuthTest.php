@@ -1,6 +1,8 @@
 <?php
 
 use App\Models\User;
+use App\Models\Ayar;
+use App\Services\AyarServisi;
 use App\Services\Kimlik\Sosyal\SosyalKimlikBilgisi;
 use App\Services\Kimlik\Sosyal\SosyalKimlikSaglayici;
 use Illuminate\Http\UploadedFile;
@@ -162,6 +164,11 @@ it('rejects social login for inactive users', function () {
 
 it('registers a new social user and uploads the profile photo', function () {
     Storage::fake('public');
+    Ayar::query()->updateOrCreate(
+        ['anahtar' => 'kayit_puani'],
+        ['deger' => '100', 'grup' => 'puan_sistemi', 'tip' => 'integer', 'aciklama' => 'Kayit Bonusu'],
+    );
+    app(AyarServisi::class)->onbellekTemizle();
 
     sahteSosyalSaglayici('social.provider.google', new SosyalKimlikBilgisi(
         provider: 'google',
@@ -187,6 +194,7 @@ it('registers a new social user and uploads the profile photo', function () {
     $response->assertCreated()
         ->assertJsonPath('durum', 'authenticated')
         ->assertJsonPath('kullanici.kullanici_adi', 'fotolukullanici')
+        ->assertJsonPath('kullanici.mevcut_puan', 100)
         ->assertJsonStructure(['token']);
 
     $user = User::where('google_kimlik', 'google-photo-user')->first();
@@ -199,6 +207,38 @@ it('registers a new social user and uploads the profile photo', function () {
         'user_id' => $user->id,
         'ana_fotograf_mi' => true,
     ]);
+});
+
+it('uses the google avatar as the profile image when registration photo is skipped', function () {
+    $avatarUrl = 'https://lh3.googleusercontent.com/a/google-avatar';
+
+    sahteSosyalSaglayici('social.provider.google', new SosyalKimlikBilgisi(
+        provider: 'google',
+        providerUserId: 'google-avatar-user',
+        email: 'avatar@example.com',
+        emailVerified: true,
+        displayName: 'Avatar Kullanici',
+        avatarUrl: $avatarUrl,
+    ));
+
+    $socialSession = sosyalOturumBaslat($this, 'google');
+
+    $response = $this->postJson('/api/auth/sosyal/kayit', [
+        'social_session' => $socialSession,
+        'ad' => 'Avatar Kullanici',
+        'kullanici_adi' => 'avatarkullanici',
+        'cinsiyet' => 'kadin',
+        'dogum_yili' => 1996,
+    ]);
+
+    $response->assertCreated()
+        ->assertJsonPath('durum', 'authenticated')
+        ->assertJsonPath('kullanici.profil_resmi', $avatarUrl);
+
+    $user = User::where('google_kimlik', 'google-avatar-user')->first();
+
+    expect($user)->not->toBeNull();
+    expect($user?->profil_resmi)->toBe($avatarUrl);
 });
 
 function sahteSosyalSaglayici(string $anahtar, SosyalKimlikBilgisi $kimlik): void

@@ -3,7 +3,6 @@
 namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
-use App\Models\Begeni;
 use App\Models\Eslesme;
 use App\Models\InstagramHesap;
 use App\Models\Mesaj;

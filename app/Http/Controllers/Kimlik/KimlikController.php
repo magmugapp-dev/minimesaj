@@ -11,6 +11,7 @@ use App\Services\Kimlik\AuthPuanServisi;
 use App\Services\Kimlik\IstemciYetenekServisi;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\ValidationException;
 
@@ -92,5 +93,17 @@ class KimlikController extends Controller
         $this->authPuanServisi->gunlukGirisBonusuUygula($user);
 
         return new KullaniciResource($user->fresh()->load('aiAyar', 'fotograflar'));
+    }
+
+    public function hesapSil(Request $request): JsonResponse
+    {
+        $user = $request->user();
+
+        DB::transaction(function () use ($user): void {
+            $user->tokens()->delete();
+            $user->delete();
+        });
+
+        return response()->json(['mesaj' => 'Hesap silindi.']);
     }
 }

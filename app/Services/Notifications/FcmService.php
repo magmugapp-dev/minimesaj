@@ -18,7 +18,8 @@ class FcmService
 
     public function diagnostics(): array
     {
-        $serviceAccountPath = $this->serviceAccountPath();
+        $serviceAccountDetails = $this->serviceAccountPathDetails();
+        $serviceAccountPath = $serviceAccountDetails['path'];
         $projectId = $this->projectId();
 
         $diagnostics = [
@@ -26,11 +27,18 @@ class FcmService
             'project_id' => $projectId,
             'service_account_path' => $serviceAccountPath,
             'google_application_credentials' => env('GOOGLE_APPLICATION_CREDENTIALS'),
+            'checked_service_account_paths' => $serviceAccountDetails['checked'],
+            'recommended_service_account_setting' => 'ayarlar/firebase/service-account.json',
+            'recommended_service_account_path' => storage_path('app/private/ayarlar/firebase/service-account.json'),
             'access_token_received' => false,
         ];
 
         if ($serviceAccountPath === null) {
-            $diagnostics['error'] = 'Firebase service account JSON file was not found.';
+            $checked = $serviceAccountDetails['checked'] !== []
+                ? implode(', ', $serviceAccountDetails['checked'])
+                : 'no configured path';
+
+            $diagnostics['error'] = 'Firebase service account JSON file was not found. Checked: ' . $checked . '.';
 
             return $diagnostics;
         }
@@ -138,13 +146,13 @@ class FcmService
 
     private function projectId(): ?string
     {
-        $projectId = $this->ayarServisi->al(
+        $projectId = $this->settingString(
             'firebase_project_id',
             config('services.firebase.project_id')
         );
 
-        if (is_string($projectId) && trim($projectId) !== '') {
-            return trim($projectId);
+        if ($projectId !== null) {
+            return $projectId;
         }
 
         if ($this->serviceAccountPath() === null) {
@@ -185,24 +193,54 @@ class FcmService
 
     private function serviceAccountPath(): ?string
     {
+        return $this->serviceAccountPathDetails()['path'];
+    }
+
+    private function serviceAccountPathDetails(): array
+    {
+        $checked = [];
         $fromEnvironment = env('GOOGLE_APPLICATION_CREDENTIALS');
 
         if (is_string($fromEnvironment) && trim($fromEnvironment) !== '') {
-            $resolved = $this->resolvePath(trim($fromEnvironment));
+            $environmentPath = trim($fromEnvironment);
+            $checked[] = $environmentPath;
+            $resolved = $this->resolvePath($environmentPath);
 
             if ($resolved !== null) {
-                return $resolved;
+                return ['path' => $resolved, 'checked' => $checked];
             }
         }
 
-        $configured = config('services.firebase.service_account_path');
-        $setting = $this->ayarServisi->al('firebase_service_account_path', $configured);
+        $setting = $this->settingString(
+            'firebase_service_account_path',
+            config('services.firebase.service_account_path')
+        );
 
-        if (!is_string($setting) || trim($setting) === '') {
-            return null;
+        if ($setting !== null) {
+            $checked[] = $setting;
+            $resolved = $this->resolvePath($setting);
+
+            if ($resolved !== null) {
+                return ['path' => $resolved, 'checked' => $checked];
+            }
         }
 
-        return $this->resolvePath(trim($setting));
+        return ['path' => null, 'checked' => $checked];
+    }
+
+    private function settingString(string $anahtar, mixed $fallback = null): ?string
+    {
+        $value = $this->ayarServisi->al($anahtar);
+
+        if (is_string($value) && trim($value) !== '') {
+            return trim($value);
+        }
+
+        if (is_string($fallback) && trim($fallback) !== '') {
+            return trim($fallback);
+        }
+
+        return null;
     }
 
     private function resolvePath(string $path): ?string

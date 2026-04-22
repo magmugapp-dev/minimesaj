@@ -86,11 +86,6 @@
                         <p class="studio-stat__meta">Toplam eşleşme</p>
                     </div>
                     <div class="studio-stat">
-                        <p class="studio-stat__label">Beğeni</p>
-                        <p class="studio-stat__value">{{ number_format($kullanici->begeniler_count) }}</p>
-                        <p class="studio-stat__meta">Atılan beğeni</p>
-                    </div>
-                    <div class="studio-stat">
                         <p class="studio-stat__label">DM mesaj</p>
                         <p class="studio-stat__value">{{ number_format($toplamMesaj) }}</p>
                         <p class="studio-stat__meta">Instagram mesajları</p>
