@@ -21,25 +21,21 @@ it('renders the redesigned ai studio pages for an admin', function () {
     $this->actingAs($admin)
         ->get(route('admin.ai.ekle'))
         ->assertOk()
-        ->assertSeeText('Yeni AI hesabi')
-        ->assertSeeText('Profil bilgileri');
-
-    $this->actingAs($admin)
-        ->get(route('admin.ai.json-ekle'))
-        ->assertOk()
-        ->assertSeeText('JSON ile toplu AI ekle')
-        ->assertSeeText('Import duzenleyicisi');
+        ->assertSeeText('Yeni AI Persona')
+        ->assertSeeText('Kimlik ve Hesap')
+        ->assertSeeText('Davranis Sliderlari');
 
     $this->actingAs($admin)
         ->get(route('admin.ai.goster', $aiUser))
         ->assertOk()
         ->assertSeeText('Aylin Deneme')
-        ->assertSeeText('Persona Sinyalleri');
+        ->assertSeeText('Davranis Matrisi');
 
     $this->actingAs($admin)
         ->get(route('admin.ai.duzenle', $aiUser))
         ->assertOk()
         ->assertSeeText('Davranis Sliderlari')
+        ->assertSeeText('Kimlik ve Hesap')
         ->assertSeeText('Kisisel Kurallar');
 
     $this->actingAs($admin)

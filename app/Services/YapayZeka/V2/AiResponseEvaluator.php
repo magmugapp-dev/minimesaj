@@ -38,6 +38,10 @@ class AiResponseEvaluator
             $reasons[] = 'fazla_kisa';
         }
 
+        if ($this->hasRiskyTone($normalized, $persona, $plan, $violations)) {
+            $reasons[] = 'riskli_ton';
+        }
+
         return [
             'accepted' => $reasons === [],
             'reasons' => $reasons,
@@ -53,5 +57,44 @@ class AiResponseEvaluator
             'warm_opening' => 'Selam, buraya denk gelmene sevindim. Nasilsin?',
             default => 'Tam olarak o konuya girmek istemiyorum, istersen baska bir seyden devam edelim.',
         };
+    }
+
+    private function hasRiskyTone(
+        string $normalized,
+        AiPersonaProfile $persona,
+        AiResponsePlan $plan,
+        array $violations,
+    ): bool {
+        $intensity = max(
+            (int) ($persona->argo_seviyesi ?? 0),
+            (int) ($persona->sarkastiklik_seviyesi ?? 0),
+            (int) ($persona->kiskanclik_seviyesi ?? 0),
+        );
+
+        if ($intensity < 8 && ($violations['blocked'] ?? false) !== true) {
+            return false;
+        }
+
+        $aggressiveTokens = [
+            'salak',
+            'sacma',
+            'kes lan',
+            'defol',
+            'ne alaka',
+            'umrumda degil',
+            'beni bozma',
+            'takintili',
+        ];
+
+        $tonRiskli = Str::contains($normalized, $aggressiveTokens)
+            || str_contains($normalized, '!!!')
+            || str_contains($normalized, '???');
+
+        if (!$tonRiskli) {
+            return false;
+        }
+
+        return in_array($plan->tone, ['soft', 'careful', 'calm_direct', 'curious'], true)
+            || ($violations['blocked'] ?? false) === true;
     }
 }

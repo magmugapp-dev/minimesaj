@@ -71,7 +71,11 @@
                 <div class="studio-form-grid studio-form-grid--2 mt-6">
                     <label>
                         <span class="studio-label">Model</span>
-                        <input class="studio-input" type="text" name="model_adi" value="{{ old('model_adi', $config->model_adi) }}" placeholder="gemini-2.5-flash">
+                        <select class="studio-select" name="model_adi">
+                            @foreach ($modelOptions as $value => $label)
+                                <option value="{{ $value }}" @selected(old('model_adi', $config->model_adi) === $value)>{{ $label }}</option>
+                            @endforeach
+                        </select>
                     </label>
                     <label>
                         <span class="studio-label">Temperature</span>
@@ -145,6 +149,7 @@
                                     <span class="studio-pill studio-pill--info">{{ $persona?->dating_aktif_mi ? 'Dating acik' : 'Dating kapali' }}</span>
                                     <span class="studio-pill studio-pill--neutral">{{ $persona?->instagram_aktif_mi ? 'Instagram acik' : 'Instagram kapali' }}</span>
                                     <span class="studio-pill studio-pill--neutral">Ton {{ $persona?->konusma_tonu ?: 'dogal' }}</span>
+                                    <span class="studio-pill studio-pill--neutral">{{ data_get($persona?->metadata, 'model_adi', $config->model_adi) }}</span>
                                 </div>
 
                                 <div class="mt-4 grid grid-cols-2 gap-3 text-sm">

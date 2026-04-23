@@ -2,7 +2,7 @@
     $links = [
         [
             'route' => 'admin.ai.index',
-            'matches' => ['admin.ai.index', 'admin.ai.goster', 'admin.ai.duzenle', 'admin.ai.guncelle'],
+            'matches' => ['admin.ai.index', 'admin.ai.ekle', 'admin.ai.kaydet', 'admin.ai.goster', 'admin.ai.duzenle', 'admin.ai.guncelle'],
             'title' => 'Studio',
         ],
         [

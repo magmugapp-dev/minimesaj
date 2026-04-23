@@ -4,10 +4,10 @@
 
 @section('icerik')
     @php
-        $guardrailCount = count(array_filter(array_map('trim', preg_split('/\r\n|\r|\n/', $blockedTopicsText . "\n" . $requiredRulesText) ?: [])));
         $stateCount = $states->count();
         $memoryCount = $memories->count();
         $traceCount = $traces->count();
+        $selectedModel = data_get($persona->metadata, 'model_adi', array_key_first($modelOptions));
     @endphp
 
     <div class="studio studio--ai space-y-6">
@@ -38,71 +38,89 @@
                 <div class="studio-stat__value">{{ $memoryCount }}</div>
             </article>
             <article class="studio-stat">
-                <div class="studio-stat__label">Flort / Emoji</div>
-                <div class="studio-stat__value">{{ $persona->flort_seviyesi }}/{{ $persona->emoji_seviyesi }}</div>
+                <div class="studio-stat__label">Trace</div>
+                <div class="studio-stat__value">{{ $traceCount }}</div>
             </article>
             <article class="studio-stat">
-                <div class="studio-stat__label">Mesaj Araligi</div>
-                <div class="studio-stat__value">{{ $persona->mesaj_uzunlugu_min }}-{{ $persona->mesaj_uzunlugu_max }}</div>
+                <div class="studio-stat__label">Model</div>
+                <div class="studio-stat__value text-lg">{{ $modelOptions[$selectedModel] ?? $selectedModel }}</div>
             </article>
         </section>
 
-        <div class="grid gap-6 xl:grid-cols-[1.1fr,1fr]">
+        <div class="grid gap-6 xl:grid-cols-[1.02fr,0.98fr]">
             <section class="studio-card">
                 <div class="studio-card__header">
                     <div>
-                        <h2 class="studio-title">Persona Sinyalleri</h2>
+                        <h2 class="studio-title">Kimlik ve Persona Ozeti</h2>
                     </div>
                 </div>
 
-                <div class="studio-progress-list">
-                    @foreach ([
-                        'Mizah' => $persona->mizah_seviyesi,
-                        'Flort' => $persona->flort_seviyesi,
-                        'Emoji' => $persona->emoji_seviyesi,
-                        'Giriskenlik' => $persona->giriskenlik_seviyesi,
-                        'Utangaclik' => $persona->utangaclik_seviyesi,
-                        'Duygusallik' => $persona->duygusallik_seviyesi,
-                    ] as $label => $value)
-                        <div class="studio-progress">
-                            <div class="studio-progress__top">
-                                <div class="studio-progress__label">{{ $label }}</div>
-                                <div class="studio-progress__value">{{ $value }}/10</div>
-                            </div>
-                            <div class="studio-progress__track">
-                                <div class="studio-progress__fill" style="width: {{ max(0, min(100, $value * 10)) }}%"></div>
-                            </div>
+                <div class="grid gap-4 md:grid-cols-2">
+                    <div class="studio-surface">
+                        <div class="studio-surface__title">Kimlik</div>
+                        <div class="studio-data-value mt-2">{{ '@' . $kullanici->kullanici_adi }}</div>
+                        <div class="mt-2 text-sm text-slate-600">
+                            {{ $dropdowns['account_statuses'][$kullanici->hesap_durumu] ?? $kullanici->hesap_durumu }}
+                            / {{ $dropdowns['genders'][$kullanici->cinsiyet] ?? $kullanici->cinsiyet }}
                         </div>
-                    @endforeach
+                        <div class="mt-2 text-sm text-slate-600">
+                            {{ $kullanici->dogum_yili ?: '-' }} / {{ $kullanici->ulke ?: '-' }}
+                        </div>
+                    </div>
+                    <div class="studio-surface">
+                        <div class="studio-surface__title">Dil ve Lokasyon</div>
+                        <div class="studio-data-value mt-2">{{ $persona->ana_dil_adi ?: '-' }}</div>
+                        <div class="mt-2 text-sm text-slate-600">
+                            {{ $persona->persona_ulke ?: '-' }} / {{ $persona->persona_bolge ?: '-' }} / {{ $persona->persona_sehir ?: '-' }}
+                        </div>
+                        @if (!empty($persona->ikinci_diller))
+                            <div class="mt-2 text-sm text-slate-600">{{ implode(', ', $persona->ikinci_diller) }}</div>
+                        @endif
+                    </div>
+                    <div class="studio-surface md:col-span-2">
+                        <div class="studio-surface__title">Persona Ozeti</div>
+                        <div class="studio-copy-block">{{ $persona->persona_ozeti ?: 'Bu persona icin yazili ozet bulunmuyor.' }}</div>
+                    </div>
                 </div>
 
                 <div class="mt-6 grid gap-4 md:grid-cols-2">
-                    <div class="studio-surface">
-                        <div class="studio-surface__title">Ilk Mesaj Davranisi</div>
-                        <div class="studio-data-value mt-2">{{ $persona->ilk_mesaj_atar_mi ? 'Ilk mesaji atar' : 'Ilk mesaji bekler' }}</div>
-                        @if ($persona->ilk_mesaj_tonu)
-                            <div class="studio-data-value mt-2">{{ $persona->ilk_mesaj_tonu }}</div>
-                        @endif
-                    </div>
-                    <div class="studio-surface">
-                        <div class="studio-surface__title">Saat Dilimi</div>
-                        <div class="studio-data-value mt-2">{{ $persona->saat_dilimi ?: config('app.timezone') }}</div>
-                        <div class="studio-data-value mt-2">{{ $persona->uyku_baslangic ?: '-' }} - {{ $persona->uyku_bitis ?: '-' }}</div>
-                    </div>
+                    @foreach ([
+                        'Yasam Tarzi' => $persona->yasam_tarzi,
+                        'Meslek' => $persona->meslek,
+                        'Sektor' => $persona->sektor,
+                        'Egitim' => $persona->egitim,
+                        'Yas Araligi' => $persona->yas_araligi,
+                        'Iliski Gecmisi' => $persona->iliski_gecmisi_tonu,
+                    ] as $label => $value)
+                        <div class="studio-surface">
+                            <div class="studio-surface__title">{{ $label }}</div>
+                            <div class="studio-data-value mt-2">{{ $value ?: '-' }}</div>
+                        </div>
+                    @endforeach
                 </div>
             </section>
 
             <section class="studio-card">
                 <div class="studio-card__header">
                     <div>
-                        <h2 class="studio-title">Guardrail ve Persona Metni</h2>
+                        <h2 class="studio-title">Guardrail ve Zamanlama</h2>
                     </div>
                 </div>
 
                 <div class="ai-studio-stack">
                     <div class="studio-surface">
-                        <div class="studio-surface__title">Persona Ozeti</div>
-                        <div class="studio-copy-block">{{ $persona->persona_ozeti ?: 'Bu persona icin yazili ozet bulunmuyor.' }}</div>
+                        <div class="studio-surface__title">Ilk Mesaj Davranisi</div>
+                        <div class="studio-data-value mt-2">{{ $persona->ilk_mesaj_atar_mi ? 'Ilk mesaji atar' : 'Ilk mesaji bekler' }}</div>
+                        @if ($persona->ilk_mesaj_tonu)
+                            <div class="studio-copy-block mt-3">{{ $persona->ilk_mesaj_tonu }}</div>
+                        @endif
+                    </div>
+                    <div class="studio-surface">
+                        <div class="studio-surface__title">Mesaj Boyu ve Uyku</div>
+                        <div class="studio-data-value mt-2">{{ $persona->mesaj_uzunlugu_min }} - {{ $persona->mesaj_uzunlugu_max }} karakter</div>
+                        <div class="mt-2 text-sm text-slate-600">{{ $persona->minimum_cevap_suresi_saniye }} - {{ $persona->maksimum_cevap_suresi_saniye }} saniye</div>
+                        <div class="mt-2 text-sm text-slate-600">{{ $persona->saat_dilimi ?: config('app.timezone') }}</div>
+                        <div class="mt-2 text-sm text-slate-600">{{ $persona->uyku_baslangic ?: '-' }} - {{ $persona->uyku_bitis ?: '-' }}</div>
                     </div>
                     <div class="studio-surface">
                         <div class="studio-surface__title">Yasakli Konular</div>
@@ -115,6 +133,40 @@
                 </div>
             </section>
         </div>
+
+        <section class="studio-card">
+            <div class="studio-card__header">
+                <div>
+                    <h2 class="studio-title">Davranis Matrisi</h2>
+                </div>
+            </div>
+
+            <div class="space-y-6">
+                @foreach ($behaviorSliderGroups as $group => $sliders)
+                    <div class="space-y-4">
+                        <div class="text-sm font-semibold uppercase tracking-[0.18em] text-slate-400">{{ $group }}</div>
+                        <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                            @foreach ($sliders as $field => $meta)
+                                @php $value = (int) ($persona->{$field} ?? ($meta['default'] ?? 5)); @endphp
+                                <div class="studio-progress">
+                                    <div class="studio-progress__top">
+                                        <div class="studio-progress__label">{{ $meta['label'] }}</div>
+                                        <div class="studio-progress__value">{{ $value }}/10</div>
+                                    </div>
+                                    <div class="studio-progress__track">
+                                        <div class="studio-progress__fill" style="width: {{ max(0, min(100, $value * 10)) }}%"></div>
+                                    </div>
+                                    <div class="studio-range__legend">
+                                        <span>{{ $meta['legend'][0] ?? 'Dusuk' }}</span>
+                                        <span>{{ $meta['legend'][1] ?? 'Yuksek' }}</span>
+                                    </div>
+                                </div>
+                            @endforeach
+                        </div>
+                    </div>
+                @endforeach
+            </div>
+        </section>
 
         <div class="grid gap-6 xl:grid-cols-[0.92fr,1.08fr]">
             <section class="studio-card">
@@ -155,7 +207,7 @@
                                         <div class="studio-data-value mt-2">{{ $state->son_kullanici_duygusu ?: '-' }}</div>
                                     </div>
                                 </div>
-                                <div class="mt-4 text-sm text-slate-600 leading-7">
+                                <div class="mt-4 text-sm leading-7 text-slate-600">
                                     Samimiyet {{ $state->samimiyet_puani }}, ilgi {{ $state->ilgi_puani }}, guven {{ $state->guven_puani }}.
                                     {{ $state->son_konu ? ' Son konu: ' . $state->son_konu . '.' : '' }}
                                 </div>
@@ -221,5 +273,3 @@
         </div>
     </div>
 @endsection
-
-

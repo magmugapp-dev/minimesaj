@@ -54,7 +54,7 @@ class AiResponseGenerator
 
         $response = $this->geminiSaglayici->tamamlaStream(
             $messages,
-            $this->engineConfigService->modelParameters($config),
+            $this->resolveModelParameters($config, $persona),
         );
 
         $raw = (string) ($response['cevap'] ?? '');
@@ -91,6 +91,7 @@ class AiResponseGenerator
         $requiredInstructions = $this->guardrailService->requiredInstructions($persona, $context->kanal);
         $languageCode = Language::normalizeCode($persona->ana_dil_kodu) ?: Language::normalizeCode($context->aiUser->dil) ?: 'tr';
         $languageName = $persona->ana_dil_adi ?: Language::name($languageCode, 'Turkish');
+        $personaModel = $this->resolvePersonaModel($config, $persona);
         $lengthInstruction = "Yanit uzunlugu hedefi: {$plan->minChars}-{$plan->maxChars} karakter civari.";
         $questionInstruction = $plan->askQuestion
             ? 'Uygunsa dogal sekilde tek bir karsi soru ile akisi canli tut.'
@@ -108,8 +109,10 @@ class AiResponseGenerator
         $systemParts = array_filter([
             $config->sistem_komutu ?: 'Dogal ve insan gibi sohbet et.',
             'Senin kimligin: ' . $this->personaIdentity($context->aiUser, $persona),
+            'Davranis matrisi: ' . $this->behaviorSummary($persona),
             "Cevap dili: {$languageName} ({$languageCode}). Kullanici baska dilde yazsa bile onu anla ama kendi persona ana dilinde cevap ver. Bu dil tercihi genel dil kurallarindan onceliklidir.",
             'Kanal: ' . $context->kanal,
+            'Persona model tercihi: ' . $personaModel . '.',
             'Ton: ' . ($persona->konusma_tonu ?: 'dogal') . ', stil: ' . ($persona->konusma_stili ?: 'samimi'),
             'Anlik durum: ruh hali ' . $state->ruhHali . ', samimiyet ' . $state->samimiyetPuani . ', ilgi ' . $state->ilgiPuani . ', guven ' . $state->guvenPuani . ', gerilim ' . $state->gerilimSeviyesi . '.',
             'Bu turdaki amacin: ' . $plan->aim . '. Uslup notu: ' . $plan->styleHint . '.',
@@ -197,5 +200,34 @@ class AiResponseGenerator
             ->all();
 
         return "Tutarlilik sinyali:\n" . implode("\n", $lines) . "\nBu farki tek mesaj icinde dogalca fark et. Sorgu memuru gibi davranma; insan gibi, yumusak bir merakla sor.";
+    }
+
+    private function resolveModelParameters(AiEngineConfig $config, AiPersonaProfile $persona): array
+    {
+        $parameters = $this->engineConfigService->modelParameters($config);
+        $parameters['model_adi'] = $this->resolvePersonaModel($config, $persona);
+
+        return $parameters;
+    }
+
+    private function resolvePersonaModel(AiEngineConfig $config, AiPersonaProfile $persona): string
+    {
+        $allowedModels = array_keys(config('ai_studio_dropdowns.models', []));
+        $personaModel = data_get($persona->metadata, 'model_adi');
+
+        if (is_string($personaModel) && in_array($personaModel, $allowedModels, true)) {
+            return $personaModel;
+        }
+
+        return $config->model_adi ?: 'gemini-2.5-flash';
+    }
+
+    private function behaviorSummary(AiPersonaProfile $persona): string
+    {
+        $labels = collect(config('ai_studio_dropdowns.behavior_sliders', []))
+            ->map(fn (array $meta, string $field) => ($meta['label'] ?? $field) . ' ' . (int) ($persona->{$field} ?? ($meta['default'] ?? 5)) . '/10')
+            ->implode(', ');
+
+        return $labels !== '' ? $labels : 'Varsayilan davranis dengesi kullan.';
     }
 }

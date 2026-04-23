@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
+use App\Models\AiAyar;
 use App\Models\AiConversationState;
 use App\Models\AiEngineConfig;
 use App\Models\AiGuardrailRule;
@@ -15,6 +16,10 @@ use App\Services\YapayZeka\V2\AiPersonaService;
 use App\Support\Language;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
+use Illuminate\Validation\Rule;
+use Illuminate\Validation\Validator;
 use Illuminate\View\View;
 
 class AiStudioController extends Controller
@@ -54,21 +59,59 @@ class AiStudioController extends Controller
             ->limit(15)
             ->get();
 
-        return view('admin.ai-v2.index', [
+        return view('admin.ai-v2.index', array_merge($this->sharedViewData(), [
             'config' => $config,
             'personalar' => $personalar,
             'istatistikler' => $istatistikler,
             'blockedTopicsText' => $this->rulesToText($config, 'blocked_topic'),
             'requiredRulesText' => $this->rulesToText($config, 'required_rule'),
             'sonTraceler' => $sonTraceler,
-        ]);
+        ]));
+    }
+
+    public function create(): View
+    {
+        return view('admin.ai-v2.create', array_merge($this->sharedViewData(), [
+            'kullanici' => null,
+            'persona' => null,
+            'blockedTopicsText' => '',
+            'requiredRulesText' => '',
+        ]));
+    }
+
+    public function store(Request $request): RedirectResponse
+    {
+        $payload = $this->validateStudioPayload($request, true);
+
+        $kullanici = DB::transaction(function () use ($payload) {
+            $user = User::query()->create($payload['user']);
+
+            $persona = AiPersonaProfile::query()->create($payload['persona'] + [
+                'ai_user_id' => $user->id,
+            ]);
+
+            $this->mirrorLegacySettings($user, $persona, $payload['legacy']);
+
+            $this->replaceRules(
+                aiEngineConfig: null,
+                aiPersonaProfile: $persona,
+                blockedTopics: $payload['guardrails']['blocked_topics'],
+                requiredRules: $payload['guardrails']['required_rules'],
+            );
+
+            return $user;
+        });
+
+        return redirect()
+            ->route('admin.ai.goster', $kullanici)
+            ->with('basari', $kullanici->ad . ' AI persona kaydi olusturuldu.');
     }
 
     public function engineUpdate(Request $request): RedirectResponse
     {
         $validated = $request->validate([
             'aktif_mi' => 'nullable|boolean',
-            'model_adi' => 'required|string|max:100',
+            'model_adi' => ['required', Rule::in(array_keys(config('ai_studio_dropdowns.models', [])))],
             'temperature' => 'required|numeric|min:0|max:2',
             'top_p' => 'required|numeric|min:0|max:1',
             'max_output_tokens' => 'required|integer|min:64|max:8192',
@@ -104,7 +147,7 @@ class AiStudioController extends Controller
 
         $persona = $this->personaService->ensureForUser($kullanici);
 
-        return view('admin.ai-v2.show', [
+        return view('admin.ai-v2.show', array_merge($this->sharedViewData(), [
             'kullanici' => $kullanici,
             'persona' => $persona,
             'states' => AiConversationState::query()
@@ -124,7 +167,7 @@ class AiStudioController extends Controller
                 ->get(),
             'blockedTopicsText' => $this->rulesToText($persona, 'blocked_topic'),
             'requiredRulesText' => $this->rulesToText($persona, 'required_rule'),
-        ]);
+        ]));
     }
 
     public function edit(User $kullanici): View
@@ -133,12 +176,12 @@ class AiStudioController extends Controller
 
         $persona = $this->personaService->ensureForUser($kullanici);
 
-        return view('admin.ai-v2.edit', [
+        return view('admin.ai-v2.edit', array_merge($this->sharedViewData(), [
             'kullanici' => $kullanici,
             'persona' => $persona,
             'blockedTopicsText' => $this->rulesToText($persona, 'blocked_topic'),
             'requiredRulesText' => $this->rulesToText($persona, 'required_rule'),
-        ]);
+        ]));
     }
 
     public function update(Request $request, User $kullanici): RedirectResponse
@@ -146,88 +189,20 @@ class AiStudioController extends Controller
         abort_unless($kullanici->hesap_tipi === 'ai', 404);
 
         $persona = $this->personaService->ensureForUser($kullanici);
+        $payload = $this->validateStudioPayload($request, false, $kullanici, $persona);
 
-        $validated = $request->validate([
-            'aktif_mi' => 'nullable|boolean',
-            'dating_aktif_mi' => 'nullable|boolean',
-            'instagram_aktif_mi' => 'nullable|boolean',
-            'ilk_mesaj_atar_mi' => 'nullable|boolean',
-            'ilk_mesaj_tonu' => 'nullable|string|max:500',
-            'persona_ozeti' => 'nullable|string|max:2000',
-            'ana_dil_kodu' => 'nullable|string|max:12',
-            'ana_dil_adi' => 'nullable|string|max:80',
-            'ikinci_diller' => 'nullable|string|max:800',
-            'persona_ulke' => 'nullable|string|max:120',
-            'persona_bolge' => 'nullable|string|max:120',
-            'persona_sehir' => 'nullable|string|max:120',
-            'persona_mahalle' => 'nullable|string|max:120',
-            'kulturel_koken' => 'nullable|string|max:160',
-            'uyruk' => 'nullable|string|max:120',
-            'yasam_tarzi' => 'nullable|string|max:160',
-            'meslek' => 'nullable|string|max:160',
-            'sektor' => 'nullable|string|max:160',
-            'egitim' => 'nullable|string|max:160',
-            'okul_bolum' => 'nullable|string|max:220',
-            'yas_araligi' => 'nullable|string|max:40',
-            'gunluk_rutin' => 'nullable|string|max:1500',
-            'hobiler' => 'nullable|string|max:1500',
-            'sevdigi_mekanlar' => 'nullable|string|max:1500',
-            'aile_arkadas_notu' => 'nullable|string|max:1500',
-            'iliski_gecmisi_tonu' => 'nullable|string|max:180',
-            'konusma_imzasi' => 'nullable|string|max:1500',
-            'argo_seviyesi' => 'required|integer|min:0|max:10',
-            'cevap_ritmi' => 'nullable|string|max:120',
-            'emoji_aliskanligi' => 'nullable|string|max:160',
-            'kacinilacak_persona_detaylari' => 'nullable|string|max:1500',
-            'konusma_tonu' => 'nullable|string|max:100',
-            'konusma_stili' => 'nullable|string|max:100',
-            'mizah_seviyesi' => 'required|integer|min:0|max:10',
-            'flort_seviyesi' => 'required|integer|min:0|max:10',
-            'emoji_seviyesi' => 'required|integer|min:0|max:10',
-            'giriskenlik_seviyesi' => 'required|integer|min:0|max:10',
-            'utangaclik_seviyesi' => 'required|integer|min:0|max:10',
-            'duygusallik_seviyesi' => 'required|integer|min:0|max:10',
-            'mesaj_uzunlugu_min' => 'required|integer|min:8|max:400',
-            'mesaj_uzunlugu_max' => 'required|integer|min:20|max:800',
-            'minimum_cevap_suresi_saniye' => 'required|integer|min:0|max:600',
-            'maksimum_cevap_suresi_saniye' => 'required|integer|min:0|max:1200',
-            'saat_dilimi' => 'nullable|string|max:100',
-            'uyku_baslangic' => 'nullable|string|max:5',
-            'uyku_bitis' => 'nullable|string|max:5',
-            'hafta_sonu_uyku_baslangic' => 'nullable|string|max:5',
-            'hafta_sonu_uyku_bitis' => 'nullable|string|max:5',
-            'blocked_topics' => 'nullable|string|max:4000',
-            'required_rules' => 'nullable|string|max:4000',
-        ]);
+        DB::transaction(function () use ($kullanici, $persona, $payload) {
+            $kullanici->update($payload['user']);
+            $persona->update($payload['persona']);
+            $this->mirrorLegacySettings($kullanici, $persona->fresh(), $payload['legacy']);
 
-        $validated['aktif_mi'] = $request->boolean('aktif_mi');
-        $validated['dating_aktif_mi'] = $request->boolean('dating_aktif_mi', true);
-        $validated['instagram_aktif_mi'] = $request->boolean('instagram_aktif_mi', true);
-        $validated['ilk_mesaj_atar_mi'] = $request->boolean('ilk_mesaj_atar_mi', true);
-        $validated['ana_dil_kodu'] = Language::normalizeCode($validated['ana_dil_kodu'] ?? null);
-        if (!$validated['ana_dil_kodu']) {
-            $validated['ana_dil_kodu'] = 'tr';
-        }
-        $validated['ana_dil_adi'] = trim((string) ($validated['ana_dil_adi'] ?? ''))
-            ?: Language::name($validated['ana_dil_kodu']);
-        $validated['ikinci_diller'] = $this->textToLines(str_replace(',', "\n", (string) ($validated['ikinci_diller'] ?? '')));
-        $validated['maksimum_cevap_suresi_saniye'] = max(
-            (int) $validated['minimum_cevap_suresi_saniye'],
-            (int) $validated['maksimum_cevap_suresi_saniye'],
-        );
-        $validated['mesaj_uzunlugu_max'] = max(
-            (int) $validated['mesaj_uzunlugu_min'],
-            (int) $validated['mesaj_uzunlugu_max'],
-        );
-
-        $persona->update(collect($validated)->except(['blocked_topics', 'required_rules'])->all());
-
-        $this->replaceRules(
-            aiEngineConfig: null,
-            aiPersonaProfile: $persona,
-            blockedTopics: $this->textToLines($validated['blocked_topics'] ?? null),
-            requiredRules: $this->textToLines($validated['required_rules'] ?? null),
-        );
+            $this->replaceRules(
+                aiEngineConfig: null,
+                aiPersonaProfile: $persona,
+                blockedTopics: $payload['guardrails']['blocked_topics'],
+                requiredRules: $payload['guardrails']['required_rules'],
+            );
+        });
 
         return redirect()
             ->route('admin.ai.goster', $kullanici)
@@ -286,6 +261,314 @@ class AiStudioController extends Controller
             'traces' => $query->latest()->paginate(30)->withQueryString(),
             'aiUsers' => User::query()->where('hesap_tipi', 'ai')->orderBy('ad')->get(['id', 'ad', 'soyad']),
         ]);
+    }
+
+    private function validateStudioPayload(
+        Request $request,
+        bool $creating,
+        ?User $kullanici = null,
+        ?AiPersonaProfile $persona = null,
+    ): array {
+        $dropdowns = $this->dropdowns();
+        $countryOptions = array_keys($dropdowns['location_catalog']);
+        $languageLabels = array_values($dropdowns['languages']);
+
+        $rules = [
+            'ad' => 'required|string|max:255',
+            'soyad' => 'nullable|string|max:255',
+            'kullanici_adi' => [
+                'required',
+                'string',
+                'max:255',
+                Rule::unique('users', 'kullanici_adi')->ignore($kullanici?->id),
+            ],
+            'hesap_durumu' => ['required', Rule::in(array_keys($dropdowns['account_statuses']))],
+            'cinsiyet' => ['required', Rule::in(array_keys($dropdowns['genders']))],
+            'dogum_yili' => 'nullable|integer|min:1950|max:' . now()->year,
+            'biyografi' => 'nullable|string|max:1000',
+            'ulke' => ['nullable', Rule::in($countryOptions)],
+            'aktif_mi' => 'nullable|boolean',
+            'dating_aktif_mi' => 'nullable|boolean',
+            'instagram_aktif_mi' => 'nullable|boolean',
+            'ilk_mesaj_atar_mi' => 'nullable|boolean',
+            'model_adi' => ['required', Rule::in(array_keys($dropdowns['models']))],
+            'ilk_mesaj_tonu' => 'nullable|string|max:500',
+            'persona_ozeti' => 'nullable|string|max:2000',
+            'ana_dil_kodu' => ['required', Rule::in(array_keys($dropdowns['languages']))],
+            'ikinci_diller' => 'nullable|array',
+            'ikinci_diller.*' => ['string', Rule::in($languageLabels)],
+            'persona_ulke' => ['nullable', Rule::in($countryOptions)],
+            'persona_bolge' => 'nullable|string|max:120',
+            'persona_sehir' => 'nullable|string|max:120',
+            'persona_mahalle' => 'nullable|string|max:120',
+            'kulturel_koken' => 'nullable|string|max:160',
+            'uyruk' => ['nullable', Rule::in($countryOptions)],
+            'yasam_tarzi' => ['nullable', Rule::in($dropdowns['lifestyles'])],
+            'meslek' => ['nullable', Rule::in($dropdowns['professions'])],
+            'sektor' => ['nullable', Rule::in($dropdowns['sectors'])],
+            'egitim' => ['nullable', Rule::in($dropdowns['education_levels'])],
+            'okul_bolum' => 'nullable|string|max:220',
+            'yas_araligi' => ['nullable', Rule::in($dropdowns['age_ranges'])],
+            'gunluk_rutin' => 'nullable|string|max:1500',
+            'hobiler' => 'nullable|string|max:1500',
+            'sevdigi_mekanlar' => 'nullable|string|max:1500',
+            'aile_arkadas_notu' => 'nullable|string|max:1500',
+            'iliski_gecmisi_tonu' => ['nullable', Rule::in($dropdowns['relationship_history_tones'])],
+            'konusma_imzasi' => 'nullable|string|max:1500',
+            'cevap_ritmi' => ['nullable', Rule::in($dropdowns['response_rhythms'])],
+            'emoji_aliskanligi' => ['nullable', Rule::in($dropdowns['emoji_habits'])],
+            'kacinilacak_persona_detaylari' => 'nullable|string|max:1500',
+            'konusma_tonu' => ['nullable', Rule::in(array_keys($dropdowns['conversation_tones']))],
+            'konusma_stili' => ['nullable', Rule::in(array_keys($dropdowns['conversation_styles']))],
+            'mesaj_uzunlugu_min' => 'required|integer|min:8|max:400',
+            'mesaj_uzunlugu_max' => 'required|integer|min:20|max:800',
+            'minimum_cevap_suresi_saniye' => 'required|integer|min:0|max:600',
+            'maksimum_cevap_suresi_saniye' => 'required|integer|min:0|max:1200',
+            'saat_dilimi' => 'nullable|timezone',
+            'uyku_baslangic' => 'nullable|date_format:H:i',
+            'uyku_bitis' => 'nullable|date_format:H:i',
+            'hafta_sonu_uyku_baslangic' => 'nullable|date_format:H:i',
+            'hafta_sonu_uyku_bitis' => 'nullable|date_format:H:i',
+            'blocked_topics' => 'nullable|string|max:4000',
+            'required_rules' => 'nullable|string|max:4000',
+        ];
+
+        foreach ($dropdowns['behavior_sliders'] as $field => $meta) {
+            $rules[$field] = 'required|integer|min:0|max:10';
+        }
+
+        $validator = validator($request->all(), $rules);
+        $validator->after(function (Validator $validator) use ($request, $dropdowns): void {
+            $this->validateLocationSelection($validator, $request->all(), $dropdowns['location_catalog']);
+        });
+
+        $validated = $validator->validate();
+
+        $anaDilKodu = Language::normalizeCode($validated['ana_dil_kodu'] ?? null) ?: 'tr';
+        $anaDilAdi = $dropdowns['languages'][$anaDilKodu] ?? Language::name($anaDilKodu, 'Turkce');
+        $personaUlke = $validated['persona_ulke'] ?: ($validated['ulke'] ?? null);
+        $personaSehir = $validated['persona_sehir'] ?: null;
+        $personaMahalle = $validated['persona_mahalle'] ?: null;
+        $ikinciDiller = array_values(array_unique(array_filter($validated['ikinci_diller'] ?? [])));
+
+        $minimumLength = (int) $validated['mesaj_uzunlugu_min'];
+        $maximumLength = max($minimumLength, (int) $validated['mesaj_uzunlugu_max']);
+        $minimumDelay = (int) $validated['minimum_cevap_suresi_saniye'];
+        $maximumDelay = max($minimumDelay, (int) $validated['maksimum_cevap_suresi_saniye']);
+
+        $metadata = array_merge($persona?->metadata ?? [], [
+            'model_adi' => $validated['model_adi'],
+        ]);
+
+        $userPayload = [
+            'ad' => $validated['ad'],
+            'soyad' => $validated['soyad'] ?? null,
+            'kullanici_adi' => $validated['kullanici_adi'],
+            'hesap_tipi' => 'ai',
+            'hesap_durumu' => $validated['hesap_durumu'],
+            'cinsiyet' => $validated['cinsiyet'],
+            'dogum_yili' => $validated['dogum_yili'] ?? null,
+            'ulke' => $validated['ulke'] ?? null,
+            'il' => $personaSehir,
+            'ilce' => $personaMahalle,
+            'biyografi' => $validated['biyografi'] ?? null,
+            'dil' => $anaDilKodu,
+        ];
+
+        if ($creating) {
+            $userPayload['password'] = bcrypt(Str::random(32));
+        }
+
+        $personaPayload = [
+            'ai_engine_config_id' => $this->engineConfigService->activeConfig()->id,
+            'aktif_mi' => $request->boolean('aktif_mi', true),
+            'dating_aktif_mi' => $request->boolean('dating_aktif_mi', true),
+            'instagram_aktif_mi' => $request->boolean('instagram_aktif_mi', true),
+            'ilk_mesaj_atar_mi' => $request->boolean('ilk_mesaj_atar_mi', true),
+            'ilk_mesaj_tonu' => $validated['ilk_mesaj_tonu'] ?? null,
+            'persona_ozeti' => $validated['persona_ozeti'] ?? ($validated['biyografi'] ?? null),
+            'ana_dil_kodu' => $anaDilKodu,
+            'ana_dil_adi' => $anaDilAdi,
+            'ikinci_diller' => $ikinciDiller,
+            'persona_ulke' => $personaUlke,
+            'persona_bolge' => $validated['persona_bolge'] ?? null,
+            'persona_sehir' => $personaSehir,
+            'persona_mahalle' => $personaMahalle,
+            'kulturel_koken' => $validated['kulturel_koken'] ?? null,
+            'uyruk' => $validated['uyruk'] ?? null,
+            'yasam_tarzi' => $validated['yasam_tarzi'] ?? null,
+            'meslek' => $validated['meslek'] ?? null,
+            'sektor' => $validated['sektor'] ?? null,
+            'egitim' => $validated['egitim'] ?? null,
+            'okul_bolum' => $validated['okul_bolum'] ?? null,
+            'yas_araligi' => $validated['yas_araligi'] ?? null,
+            'gunluk_rutin' => $validated['gunluk_rutin'] ?? null,
+            'hobiler' => $validated['hobiler'] ?? null,
+            'sevdigi_mekanlar' => $validated['sevdigi_mekanlar'] ?? null,
+            'aile_arkadas_notu' => $validated['aile_arkadas_notu'] ?? null,
+            'iliski_gecmisi_tonu' => $validated['iliski_gecmisi_tonu'] ?? null,
+            'konusma_imzasi' => $validated['konusma_imzasi'] ?? null,
+            'cevap_ritmi' => $validated['cevap_ritmi'] ?? null,
+            'emoji_aliskanligi' => $validated['emoji_aliskanligi'] ?? null,
+            'kacinilacak_persona_detaylari' => $validated['kacinilacak_persona_detaylari'] ?? null,
+            'konusma_tonu' => $validated['konusma_tonu'] ?? null,
+            'konusma_stili' => $validated['konusma_stili'] ?? null,
+            'mesaj_uzunlugu_min' => $minimumLength,
+            'mesaj_uzunlugu_max' => $maximumLength,
+            'minimum_cevap_suresi_saniye' => $minimumDelay,
+            'maksimum_cevap_suresi_saniye' => $maximumDelay,
+            'saat_dilimi' => $validated['saat_dilimi'] ?? config('app.timezone'),
+            'uyku_baslangic' => $validated['uyku_baslangic'] ?? null,
+            'uyku_bitis' => $validated['uyku_bitis'] ?? null,
+            'hafta_sonu_uyku_baslangic' => $validated['hafta_sonu_uyku_baslangic'] ?? null,
+            'hafta_sonu_uyku_bitis' => $validated['hafta_sonu_uyku_bitis'] ?? null,
+            'metadata' => $metadata,
+        ];
+
+        foreach (array_keys($dropdowns['behavior_sliders']) as $field) {
+            $personaPayload[$field] = (int) $validated[$field];
+        }
+
+        return [
+            'user' => $userPayload,
+            'persona' => $personaPayload,
+            'legacy' => [
+                'aktif_mi' => $personaPayload['aktif_mi'],
+                'model_adi' => $validated['model_adi'],
+                'persona_ozeti' => $personaPayload['persona_ozeti'],
+                'konusma_tonu' => $personaPayload['konusma_tonu'],
+                'konusma_stili' => $personaPayload['konusma_stili'],
+                'ilk_mesaj_atar_mi' => $personaPayload['ilk_mesaj_atar_mi'],
+                'ilk_mesaj_tonu' => $personaPayload['ilk_mesaj_tonu'],
+                'mesaj_uzunlugu_min' => $minimumLength,
+                'mesaj_uzunlugu_max' => $maximumLength,
+                'minimum_cevap_suresi_saniye' => $minimumDelay,
+                'maksimum_cevap_suresi_saniye' => $maximumDelay,
+                'saat_dilimi' => $personaPayload['saat_dilimi'],
+                'uyku_baslangic' => $personaPayload['uyku_baslangic'],
+                'uyku_bitis' => $personaPayload['uyku_bitis'],
+                'hafta_sonu_uyku_baslangic' => $personaPayload['hafta_sonu_uyku_baslangic'],
+                'hafta_sonu_uyku_bitis' => $personaPayload['hafta_sonu_uyku_bitis'],
+                'emoji_seviyesi' => $personaPayload['emoji_seviyesi'],
+                'flort_seviyesi' => $personaPayload['flort_seviyesi'],
+                'giriskenlik_seviyesi' => $personaPayload['giriskenlik_seviyesi'],
+                'utangaclik_seviyesi' => $personaPayload['utangaclik_seviyesi'],
+                'duygusallik_seviyesi' => $personaPayload['duygusallik_seviyesi'],
+                'kiskanclik_seviyesi' => $personaPayload['kiskanclik_seviyesi'],
+                'mizah_seviyesi' => $personaPayload['mizah_seviyesi'],
+                'zeka_seviyesi' => $personaPayload['zeka_seviyesi'],
+            ],
+            'guardrails' => [
+                'blocked_topics' => $this->textToLines($validated['blocked_topics'] ?? null),
+                'required_rules' => $this->textToLines($validated['required_rules'] ?? null),
+            ],
+        ];
+    }
+
+    private function validateLocationSelection(Validator $validator, array $data, array $catalog): void
+    {
+        $country = $data['persona_ulke'] ?? null;
+        $region = $data['persona_bolge'] ?? null;
+        $city = $data['persona_sehir'] ?? null;
+
+        if ($country && !isset($catalog[$country])) {
+            $validator->errors()->add('persona_ulke', 'Secilen ulke katalogda bulunmuyor.');
+
+            return;
+        }
+
+        if ($region && !$country) {
+            $validator->errors()->add('persona_ulke', 'Bolge secimi icin once ulke secmelisin.');
+
+            return;
+        }
+
+        if ($city && (!$country || !$region)) {
+            $validator->errors()->add('persona_bolge', 'Sehir secimi icin once ulke ve bolge secmelisin.');
+
+            return;
+        }
+
+        if ($country && $region) {
+            $regions = array_keys($catalog[$country]['regions'] ?? []);
+
+            if (!in_array($region, $regions, true)) {
+                $validator->errors()->add('persona_bolge', 'Secilen bolge bu ulke icin gecersiz.');
+
+                return;
+            }
+        }
+
+        if ($country && $region && $city) {
+            $cities = $catalog[$country]['regions'][$region] ?? [];
+
+            if (!in_array($city, $cities, true)) {
+                $validator->errors()->add('persona_sehir', 'Secilen sehir bu bolge icin gecersiz.');
+            }
+        }
+    }
+
+    private function mirrorLegacySettings(User $kullanici, AiPersonaProfile $persona, array $legacy): void
+    {
+        $engineConfig = $this->engineConfigService->activeConfig();
+
+        AiAyar::query()->updateOrCreate(
+            ['user_id' => $kullanici->id],
+            [
+                'aktif_mi' => $legacy['aktif_mi'],
+                'saglayici_tipi' => 'gemini',
+                'model_adi' => $legacy['model_adi'],
+                'kisilik_aciklamasi' => $legacy['persona_ozeti'],
+                'konusma_tonu' => $legacy['konusma_tonu'],
+                'konusma_stili' => $legacy['konusma_stili'],
+                'emoji_seviyesi' => $legacy['emoji_seviyesi'],
+                'flort_seviyesi' => $legacy['flort_seviyesi'],
+                'giriskenlik_seviyesi' => $legacy['giriskenlik_seviyesi'],
+                'utangaclik_seviyesi' => $legacy['utangaclik_seviyesi'],
+                'duygusallik_seviyesi' => $legacy['duygusallik_seviyesi'],
+                'kiskanclik_seviyesi' => $legacy['kiskanclik_seviyesi'],
+                'mizah_seviyesi' => $legacy['mizah_seviyesi'],
+                'zeka_seviyesi' => $legacy['zeka_seviyesi'],
+                'ilk_mesaj_atar_mi' => $legacy['ilk_mesaj_atar_mi'],
+                'ilk_mesaj_sablonu' => $legacy['ilk_mesaj_tonu'],
+                'minimum_cevap_suresi_saniye' => $legacy['minimum_cevap_suresi_saniye'],
+                'maksimum_cevap_suresi_saniye' => $legacy['maksimum_cevap_suresi_saniye'],
+                'mesaj_uzunlugu_min' => $legacy['mesaj_uzunlugu_min'],
+                'mesaj_uzunlugu_max' => $legacy['mesaj_uzunlugu_max'],
+                'saat_dilimi' => $legacy['saat_dilimi'],
+                'uyku_baslangic' => $legacy['uyku_baslangic'],
+                'uyku_bitis' => $legacy['uyku_bitis'],
+                'hafta_sonu_uyku_baslangic' => $legacy['hafta_sonu_uyku_baslangic'],
+                'hafta_sonu_uyku_bitis' => $legacy['hafta_sonu_uyku_bitis'],
+                'temperature' => $engineConfig->temperature,
+                'top_p' => $engineConfig->top_p,
+                'max_output_tokens' => $engineConfig->max_output_tokens,
+            ],
+        );
+
+        $metadata = $persona->metadata ?? [];
+        $metadata['legacy_ai_ayar_sync'] = now()->toIso8601String();
+        $persona->forceFill(['metadata' => $metadata])->save();
+    }
+
+    private function sharedViewData(): array
+    {
+        $dropdowns = $this->dropdowns();
+        $behaviorSliders = $dropdowns['behavior_sliders'];
+
+        return [
+            'dropdowns' => $dropdowns,
+            'modelOptions' => $dropdowns['models'],
+            'locationCatalog' => $dropdowns['location_catalog'],
+            'countryOptions' => array_keys($dropdowns['location_catalog']),
+            'behaviorSliders' => $behaviorSliders,
+            'behaviorSliderGroups' => collect($behaviorSliders)->groupBy('group')->all(),
+        ];
+    }
+
+    private function dropdowns(): array
+    {
+        return config('ai_studio_dropdowns', []);
     }
 
     private function replaceRules(

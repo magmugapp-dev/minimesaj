@@ -47,8 +47,8 @@ Route::prefix('admin')->group(function () {
         Route::get('ai/states', [AiStudioController::class, 'states'])->name('admin.ai.states');
         Route::get('ai/memories', [AiStudioController::class, 'memories'])->name('admin.ai.memories');
         Route::get('ai/traces', [AiStudioController::class, 'traces'])->name('admin.ai.traces');
-        Route::get('ai/ekle', [AiController::class, 'ekle'])->name('admin.ai.ekle');
-        Route::post('ai/ekle', [AiController::class, 'kaydet'])->name('admin.ai.kaydet');
+        Route::get('ai/ekle', [AiStudioController::class, 'create'])->name('admin.ai.ekle');
+        Route::post('ai/ekle', [AiStudioController::class, 'store'])->name('admin.ai.kaydet');
         Route::get('ai/json-ekle', [AiController::class, 'jsonEkle'])->name('admin.ai.json-ekle');
         Route::post('ai/json-ekle', [AiController::class, 'jsonKaydet'])->name('admin.ai.json-kaydet');
         Route::post('ai/toplu-durum', [AiController::class, 'topluDurumGuncelle'])->name('admin.ai.toplu-durum');
