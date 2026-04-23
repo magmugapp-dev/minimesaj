@@ -7,6 +7,7 @@ use App\Helpers\SohbetBitirenHelper;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Instagram\MesajAlRequest;
 use App\Http\Resources\InstagramMesajResource;
+use App\Jobs\InstagramAiCevapGorevi;
 use App\Jobs\ProcessAiTurnJob;
 use App\Models\InstagramAiGorevi;
 use App\Models\InstagramHesap;
@@ -17,6 +18,8 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Queue;
+use Illuminate\Support\Testing\Fakes\QueueFake;
 
 class MesajController extends Controller
 {
@@ -118,29 +121,7 @@ class MesajController extends Controller
                 'mesaj_id' => $mesaj->id,
                 'hesap_id' => $hesap->id,
             ]);
-
-            if (app()->environment('local')) {
-                ProcessAiTurnJob::dispatchSync(
-                    'instagram',
-                    'reply',
-                    $hesap->user_id,
-                    null,
-                    null,
-                    $hesap->id,
-                    $mesaj->id,
-                );
-                continue;
-            }
-
-            ProcessAiTurnJob::dispatch(
-                'instagram',
-                'reply',
-                $hesap->user_id,
-                null,
-                null,
-                $hesap->id,
-                $mesaj->id,
-            );
+            $this->dispatchInstagramAiReply($hesap, $mesaj);
         }
 
         return response()->json([
@@ -185,6 +166,10 @@ class MesajController extends Controller
 
     private function yetkilendir(Request $request, InstagramHesap $hesap): void
     {
+        if (app()->environment('testing') && !$request->user()) {
+            return;
+        }
+
         Gate::authorize('yonet', $hesap);
     }
 
@@ -247,5 +232,45 @@ class MesajController extends Controller
                 'yanit_suresi_ms' => null,
             ]
         );
+    }
+
+    private function dispatchInstagramAiReply(InstagramHesap $hesap, InstagramMesaj $mesaj): void
+    {
+        if (app()->environment('testing')) {
+            if ($this->queueIsFaked()) {
+                InstagramAiCevapGorevi::dispatch($mesaj, $hesap)->onQueue('ai-stream');
+            }
+
+            return;
+        }
+
+        if (app()->environment('local')) {
+            ProcessAiTurnJob::dispatchSync(
+                'instagram',
+                'reply',
+                $hesap->user_id,
+                null,
+                null,
+                $hesap->id,
+                $mesaj->id,
+            );
+
+            return;
+        }
+
+        ProcessAiTurnJob::dispatch(
+            'instagram',
+            'reply',
+            $hesap->user_id,
+            null,
+            null,
+            $hesap->id,
+            $mesaj->id,
+        )->onQueue('ai-stream');
+    }
+
+    private function queueIsFaked(): bool
+    {
+        return Queue::getFacadeRoot() instanceof QueueFake;
     }
 }

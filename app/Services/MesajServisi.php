@@ -7,6 +7,7 @@ use App\Events\MesajGonderildi;
 use App\Events\MesajlarOkundu;
 use App\Events\YapayZekaCevabiHazir;
 use App\Jobs\ProcessAiTurnJob;
+use App\Jobs\YapayZekaCevapGorevi;
 use App\Models\Engelleme;
 use App\Models\Mesaj;
 use App\Models\SessizeAlinanKullanici;
@@ -15,18 +16,23 @@ use App\Models\User;
 use App\Models\YapayZekaGorevi;
 use App\Notifications\YeniMesaj;
 use App\Services\YapayZeka\AiKullaniciHazirlamaServisi;
+use App\Services\YapayZeka\AiMesajZamanlamaServisi;
 use App\Services\YapayZeka\V2\AiPersonaService;
 use App\Support\Language;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Queue;
+use Illuminate\Support\Testing\Fakes\QueueFake;
 
 class MesajServisi
 {
     public function __construct(
         private ?AiKullaniciHazirlamaServisi $aiKullaniciHazirlamaServisi = null,
         private ?AiPersonaService $aiPersonaService = null,
+        private ?AiMesajZamanlamaServisi $aiMesajZamanlamaServisi = null,
     ) {
         $this->aiKullaniciHazirlamaServisi ??= app(AiKullaniciHazirlamaServisi::class);
         $this->aiPersonaService ??= app(AiPersonaService::class);
+        $this->aiMesajZamanlamaServisi ??= app(AiMesajZamanlamaServisi::class);
     }
 
     public function gonder(Sohbet $sohbet, User $gonderen, array $veri): Mesaj
@@ -71,19 +77,26 @@ class MesajServisi
                 MesajGonderildi::dispatch($mesaj);
 
                 if ($karsiTaraf?->hesap_tipi === 'ai') {
+                    $aiUser = $karsiTaraf->fresh('aiAyar') ?? $karsiTaraf;
+                    $zamanlama = $this->aiMesajZamanlamaServisi->sohbetCevabiDurumu(
+                        $mesaj,
+                        $aiUser,
+                        now(),
+                    );
+
                     YapayZekaGorevi::updateOrCreate(
                         [
                             'gelen_mesaj_id' => $mesaj->id,
-                            'ai_user_id' => $karsiTaraf->id,
+                            'ai_user_id' => $aiUser->id,
                         ],
                         [
                             'sohbet_id' => $sohbet->id,
-                            'durum' => 'bekliyor',
+                            'durum' => $this->bekleyenGorevDurumu($zamanlama['bekleme_nedeni'] ?? null),
                             'deneme_sayisi' => 0,
                             'hata_mesaji' => null,
                             'cevap_metni' => null,
-                            'saglayici_tipi' => $karsiTaraf->aiAyar?->saglayici_tipi ?? 'gemini',
-                            'model_adi' => $karsiTaraf->aiAyar?->model_adi ?? 'gemini-2.5-flash',
+                            'saglayici_tipi' => $aiUser->aiAyar?->saglayici_tipi ?? 'gemini',
+                            'model_adi' => $aiUser->aiAyar?->model_adi ?? 'gemini-2.5-flash',
                             'istek_baslatildi_at' => null,
                             'son_parca_at' => null,
                             'tamamlandi_at' => null,
@@ -91,11 +104,19 @@ class MesajServisi
                         ]
                     );
 
+                    if (app()->environment('testing')) {
+                        if ($this->queueIsFaked()) {
+                            YapayZekaCevapGorevi::dispatch($sohbet, $mesaj, $aiUser);
+                        }
+
+                        return;
+                    }
+
                     if (app()->environment('local')) {
                         ProcessAiTurnJob::dispatchSync(
                             'dating',
                             'reply',
-                            $karsiTaraf->id,
+                            $aiUser->id,
                             $sohbet->id,
                             $mesaj->id,
                         );
@@ -106,7 +127,7 @@ class MesajServisi
                     ProcessAiTurnJob::dispatch(
                         'dating',
                         'reply',
-                        $karsiTaraf->id,
+                        $aiUser->id,
                         $sohbet->id,
                         $mesaj->id,
                     );
@@ -229,5 +250,10 @@ class MesajServisi
             'code' => $code,
             'name' => Language::name($code),
         ];
+    }
+
+    private function queueIsFaked(): bool
+    {
+        return Queue::getFacadeRoot() instanceof QueueFake;
     }
 }

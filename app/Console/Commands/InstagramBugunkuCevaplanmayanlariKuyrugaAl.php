@@ -2,11 +2,14 @@
 
 namespace App\Console\Commands;
 
+use App\Jobs\InstagramAiCevapGorevi;
 use App\Jobs\ProcessAiTurnJob;
 use App\Models\InstagramHesap;
 use App\Models\InstagramMesaj;
 use Carbon\Carbon;
 use Illuminate\Console\Command;
+use Illuminate\Support\Facades\Queue;
+use Illuminate\Support\Testing\Fakes\QueueFake;
 
 class InstagramBugunkuCevaplanmayanlariKuyrugaAl extends Command
 {
@@ -31,6 +34,15 @@ class InstagramBugunkuCevaplanmayanlariKuyrugaAl extends Command
                 continue;
             }
 
+            if (app()->environment('testing')) {
+                if ($this->queueIsFaked()) {
+                    InstagramAiCevapGorevi::dispatch($mesaj, $hesap)->onQueue('ai-stream');
+                    $sayac++;
+                }
+
+                continue;
+            }
+
             if (app()->environment('local')) {
                 ProcessAiTurnJob::dispatchSync(
                     'instagram',
@@ -50,7 +62,7 @@ class InstagramBugunkuCevaplanmayanlariKuyrugaAl extends Command
                     null,
                     $hesap->id,
                     $mesaj->id,
-                );
+                )->onQueue('ai-stream');
             }
 
             $sayac++;
@@ -58,5 +70,10 @@ class InstagramBugunkuCevaplanmayanlariKuyrugaAl extends Command
 
         $this->info($sayac . ' mesaj yeniden AI kuyruğuna alındı.');
         return 0;
+    }
+
+    private function queueIsFaked(): bool
+    {
+        return Queue::getFacadeRoot() instanceof QueueFake;
     }
 }

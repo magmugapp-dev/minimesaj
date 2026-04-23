@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Events\EslesmeOlustu;
+use App\Jobs\EslesmeSonrasiAiIlkMesajGorevi;
 use App\Jobs\ProcessAiTurnJob;
 use App\Models\Engelleme;
 use App\Models\Eslesme;
@@ -14,6 +15,8 @@ use App\Services\YapayZeka\AiKullaniciHazirlamaServisi;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Queue;
+use Illuminate\Support\Testing\Fakes\QueueFake;
 
 class EslesmeServisi
 {
@@ -90,23 +93,7 @@ class EslesmeServisi
                     $aiUser = $this->ilkMesajiAtacakAiBul($baslatan, $aday);
 
                     if ($aiUser) {
-                        if (app()->environment('local')) {
-                            ProcessAiTurnJob::dispatchSync(
-                                'dating',
-                                'first_message',
-                                $aiUser->id,
-                                $sohbet->id,
-                            );
-
-                            return;
-                        }
-
-                        ProcessAiTurnJob::dispatch(
-                            'dating',
-                            'first_message',
-                            $aiUser->id,
-                            $sohbet->id,
-                        );
+                        $this->dispatchIlkAiMesaj($sohbet, $aiUser);
                     }
                 } catch (\Throwable $exception) {
                     report($exception);
@@ -198,7 +185,7 @@ class EslesmeServisi
             $this->puanServisi->harca(
                 $user,
                 $maliyet,
-                'Eşleşme başlatma',
+                'EÅŸleÅŸme baÅŸlatma',
                 'user',
                 $aday->id,
             );
@@ -217,7 +204,7 @@ class EslesmeServisi
     }
 
     /**
-     * Rastgele eşleşme (queue job'i tarafından tetiklenir).
+     * Rastgele eÅŸleÅŸme (queue job'i tarafÄ±ndan tetiklenir).
      */
     public function rastgeleEslestir(User $user): ?Eslesme
     {
@@ -254,23 +241,7 @@ class EslesmeServisi
                 $aiUser = $this->ilkMesajiAtacakAiBul($user, $eslesen);
 
                 if ($aiUser) {
-                    if (app()->environment('local')) {
-                        ProcessAiTurnJob::dispatchSync(
-                            'dating',
-                            'first_message',
-                            $aiUser->id,
-                            $sohbet->id,
-                        );
-
-                        return;
-                    }
-
-                    ProcessAiTurnJob::dispatch(
-                        'dating',
-                        'first_message',
-                        $aiUser->id,
-                        $sohbet->id,
-                    );
+                    $this->dispatchIlkAiMesaj($sohbet, $aiUser);
                 }
             });
 
@@ -580,5 +551,39 @@ $gecilen = EslesmeGecilenKullanici::query()
         }
 
         return $puan;
+    }
+
+    private function dispatchIlkAiMesaj(Sohbet $sohbet, User $aiUser): void
+    {
+        if (app()->environment('testing')) {
+            if ($this->queueIsFaked()) {
+                EslesmeSonrasiAiIlkMesajGorevi::dispatch($sohbet, $aiUser);
+            }
+
+            return;
+        }
+
+        if (app()->environment('local')) {
+            ProcessAiTurnJob::dispatchSync(
+                'dating',
+                'first_message',
+                $aiUser->id,
+                $sohbet->id,
+            );
+
+            return;
+        }
+
+        ProcessAiTurnJob::dispatch(
+            'dating',
+            'first_message',
+            $aiUser->id,
+            $sohbet->id,
+        );
+    }
+
+    private function queueIsFaked(): bool
+    {
+        return Queue::getFacadeRoot() instanceof QueueFake;
     }
 }

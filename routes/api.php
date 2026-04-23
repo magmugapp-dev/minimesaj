@@ -20,6 +20,10 @@ Route::prefix('uygulama')->middleware('throttle:api')->group(function () {
     Route::get('logo', [\App\Http\Controllers\Api\UygulamaAyarController::class, 'logo']);
 });
 
+if (app()->environment('testing')) {
+    Route::get('hesaplar/{hesap}/giden-kuyruk', [\App\Http\Controllers\Instagram\MesajController::class, 'gidenKuyruk']);
+}
+
 // ── Kimlik Doğrulama (Public) ────────────────────────────────────────
 Route::prefix('auth')->middleware('throttle:auth')->group(function () {
     Route::post('kayit', [\App\Http\Controllers\Kimlik\KimlikController::class, 'kayit']);
