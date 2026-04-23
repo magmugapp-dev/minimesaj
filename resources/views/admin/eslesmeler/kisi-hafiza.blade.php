@@ -15,8 +15,6 @@
                 <div>
                     <p class="text-xs uppercase tracking-wide text-gray-400">Eslesme #{{ $eslesme->id }}</p>
                     <h2 class="text-xl font-bold text-gray-900">{{ $kullanici->ad }} {{ $kullanici->soyad }}</h2>
-                    <p class="text-sm text-gray-500">{{ '@' . $kullanici->kullanici_adi }} icin eslesme baglamli AI hafizasi
-                    </p>
                 </div>
             </div>
 
@@ -37,8 +35,6 @@
         @if ($paneller === [])
             <div class="rounded-xl border border-gray-200 bg-white p-8 text-center">
                 <p class="text-sm font-medium text-gray-700">Bu kisi hakkinda aktif AI hafizasi bulunmuyor.</p>
-                <p class="mt-2 text-xs text-gray-400">AI tarafi bu eslesmede henuz kayda deger bir hafiza olusturmamis
-                    olabilir.</p>
             </div>
         @else
             <div class="space-y-6">

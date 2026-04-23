@@ -14,6 +14,10 @@ class Sohbet extends Model
         'eslesme_id',
         'son_mesaj_id',
         'son_mesaj_tarihi',
+        'ai_durumu',
+        'ai_durum_metni',
+        'ai_planlanan_cevap_at',
+        'ai_durum_guncellendi_at',
         'ai_sessiz_mod_bitis_at',
         'ai_sessiz_mod_tetikleyen_mesaj_id',
         'toplam_mesaj_sayisi',
@@ -24,6 +28,8 @@ class Sohbet extends Model
     {
         return [
             'son_mesaj_tarihi' => 'datetime',
+            'ai_planlanan_cevap_at' => 'datetime',
+            'ai_durum_guncellendi_at' => 'datetime',
             'ai_sessiz_mod_bitis_at' => 'datetime',
         ];
     }

@@ -14,7 +14,6 @@
         <div class="rounded-xl bg-white p-8 shadow-lg">
             <div class="mb-6 text-center">
                 <h1 class="text-2xl font-bold text-gray-900">MiniMesaj</h1>
-                <p class="mt-1 text-sm text-gray-500">Admin Paneli</p>
             </div>
 
             {{-- Başarı mesajı --}}
@@ -93,9 +92,6 @@
             </form>
         </div>
 
-        <p class="mt-4 text-center text-xs text-gray-400">
-            MiniMesaj Admin Panel &copy; {{ date('Y') }}
-        </p>
     </div>
 </body>
 

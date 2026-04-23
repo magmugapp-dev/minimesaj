@@ -3,42 +3,34 @@
         [
             'alan' => 'emoji_seviyesi',
             'etiket' => 'Emoji kullanımı',
-            'aciklama' => 'Mesajların ne kadar görsel ve sıcak hissettirdiğini belirler.',
         ],
         [
             'alan' => 'flort_seviyesi',
             'etiket' => 'Flört düzeyi',
-            'aciklama' => 'Yakınlaşma ve romantik çağrışım dozunu ayarlar.',
         ],
         [
             'alan' => 'giriskenlik_seviyesi',
             'etiket' => 'Girişkenlik',
-            'aciklama' => 'İlk adımı atma ve konuşmayı taşıma eğilimini yükseltir.',
         ],
         [
             'alan' => 'utangaclik_seviyesi',
             'etiket' => 'Utangaçlık',
-            'aciklama' => 'Daha kontrollü, mesafeli ve çekingen bir hissiyat verir.',
         ],
         [
             'alan' => 'duygusallik_seviyesi',
             'etiket' => 'Duygusallık',
-            'aciklama' => 'Empati ve duygusal yoğunluğun ne kadar baskın olacağını tanımlar.',
         ],
         [
             'alan' => 'kiskanclik_seviyesi',
             'etiket' => 'Kıskançlık',
-            'aciklama' => 'Sahiplenme ve hassasiyet dozunu dikkatli şekilde yönetir.',
         ],
         [
             'alan' => 'mizah_seviyesi',
             'etiket' => 'Mizah',
-            'aciklama' => 'Espri sıklığını ve konuşmanın ne kadar eğlenceli olacağını etkiler.',
         ],
         [
             'alan' => 'zeka_seviyesi',
             'etiket' => 'Zeka',
-            'aciklama' => 'Cevapların ne kadar analitik, kıvrak ve sezgisel olacağını belirler.',
         ],
     ];
 @endphp

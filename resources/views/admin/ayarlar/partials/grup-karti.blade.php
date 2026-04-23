@@ -1,29 +1,16 @@
 <section class="studio-card">
     <div class="studio-card__header">
         <div>
-            <p class="studio-kicker">Form Surface</p>
             <h3 class="studio-title">{{ $gAd }} ayarlari</h3>
-            @if (!empty($grupAciklamasi))
-                <p class="studio-description">{{ $grupAciklamasi }}</p>
-            @endif
         </div>
 
         <div class="studio-pill-list">
             <span class="studio-pill studio-pill--info">{{ count($ayarListesi) }} alan</span>
-            <span class="studio-pill studio-pill--neutral">Kategori odakli kayit</span>
         </div>
     </div>
 
-    @if ($gKod === 'bildirimler')
-        <div class="studio-notice studio-notice--warning">
-            Firebase bildirimleri server key yerine HTTP v1 service account akisiyla yonetiliyor. Bu kategorideki servis
-            hesabı ve sertifika alanlarini birlikte guncellemek daha guvenli olur.
-        </div>
-    @endif
-
     @if (empty($ayarListesi))
         <div class="studio-surface">
-            <p class="studio-description">Bu kategoride gosterilecek bir ayar bulunmuyor.</p>
         </div>
     @else
         <div class="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
@@ -83,8 +70,6 @@
                                 <div class="studio-toggle__row">
                                     <div>
                                         <div class="studio-toggle__title">Durum yonetimi</div>
-                                        <div class="studio-toggle__body">Bu anahtari aktif tutmak icin isaretli birak.
-                                        </div>
                                     </div>
                                     <div class="shrink-0">
                                         <input type="hidden" name="{{ $anahtar }}" value="0">

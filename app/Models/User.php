@@ -82,6 +82,26 @@ class User extends Authenticatable
         return $this->hasOne(AiAyar::class);
     }
 
+    public function aiPersonaProfile(): HasOne
+    {
+        return $this->hasOne(AiPersonaProfile::class, 'ai_user_id');
+    }
+
+    public function aiConversationStates(): HasMany
+    {
+        return $this->hasMany(AiConversationState::class, 'ai_user_id');
+    }
+
+    public function aiMemoriesV2(): HasMany
+    {
+        return $this->hasMany(AiMemory::class, 'ai_user_id');
+    }
+
+    public function aiTurnLogs(): HasMany
+    {
+        return $this->hasMany(AiTurnLog::class, 'ai_user_id');
+    }
+
     public function eslesmeler(): HasMany
     {
         return $this->hasMany(Eslesme::class, 'user_id');

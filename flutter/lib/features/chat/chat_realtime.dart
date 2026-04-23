@@ -5,7 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:magmug/app_core.dart';
 import 'package:pusher_reverb_flutter/pusher_reverb_flutter.dart' as reverb;
 
-enum ChatRealtimeEventType { messageSent, messagesRead }
+enum ChatRealtimeEventType { messageSent, messagesRead, aiStatus }
 
 @immutable
 class ChatRealtimeEvent {
@@ -194,8 +194,12 @@ class ChatRealtimeService {
     return switch (eventName) {
       'mesaj.gonderildi' ||
       '.mesaj.gonderildi' => ChatRealtimeEventType.messageSent,
+      'yapay_zeka.cevap_hazir' ||
+      '.yapay_zeka.cevap_hazir' => ChatRealtimeEventType.messageSent,
       'mesajlar.okundu' ||
       '.mesajlar.okundu' => ChatRealtimeEventType.messagesRead,
+      'ai.turn.status' ||
+      '.ai.turn.status' => ChatRealtimeEventType.aiStatus,
       _ => null,
     };
   }

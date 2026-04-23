@@ -30,6 +30,8 @@ class YapayZekaCevabiHazir implements ShouldBroadcastNow
             'gonderen_user_id' => $this->mesaj->gonderen_user_id,
             'mesaj_tipi' => $this->mesaj->mesaj_tipi,
             'mesaj_metni' => $this->mesaj->mesaj_metni,
+            'dil_kodu' => $this->mesaj->dil_kodu,
+            'dil_adi' => $this->mesaj->dil_adi,
             'created_at' => $this->mesaj->created_at->toISOString(),
         ];
     }

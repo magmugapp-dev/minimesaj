@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Admin\AiController;
+use App\Http\Controllers\Admin\AiStudioController;
 use App\Http\Controllers\Admin\AbonelikPaketiController;
 use App\Http\Controllers\Admin\AyarController;
 use App\Http\Controllers\Admin\EngelController;
@@ -41,15 +42,19 @@ Route::prefix('admin')->group(function () {
         Route::patch('kullanicilar/{kullanici}/durum', [KullaniciController::class, 'durumGuncelle'])->name('admin.kullanicilar.durum');
 
         // AI Yönetimi
-        Route::get('ai', [AiController::class, 'index'])->name('admin.ai.index');
+        Route::get('ai', [AiStudioController::class, 'index'])->name('admin.ai.index');
+        Route::post('ai/motor', [AiStudioController::class, 'engineUpdate'])->name('admin.ai.engine.update');
+        Route::get('ai/states', [AiStudioController::class, 'states'])->name('admin.ai.states');
+        Route::get('ai/memories', [AiStudioController::class, 'memories'])->name('admin.ai.memories');
+        Route::get('ai/traces', [AiStudioController::class, 'traces'])->name('admin.ai.traces');
         Route::get('ai/ekle', [AiController::class, 'ekle'])->name('admin.ai.ekle');
         Route::post('ai/ekle', [AiController::class, 'kaydet'])->name('admin.ai.kaydet');
         Route::get('ai/json-ekle', [AiController::class, 'jsonEkle'])->name('admin.ai.json-ekle');
         Route::post('ai/json-ekle', [AiController::class, 'jsonKaydet'])->name('admin.ai.json-kaydet');
         Route::post('ai/toplu-durum', [AiController::class, 'topluDurumGuncelle'])->name('admin.ai.toplu-durum');
-        Route::get('ai/{kullanici}', [AiController::class, 'goster'])->name('admin.ai.goster');
-        Route::get('ai/{kullanici}/duzenle', [AiController::class, 'duzenle'])->name('admin.ai.duzenle');
-        Route::put('ai/{kullanici}', [AiController::class, 'guncelle'])->name('admin.ai.guncelle');
+        Route::get('ai/{kullanici}', [AiStudioController::class, 'show'])->name('admin.ai.goster');
+        Route::get('ai/{kullanici}/duzenle', [AiStudioController::class, 'edit'])->name('admin.ai.duzenle');
+        Route::put('ai/{kullanici}', [AiStudioController::class, 'update'])->name('admin.ai.guncelle');
 
         // Moderasyon — Şikayetler
         Route::get('moderasyon/sikayetler', [SikayetController::class, 'index'])->name('admin.moderasyon.sikayetler');

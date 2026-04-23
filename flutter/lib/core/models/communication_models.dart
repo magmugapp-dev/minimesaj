@@ -8,12 +8,17 @@ class AppConversationPreview {
   final String peerName;
   final String peerUsername;
   final String? peerProfileImageUrl;
+  final String? peerLanguageCode;
+  final String? peerLanguageName;
   final bool online;
   final String? lastMessage;
   final String? lastMessageType;
   final DateTime? lastMessageAt;
   final int unreadCount;
   final bool myMessageRead;
+  final String? aiStatus;
+  final String? aiStatusText;
+  final DateTime? aiPlannedAt;
 
   const AppConversationPreview({
     required this.id,
@@ -22,15 +27,23 @@ class AppConversationPreview {
     required this.peerName,
     required this.peerUsername,
     this.peerProfileImageUrl,
+    this.peerLanguageCode,
+    this.peerLanguageName,
     required this.online,
     this.lastMessage,
     this.lastMessageType,
     this.lastMessageAt,
     required this.unreadCount,
     required this.myMessageRead,
+    this.aiStatus,
+    this.aiStatusText,
+    this.aiPlannedAt,
   });
 
   String? get statusText {
+    if (aiStatusText != null && aiStatusText!.trim().isNotEmpty) {
+      return aiStatusText;
+    }
     if (lastMessageType == 'typing') {
       return 'Yaziyor...';
     }
@@ -51,6 +64,11 @@ class AppConversationMessage {
   final Duration? fileDuration;
   final bool isRead;
   final bool isAiGenerated;
+  final String? languageCode;
+  final String? languageName;
+  final String? translatedText;
+  final String? translationTargetLanguageCode;
+  final String? translationTargetLanguageName;
   final DateTime? createdAt;
 
   const AppConversationMessage({
@@ -65,10 +83,66 @@ class AppConversationMessage {
     this.fileDuration,
     required this.isRead,
     required this.isAiGenerated,
+    this.languageCode,
+    this.languageName,
+    this.translatedText,
+    this.translationTargetLanguageCode,
+    this.translationTargetLanguageName,
     this.createdAt,
   });
 
   bool isFromUser(int userId) => senderId == userId;
+
+  AppConversationMessage copyWith({
+    String? translatedText,
+    String? translationTargetLanguageCode,
+    String? translationTargetLanguageName,
+  }) {
+    return AppConversationMessage(
+      id: id,
+      conversationId: conversationId,
+      senderId: senderId,
+      senderName: senderName,
+      senderProfileImageUrl: senderProfileImageUrl,
+      type: type,
+      text: text,
+      fileUrl: fileUrl,
+      fileDuration: fileDuration,
+      isRead: isRead,
+      isAiGenerated: isAiGenerated,
+      languageCode: languageCode,
+      languageName: languageName,
+      translatedText: translatedText ?? this.translatedText,
+      translationTargetLanguageCode:
+          translationTargetLanguageCode ?? this.translationTargetLanguageCode,
+      translationTargetLanguageName:
+          translationTargetLanguageName ?? this.translationTargetLanguageName,
+      createdAt: createdAt,
+    );
+  }
+}
+
+@immutable
+class AppConversationMessagePage {
+  final List<AppConversationMessage> messages;
+  final int currentPage;
+  final int? nextPage;
+  final int? total;
+  final String? aiStatus;
+  final String? aiStatusText;
+  final DateTime? aiPlannedAt;
+
+  const AppConversationMessagePage({
+    required this.messages,
+    required this.currentPage,
+    required this.nextPage,
+    this.total,
+    this.aiStatus,
+    this.aiStatusText,
+    this.aiPlannedAt,
+  });
+
+  bool get hasMore => nextPage != null;
 }
 
 @immutable

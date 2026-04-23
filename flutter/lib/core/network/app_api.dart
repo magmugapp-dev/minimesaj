@@ -36,6 +36,11 @@ class AppApi {
   static String datingChatMessagesPath(int conversationId) =>
       '/api/dating/sohbetler/$conversationId/mesajlar';
 
+  static String datingChatMessageTranslationPath(
+    int conversationId,
+    int messageId,
+  ) => '/api/dating/sohbetler/$conversationId/mesajlar/$messageId/ceviri';
+
   static String datingChatReadPath(int conversationId) =>
       '/api/dating/sohbetler/$conversationId/oku';
 

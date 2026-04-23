@@ -126,6 +126,18 @@ class YapayZekaCevapGorevi implements ShouldQueue
             $tamamlandiAt = now();
             $yanitSuresiMs = $istekBaslangici->diffInMilliseconds($tamamlandiAt);
 
+            Log::stack(['single', 'ai'])->info('YapayZekaCevapGorevi AI cevabi uretildi.', [
+                'sohbet_id' => $this->sohbet->id,
+                'gelen_mesaj_id' => $this->gelenMesaj->id,
+                'ai_user_id' => $this->aiUser->id,
+                'cevap_metni' => $sonuc['cevap'] ?? null,
+                'ham_cevap' => $sonuc['ham_cevap'] ?? null,
+                'model' => $sonuc['model'] ?? null,
+                'giris_token' => $sonuc['giris_token'] ?? null,
+                'cikis_token' => $sonuc['cikis_token'] ?? null,
+                'yanit_suresi_ms' => $yanitSuresiMs,
+            ]);
+
             $aiMesaji = $mesajServisi->gonderAiMesaji($this->sohbet, $this->aiUser, [
                 'mesaj_tipi' => 'metin',
                 'mesaj_metni' => $sonuc['cevap'],

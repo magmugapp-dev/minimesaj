@@ -6,7 +6,6 @@
     <div class="space-y-6 p-6">
         <div>
             <h2 class="text-xl font-semibold text-gray-900">Yeni abonelik paketi</h2>
-            <p class="text-sm text-gray-500">Premium paywall ekraninda gosterilecek paketi tanimla.</p>
         </div>
 
         <div class="rounded-xl border border-gray-200 bg-white p-5">

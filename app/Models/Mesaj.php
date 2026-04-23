@@ -14,6 +14,9 @@ class Mesaj extends Model
         'gonderen_user_id',
         'mesaj_tipi',
         'mesaj_metni',
+        'dil_kodu',
+        'dil_adi',
+        'ceviriler',
         'dosya_yolu',
         'dosya_suresi',
         'dosya_boyutu',
@@ -31,6 +34,7 @@ class Mesaj extends Model
             'silindi_mi' => 'boolean',
             'herkesten_silindi_mi' => 'boolean',
             'ai_tarafindan_uretildi_mi' => 'boolean',
+            'ceviriler' => 'array',
         ];
     }
 

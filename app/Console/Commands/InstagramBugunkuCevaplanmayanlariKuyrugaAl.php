@@ -2,11 +2,11 @@
 
 namespace App\Console\Commands;
 
-use Illuminate\Console\Command;
-use App\Models\InstagramMesaj;
-use App\Jobs\InstagramAiCevapGorevi;
+use App\Jobs\ProcessAiTurnJob;
 use App\Models\InstagramHesap;
+use App\Models\InstagramMesaj;
 use Carbon\Carbon;
+use Illuminate\Console\Command;
 
 class InstagramBugunkuCevaplanmayanlariKuyrugaAl extends Command
 {
@@ -27,10 +27,33 @@ class InstagramBugunkuCevaplanmayanlariKuyrugaAl extends Command
         $sayac = 0;
         foreach ($mesajlar as $mesaj) {
             $hesap = InstagramHesap::find($mesaj->instagram_hesap_id);
-            if ($hesap) {
-                InstagramAiCevapGorevi::dispatch($mesaj, $hesap);
-                $sayac++;
+            if (!$hesap) {
+                continue;
             }
+
+            if (app()->environment('local')) {
+                ProcessAiTurnJob::dispatchSync(
+                    'instagram',
+                    'reply',
+                    $hesap->user_id,
+                    null,
+                    null,
+                    $hesap->id,
+                    $mesaj->id,
+                );
+            } else {
+                ProcessAiTurnJob::dispatch(
+                    'instagram',
+                    'reply',
+                    $hesap->user_id,
+                    null,
+                    null,
+                    $hesap->id,
+                    $mesaj->id,
+                );
+            }
+
+            $sayac++;
         }
 
         $this->info($sayac . ' mesaj yeniden AI kuyruğuna alındı.');

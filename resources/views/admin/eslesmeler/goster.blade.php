@@ -91,8 +91,6 @@
                         <div>
                             <h4 class="text-sm font-semibold uppercase tracking-wide text-gray-500">Kisi Bazli AI Hafizasi
                             </h4>
-                            <p class="mt-1 text-sm text-gray-500">Kisi adina tiklayarak tam hafiza ekranini acabilir,
-                                asagida hizli ozeti gorebilirsin.</p>
                         </div>
                         <div class="grid gap-4 xl:grid-cols-2">
                             @foreach ($hafizaOzetleri as $ozet)

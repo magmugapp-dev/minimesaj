@@ -8,7 +8,6 @@
         <label class="mb-1 block text-sm font-medium text-gray-700">Kod</label>
         <input type="text" name="kod" value="{{ old('kod', $hediye->kod) }}" placeholder="gul"
             class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-indigo-500">
-        <p class="mt-1 text-xs text-gray-400">API tarafinda sabit kimlik olarak kullanilir. Ornek: gul, yuzuk.</p>
     </div>
 
     <div>

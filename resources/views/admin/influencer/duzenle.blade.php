@@ -25,41 +25,10 @@
                 x-data="{ provider: '{{ old('saglayici_tipi', $ayar->saglayici_tipi ?? 'gemini') }}' }">
                 @csrf
                 @method('PUT')
-
-                <section class="studio-hero">
-                    <div class="studio-hero__inner">
-                        <div>
-                            <a href="{{ route('admin.influencer.goster', $kullanici) }}" class="studio-back">
-                                <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke-width="1.7" stroke="currentColor">
-                                    <path stroke-linecap="round" stroke-linejoin="round" d="M10.5 19.5 3 12m0 0 7.5-7.5M3 12h18" />
-                                </svg>
-                                Detaya dön
-                            </a>
-                            <p class="studio-eyebrow">Influencer Editor</p>
-                            <h2 class="studio-heading">{{ $tamAd }}</h2>
-                            <div class="studio-chipbar">
-                                <span class="studio-chip">{{ '@' . $kullanici->kullanici_adi }}</span>
-                                <span class="studio-chip">{{ $igHesap?->instagram_kullanici_adi ? '@' . ltrim($igHesap->instagram_kullanici_adi, '@') : 'Instagram yok' }}</span>
-                                <span class="studio-chip">{{ ucfirst($kullanici->hesap_durumu) }}</span>
-                            </div>
-                        </div>
-
-                        <div class="studio-panelstack">
-                            <div class="studio-panel">
-                                <p class="studio-panel__meta">Instagram</p>
-                                <p class="studio-panel__title">{{ $igHesap?->instagram_kullanici_adi ?: 'Bağlı değil' }}</p>
-                            </div>
-                            <div class="studio-panel">
-                                <p class="studio-panel__meta">AI model</p>
-                                <p class="studio-panel__title">{{ $ayar->model_adi ?? 'Tanımsız' }}</p>
-                            </div>
-                            <div class="studio-panel">
-                                <p class="studio-panel__meta">Oto yanıt</p>
-                                <p class="studio-panel__title">{{ $igHesap?->otomatik_cevap_aktif_mi ? 'Açık' : 'Kapalı' }}</p>
-                            </div>
-                        </div>
-                    </div>
-                </section>
+                <div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                    <a href="{{ route('admin.influencer.goster', $kullanici) }}" class="studio-button studio-button--ghost">Detaya don</a>
+                    <h1 class="text-2xl font-semibold text-slate-950">{{ $tamAd }}</h1>
+                </div>
 
                 @include('admin.partials.form-hatalari')
 
@@ -175,7 +144,6 @@
 
             <aside class="studio-sidebar">
                 <section class="studio-card">
-                    <p class="studio-kicker">Bölümler</p>
                     <nav class="studio-nav mt-4">
                         @foreach ($sections as $section)
                             <a href="#{{ $section['id'] }}" class="studio-nav__link">
@@ -189,7 +157,6 @@
                 </section>
 
                 <section class="studio-card">
-                    <p class="studio-kicker">Özet</p>
                     <div class="studio-meta mt-4">
                         <div class="studio-meta__item">
                             <p class="studio-meta__eyebrow">Instagram</p>
@@ -211,7 +178,6 @@
                 </section>
 
                 <section class="studio-card">
-                    <p class="studio-kicker">Aksiyonlar</p>
                     <div class="studio-stack mt-4">
                         <a href="{{ route('admin.influencer.goster', $kullanici) }}" class="studio-linkcard">
                             <span>Detayı gör</span>

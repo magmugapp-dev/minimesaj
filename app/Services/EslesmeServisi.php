@@ -3,7 +3,7 @@
 namespace App\Services;
 
 use App\Events\EslesmeOlustu;
-use App\Jobs\EslesmeSonrasiAiIlkMesajGorevi;
+use App\Jobs\ProcessAiTurnJob;
 use App\Models\Engelleme;
 use App\Models\Eslesme;
 use App\Models\EslesmeGecilenKullanici;
@@ -11,7 +11,6 @@ use App\Models\Sohbet;
 use App\Models\User;
 use App\Notifications\YeniEslesme;
 use App\Services\YapayZeka\AiKullaniciHazirlamaServisi;
-use App\Services\YapayZeka\AiMesajZamanlamaServisi;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -20,12 +19,10 @@ class EslesmeServisi
 {
     public function __construct(
         private ?AiKullaniciHazirlamaServisi $aiKullaniciHazirlamaServisi = null,
-        private ?AiMesajZamanlamaServisi $aiMesajZamanlamaServisi = null,
         private ?PuanServisi $puanServisi = null,
         private ?AyarServisi $ayarServisi = null,
     ) {
         $this->aiKullaniciHazirlamaServisi ??= app(AiKullaniciHazirlamaServisi::class);
-        $this->aiMesajZamanlamaServisi ??= app(AiMesajZamanlamaServisi::class);
         $this->puanServisi ??= app(PuanServisi::class);
         $this->ayarServisi ??= app(AyarServisi::class);
     }
@@ -92,24 +89,24 @@ class EslesmeServisi
                 try {
                     $aiUser = $this->ilkMesajiAtacakAiBul($baslatan, $aday);
 
-                    if ($aiUser?->aiAyar?->ilk_mesaj_atar_mi) {
-                        $zamanlama = $this->aiMesajZamanlamaServisi
-                            ->ilkMesajDurumu($sohbet, $aiUser);
-
-                        if ($zamanlama['hemen_calistir'] && app()->environment('local')) {
-                            EslesmeSonrasiAiIlkMesajGorevi::dispatchSync($sohbet, $aiUser);
-
-                            return;
-                        }
-
-                        if ($zamanlama['sonraki_kontrol_at']) {
-                            EslesmeSonrasiAiIlkMesajGorevi::dispatch($sohbet, $aiUser)
-                                ->delay($zamanlama['sonraki_kontrol_at']);
+                    if ($aiUser) {
+                        if (app()->environment('local')) {
+                            ProcessAiTurnJob::dispatchSync(
+                                'dating',
+                                'first_message',
+                                $aiUser->id,
+                                $sohbet->id,
+                            );
 
                             return;
                         }
 
-                        EslesmeSonrasiAiIlkMesajGorevi::dispatch($sohbet, $aiUser);
+                        ProcessAiTurnJob::dispatch(
+                            'dating',
+                            'first_message',
+                            $aiUser->id,
+                            $sohbet->id,
+                        );
                     }
                 } catch (\Throwable $exception) {
                     report($exception);
@@ -256,21 +253,24 @@ class EslesmeServisi
 
                 $aiUser = $this->ilkMesajiAtacakAiBul($user, $eslesen);
 
-                if ($aiUser?->aiAyar?->ilk_mesaj_atar_mi) {
-                    $zamanlama = $this->aiMesajZamanlamaServisi
-                        ->ilkMesajDurumu($sohbet, $aiUser);
-
-                    if ($zamanlama['hemen_calistir'] && app()->environment('local')) {
-                        EslesmeSonrasiAiIlkMesajGorevi::dispatchSync($sohbet, $aiUser);
+                if ($aiUser) {
+                    if (app()->environment('local')) {
+                        ProcessAiTurnJob::dispatchSync(
+                            'dating',
+                            'first_message',
+                            $aiUser->id,
+                            $sohbet->id,
+                        );
 
                         return;
                     }
 
-                    $gorev = EslesmeSonrasiAiIlkMesajGorevi::dispatch($sohbet, $aiUser);
-
-                    if ($zamanlama['sonraki_kontrol_at']) {
-                        $gorev->delay($zamanlama['sonraki_kontrol_at']);
-                    }
+                    ProcessAiTurnJob::dispatch(
+                        'dating',
+                        'first_message',
+                        $aiUser->id,
+                        $sohbet->id,
+                    );
                 }
             });
 

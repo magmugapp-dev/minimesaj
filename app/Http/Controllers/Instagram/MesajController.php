@@ -7,7 +7,7 @@ use App\Helpers\SohbetBitirenHelper;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Instagram\MesajAlRequest;
 use App\Http\Resources\InstagramMesajResource;
-use App\Jobs\InstagramAiCevapGorevi;
+use App\Jobs\ProcessAiTurnJob;
 use App\Models\InstagramAiGorevi;
 use App\Models\InstagramHesap;
 use App\Models\InstagramKisi;
@@ -118,7 +118,29 @@ class MesajController extends Controller
                 'mesaj_id' => $mesaj->id,
                 'hesap_id' => $hesap->id,
             ]);
-            InstagramAiCevapGorevi::dispatch($mesaj, $hesap);
+
+            if (app()->environment('local')) {
+                ProcessAiTurnJob::dispatchSync(
+                    'instagram',
+                    'reply',
+                    $hesap->user_id,
+                    null,
+                    null,
+                    $hesap->id,
+                    $mesaj->id,
+                );
+                continue;
+            }
+
+            ProcessAiTurnJob::dispatch(
+                'instagram',
+                'reply',
+                $hesap->user_id,
+                null,
+                null,
+                $hesap->id,
+                $mesaj->id,
+            );
         }
 
         return response()->json([

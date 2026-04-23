@@ -7,7 +7,6 @@
         <div class="flex flex-wrap items-center justify-between gap-3">
             <div>
                 <h2 class="text-xl font-semibold text-gray-900">Mobil satın alma paketleri</h2>
-                <p class="text-sm text-gray-500">Android ve iOS ürün kodlarını burada yönetebilirsin.</p>
             </div>
             <a href="{{ route('admin.finansal.puan-paketleri.create') }}"
                 class="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700">

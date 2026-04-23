@@ -69,6 +69,16 @@ class EslesmeSonrasiAiIlkMesajGorevi implements ShouldQueue
             return;
         }
 
+        Log::stack(['single', 'ai'])->info('EslesmeSonrasiAiIlkMesajGorevi AI ilk mesaji uretildi.', [
+            'sohbet_id' => $sohbet->id,
+            'ai_user_id' => $aiUser->id,
+            'cevap_metni' => $ilkMesaj,
+            'ham_cevap' => $sonuc['ham_cevap'] ?? null,
+            'model' => $sonuc['model'] ?? null,
+            'giris_token' => $sonuc['giris_token'] ?? null,
+            'cikis_token' => $sonuc['cikis_token'] ?? null,
+        ]);
+
         $mesajServisi->gonderAiMesaji($sohbet, $aiUser, [
             'mesaj_tipi' => 'metin',
             'mesaj_metni' => $ilkMesaj,

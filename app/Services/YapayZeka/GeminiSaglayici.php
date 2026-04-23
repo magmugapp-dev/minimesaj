@@ -21,8 +21,7 @@ class GeminiSaglayici implements AiSaglayiciInterface
 
     public function tamamla(array $mesajlar, array $parametreler = []): array
     {
-        // Model adı sabit: gemini-2.5-flash
-        $parametreler['model_adi'] = self::MODEL_ADI;
+        $parametreler['model_adi'] = $this->cozulenModelAdi($parametreler['model_adi'] ?? null);
         return $this->tamamlaStream($mesajlar, $parametreler);
     }
 
@@ -31,29 +30,40 @@ class GeminiSaglayici implements AiSaglayiciInterface
         array $parametreler = [],
         ?callable $parcaCallback = null
     ): array {
-        $model = self::MODEL_ADI;
+        $model = $this->cozulenModelAdi($parametreler['model_adi'] ?? null);
         $apiKey = Ayar::where('anahtar', 'gemini_api_key')->value('deger');
-        // Sadece ayarlar tablosundan anahtar okunacak. .env'den okuma kaldırıldı.
+
         if (empty($apiKey)) {
             throw new AiSaglayiciHatasi(
                 'Gemini API key tanimlanmamis. Admin panelinden Gemini anahtarini ekleyin.',
                 'gemini',
-                self::MODEL_ADI
+                $model
             );
+        }
+
+        $responseMimeType = $parametreler['response_mime_type'] ?? self::RESPONSE_MIME_TYPE;
+        $responseSchema = $parametreler['response_json_schema'] ?? $this->yapilandirilmisYanitSemasi();
+
+        $generationConfig = [
+            'temperature' => $parametreler['temperature'] ?? 0.9,
+            'topP' => $parametreler['top_p'] ?? 0.95,
+            'maxOutputTokens' => $parametreler['max_output_tokens'] ?? 1024,
+            'thinkingConfig' => [
+                'thinkingBudget' => $parametreler['thinking_budget'] ?? 0,
+            ],
+        ];
+
+        if ($responseMimeType) {
+            $generationConfig['responseMimeType'] = $responseMimeType;
+        }
+
+        if (is_array($responseSchema) && $responseSchema !== []) {
+            $generationConfig['responseJsonSchema'] = $responseSchema;
         }
 
         $govde = [
             'contents' => $this->mesajlariDonustur($mesajlar),
-            'generationConfig' => [
-                'temperature' => $parametreler['temperature'] ?? 0.9,
-                'topP' => $parametreler['top_p'] ?? 0.95,
-                'maxOutputTokens' => $parametreler['max_output_tokens'] ?? 1024,
-                'responseMimeType' => self::RESPONSE_MIME_TYPE,
-                'responseJsonSchema' => $this->yapilandirilmisYanitSemasi(),
-                'thinkingConfig' => [
-                    'thinkingBudget' => $parametreler['thinking_budget'] ?? 0,
-                ],
-            ],
+            'generationConfig' => $generationConfig,
         ];
 
         $sistemMesaji = collect($mesajlar)->firstWhere('role', 'system');
@@ -69,6 +79,17 @@ class GeminiSaglayici implements AiSaglayiciInterface
     public function saglayiciAdi(): string
     {
         return 'gemini';
+    }
+
+    private function cozulenModelAdi(?string $modelAdi): string
+    {
+        $normalized = trim((string) $modelAdi);
+
+        if ($normalized !== '' && Str::startsWith(Str::lower($normalized), 'gemini')) {
+            return $normalized;
+        }
+
+        return self::MODEL_ADI;
     }
 
     private function modelIleStreamDene(

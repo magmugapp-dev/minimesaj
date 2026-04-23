@@ -6,7 +6,6 @@
     <div class="space-y-6 p-6">
         <div>
             <h2 class="text-xl font-semibold text-gray-900">Abonelik paketi duzenle</h2>
-            <p class="text-sm text-gray-500">Store urun kodu, sure ve fiyat bilgilerini guncelle.</p>
         </div>
 
         <div class="rounded-xl border border-gray-200 bg-white p-5">

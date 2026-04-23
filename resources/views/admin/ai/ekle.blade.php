@@ -13,36 +13,10 @@
     @endphp
 
     <div class="studio studio--ai" x-data="{ provider: '{{ old('saglayici_tipi', 'gemini') }}' }">
-        <section class="studio-hero">
-            <div class="studio-hero__inner">
-                <div>
-                    <a href="{{ route('admin.ai.index') }}" class="studio-back">
-                        <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke-width="1.7" stroke="currentColor">
-                            <path stroke-linecap="round" stroke-linejoin="round" d="M10.5 19.5 3 12m0 0 7.5-7.5M3 12h18" />
-                        </svg>
-                        AI listesi
-                    </a>
-                    <p class="studio-eyebrow">AI Create</p>
-                    <h2 class="studio-heading">Yeni AI hesabı</h2>
-                    <div class="studio-chipbar">
-                        <span class="studio-chip">Hesap aktif</span>
-                        <span class="studio-chip">Gemini varsayılan</span>
-                        <span class="studio-chip">Tek ekran kurulum</span>
-                    </div>
-                </div>
-
-                <div class="studio-panelstack">
-                    <div class="studio-panel">
-                        <p class="studio-panel__meta">Varsayılan model</p>
-                        <p class="studio-panel__title">gemini-2.5-flash</p>
-                    </div>
-                    <div class="studio-panel">
-                        <p class="studio-panel__meta">Durum</p>
-                        <p class="studio-panel__title">Oluşturulduğunda aktif</p>
-                    </div>
-                </div>
-            </div>
-        </section>
+        <div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <a href="{{ route('admin.ai.index') }}" class="studio-button studio-button--ghost">AI listesi</a>
+            <h1 class="text-2xl font-semibold text-slate-950">Yeni AI hesabi</h1>
+        </div>
 
         <div class="studio-grid studio-grid--create">
             <form method="POST" action="{{ route('admin.ai.kaydet') }}" class="studio-main">
@@ -53,7 +27,6 @@
                 <section id="kimlik" class="studio-card scroll-mt-24">
                     <div class="studio-card__header">
                         <div>
-                            <p class="studio-kicker">Kimlik</p>
                             <h3 class="studio-title">Profil bilgileri</h3>
                         </div>
                     </div>
@@ -106,7 +79,6 @@
                 <section id="persona" class="studio-card scroll-mt-24">
                     <div class="studio-card__header">
                         <div>
-                            <p class="studio-kicker">Persona</p>
                             <h3 class="studio-title">Karakter ve model</h3>
                         </div>
                     </div>
@@ -190,7 +162,6 @@
 
             <aside class="studio-sidebar">
                 <section class="studio-card">
-                    <p class="studio-kicker">Bölümler</p>
                     <nav class="studio-nav mt-4">
                         @foreach ($sections as $section)
                             <a href="#{{ $section['id'] }}" class="studio-nav__link">
@@ -204,7 +175,6 @@
                 </section>
 
                 <section class="studio-card">
-                    <p class="studio-kicker">Özet</p>
                     <div class="studio-meta mt-4">
                         <div class="studio-meta__item">
                             <p class="studio-meta__eyebrow">Durum</p>
@@ -218,7 +188,6 @@
                 </section>
 
                 <section class="studio-card">
-                    <p class="studio-kicker">Aksiyonlar</p>
                     <div class="studio-stack mt-4">
                         <a href="{{ route('admin.ai.index') }}" class="studio-linkcard">
                             <span>AI listesi</span>

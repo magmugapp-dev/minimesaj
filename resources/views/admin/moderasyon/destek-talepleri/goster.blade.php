@@ -180,8 +180,6 @@
                                 class="mt-0.5 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500">
                             <span>
                                 <span class="block text-sm font-medium text-gray-800">Kullanıcıya e-posta gönder</span>
-                                <span class="mt-1 block text-xs text-gray-500">İşaretli kalırsa bu yanıt, kullanıcının
-                                    kayıtlı e-posta adresine de iletilir.</span>
                             </span>
                         </label>
                         <button type="submit"

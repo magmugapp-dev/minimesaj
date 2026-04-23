@@ -19,8 +19,8 @@ class SohbetController extends Controller
         })
             ->where('durum', 'aktif')
             ->with([
-                'eslesme.user:id,ad,kullanici_adi,profil_resmi,cevrim_ici_mi',
-                'eslesme.eslesenUser:id,ad,kullanici_adi,profil_resmi,cevrim_ici_mi',
+                'eslesme.user:id,ad,kullanici_adi,profil_resmi,cevrim_ici_mi,dil',
+                'eslesme.eslesenUser:id,ad,kullanici_adi,profil_resmi,cevrim_ici_mi,dil',
                 'sonMesaj',
             ])
             ->withCount([

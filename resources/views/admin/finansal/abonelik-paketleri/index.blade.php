@@ -7,7 +7,6 @@
         <div class="flex flex-wrap items-center justify-between gap-3">
             <div>
                 <h2 class="text-xl font-semibold text-gray-900">Premium abonelik paketleri</h2>
-                <p class="text-sm text-gray-500">iOS ve Android urun kodlarini buradan yonetebilirsin.</p>
             </div>
             <a href="{{ route('admin.finansal.abonelik-paketleri.create') }}"
                 class="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700">

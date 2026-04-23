@@ -30,50 +30,16 @@
                 x-data="{ provider: '{{ old('saglayici_tipi', $ayar->saglayici_tipi ?? 'gemini') }}', backupProvider: '{{ old('yedek_saglayici_tipi', $ayar->yedek_saglayici_tipi ?? '') }}' }">
                 @csrf
                 @method('PUT')
-
-                <section class="studio-hero">
-                    <div class="studio-hero__inner">
-                        <div>
-                            <a href="{{ route('admin.ai.goster', $kullanici) }}" class="studio-back">
-                                <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke-width="1.7"
-                                    stroke="currentColor">
-                                    <path stroke-linecap="round" stroke-linejoin="round"
-                                        d="M10.5 19.5 3 12m0 0 7.5-7.5M3 12h18" />
-                                </svg>
-                                Detaya dön
-                            </a>
-                            <p class="studio-eyebrow">AI Editor</p>
-                            <h2 class="studio-heading">{{ $tamAd }}</h2>
-                            <div class="studio-chipbar">
-                                <span class="studio-chip">{{ '@' . $kullanici->kullanici_adi }}</span>
-                                <span class="studio-chip">{{ ucfirst($kullanici->hesap_durumu) }}</span>
-                                <span class="studio-chip">{{ $ayar->aktif_mi ? 'AI aktif' : 'AI pasif' }}</span>
-                            </div>
-                        </div>
-
-                        <div class="studio-panelstack">
-                            <div class="studio-panel">
-                                <p class="studio-panel__meta">Ana model</p>
-                                <p class="studio-panel__title">{{ $ayar->model_adi ?? 'Tanımsız' }}</p>
-                            </div>
-                            <div class="studio-panel">
-                                <p class="studio-panel__meta">Yedek model</p>
-                                <p class="studio-panel__title">{{ $ayar->yedek_model_adi ?: 'Yok' }}</p>
-                            </div>
-                            <div class="studio-panel">
-                                <p class="studio-panel__meta">Hafıza</p>
-                                <p class="studio-panel__title">{{ $ayar->hafiza_aktif_mi ? 'Aktif' : 'Pasif' }}</p>
-                            </div>
-                        </div>
-                    </div>
-                </section>
+                <div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                    <a href="{{ route('admin.ai.goster', $kullanici) }}" class="studio-button studio-button--ghost">Detaya don</a>
+                    <h1 class="text-2xl font-semibold text-slate-950">{{ $tamAd }}</h1>
+                </div>
 
                 @include('admin.partials.form-hatalari')
 
                 <section id="profil" class="studio-card scroll-mt-24">
                     <div class="studio-card__header">
                         <div>
-                            <p class="studio-kicker">Profil</p>
                             <h3 class="studio-title">Kullanıcı</h3>
                         </div>
                     </div>
@@ -109,7 +75,6 @@
                 <section id="kisilik" class="studio-card scroll-mt-24">
                     <div class="studio-card__header">
                         <div>
-                            <p class="studio-kicker">Kişilik</p>
                             <h3 class="studio-title">Ses ve karakter</h3>
                         </div>
                     </div>
@@ -167,7 +132,6 @@
                 <section id="model" class="studio-card scroll-mt-24">
                     <div class="studio-card__header">
                         <div>
-                            <p class="studio-kicker">Model</p>
                             <h3 class="studio-title">Sağlayıcı</h3>
                         </div>
                     </div>
@@ -235,12 +199,8 @@
                 <section id="mesaj" class="studio-card scroll-mt-24">
                     <div class="studio-card__header">
                         <div>
-                            <p class="studio-kicker">Mesaj</p>
                             <h3 class="studio-title">Mesaj akışı</h3>
                         </div>
-                    </div>
-                    <div class="studio-copy-block" style="margin-bottom: 1rem;">
-                        Cevaplar bu araliga ve rastgele gecikmeye gore planlanir. AI yalnizca cevrim iciyse ve aktif saat penceresindeyse cevap uretir.
                     </div>
                     <div class="studio-form-grid studio-form-grid--4">
                         <div><label class="studio-label" for="minimum_cevap_suresi_saniye">Min. cevap süresi</label><input
@@ -288,12 +248,8 @@
                 <section id="zamanlama" class="studio-card scroll-mt-24">
                     <div class="studio-card__header">
                         <div>
-                            <p class="studio-kicker">Zamanlama</p>
                             <h3 class="studio-title">Aktif saatler</h3>
                         </div>
-                    </div>
-                    <div class="studio-copy-block" style="margin-bottom: 1rem;">
-                        Uyku penceresinde cevap akis durur. Aktif saat disina tasan mesajlar, bir sonraki uygun pencereye kaydirilir.
                     </div>
                     <div class="studio-form-grid studio-form-grid--3">
                         <div><label class="studio-label" for="saat_dilimi">Saat dilimi</label><input id="saat_dilimi"
@@ -326,7 +282,6 @@
                 <section id="kurallar" class="studio-card scroll-mt-24">
                     <div class="studio-card__header">
                         <div>
-                            <p class="studio-kicker">Kurallar</p>
                             <h3 class="studio-title">Kurallar</h3>
                         </div>
                     </div>
@@ -361,7 +316,6 @@
 
             <aside class="studio-sidebar">
                 <section class="studio-card">
-                    <p class="studio-kicker">Bölümler</p>
                     <nav class="studio-nav mt-4">
                         @foreach ($sections as $section)
                             <a href="#{{ $section['id'] }}" class="studio-nav__link">
@@ -376,7 +330,6 @@
                 </section>
 
                 <section class="studio-card">
-                    <p class="studio-kicker">Özet</p>
                     <div class="studio-meta mt-4">
                         <div class="studio-meta__item">
                             <p class="studio-meta__eyebrow">Hesap Durumu</p>
@@ -398,7 +351,6 @@
                 </section>
 
                 <section class="studio-card">
-                    <p class="studio-kicker">Aksiyonlar</p>
                     <div class="studio-stack mt-4">
                         <a href="{{ route('admin.ai.goster', $kullanici) }}" class="studio-linkcard">
                             <span>Detayı gör</span>

@@ -670,9 +670,28 @@ class AppAuthApi {
   Future<List<AppConversationMessage>> fetchConversationMessages(
     String token, {
     required int conversationId,
+    int page = 1,
   }) async {
+    final result = await fetchConversationMessagesPage(
+      token,
+      conversationId: conversationId,
+      page: page,
+    );
+
+    return result.messages;
+  }
+
+  Future<AppConversationMessagePage> fetchConversationMessagesPage(
+    String token, {
+    required int conversationId,
+    int page = 1,
+  }) async {
+    final uri = AppApi.uri(
+      AppApi.datingChatMessagesPath(conversationId),
+    ).replace(queryParameters: <String, String>{'page': page.toString()});
+
     final response = await _client.get(
-      AppApi.uri(AppApi.datingChatMessagesPath(conversationId)),
+      uri,
       headers: {'Accept': 'application/json', 'Authorization': 'Bearer $token'},
     );
 
@@ -684,12 +703,27 @@ class AppAuthApi {
       throw ApiException(_extractErrorMessage(payload));
     }
 
-    return _extractDataList(payload)
+    final messages = _extractDataList(payload)
         .map(_conversationMessageFromJson)
         .whereType<AppConversationMessage>()
         .toList()
         .reversed
         .toList();
+    final meta = _asMap(payload['meta']);
+    final ai = _asMap(payload['ai']);
+    final currentPage = (meta?['current_page'] as num?)?.toInt() ?? page;
+    final lastPage = (meta?['last_page'] as num?)?.toInt() ?? currentPage;
+    final total = (meta?['total'] as num?)?.toInt();
+
+    return AppConversationMessagePage(
+      messages: messages,
+      currentPage: currentPage,
+      nextPage: currentPage < lastPage ? currentPage + 1 : null,
+      total: total,
+      aiStatus: _nullableString(ai?['status']?.toString()),
+      aiStatusText: _nullableString(ai?['status_text']?.toString()),
+      aiPlannedAt: DateTime.tryParse(ai?['planned_at']?.toString() ?? ''),
+    );
   }
 
   Future<AppConversationMessage> sendConversationMessage(
@@ -720,6 +754,47 @@ class AppAuthApi {
       throw const ApiException('Mesaj gonderildi ama sunucu yaniti okunamadi.');
     }
     return message;
+  }
+
+  Future<AppConversationMessage> translateConversationMessage(
+    String token, {
+    required AppConversationMessage message,
+  }) async {
+    final response = await _client.post(
+      AppApi.uri(
+        AppApi.datingChatMessageTranslationPath(
+          message.conversationId,
+          message.id,
+        ),
+      ),
+      headers: {'Accept': 'application/json', 'Authorization': 'Bearer $token'},
+    );
+
+    final payload = _decodeJsonMap(response);
+    if (response.statusCode == 401 || response.statusCode == 403) {
+      throw const UnauthorizedApiException('Oturum suresi doldu.');
+    }
+    if (response.statusCode >= 400) {
+      throw _extractApiException(payload);
+    }
+
+    final translation = _asMap(payload['ceviri']);
+    final translatedText = _nullableString(
+      translation?['metin']?.toString() ?? payload['ceviri_metni']?.toString(),
+    );
+    if (translatedText == null) {
+      throw const ApiException('Ceviri alindi ama metin okunamadi.');
+    }
+
+    return message.copyWith(
+      translatedText: translatedText,
+      translationTargetLanguageCode: _nullableString(
+        translation?['hedef_dil_kodu']?.toString(),
+      ),
+      translationTargetLanguageName: _nullableString(
+        translation?['hedef_dil_adi']?.toString(),
+      ),
+    );
   }
 
   Future<void> markConversationRead(
@@ -896,10 +971,7 @@ class AppAuthApi {
         'Authorization': 'Bearer $token',
         'Content-Type': 'application/json',
       },
-      body: jsonEncode({
-        'alici_user_id': receiverUserId,
-        'hediye_id': giftId,
-      }),
+      body: jsonEncode({'alici_user_id': receiverUserId, 'hediye_id': giftId}),
     );
 
     final payload = _decodeJsonMap(response);
@@ -1353,6 +1425,12 @@ class AppAuthApi {
       peerName: peer['ad']?.toString() ?? 'Kullanici',
       peerUsername: peer['kullanici_adi']?.toString() ?? '',
       peerProfileImageUrl: peer['profil_resmi']?.toString(),
+      peerLanguageCode: _nullableString(
+        json['peer_language_code']?.toString() ?? peer['dil']?.toString(),
+      ),
+      peerLanguageName: _nullableString(
+        json['peer_language_name']?.toString() ?? peer['dil_adi']?.toString(),
+      ),
       online: peer['cevrim_ici_mi'] == true,
       lastMessage: messageText,
       lastMessageType: messageType,
@@ -1363,6 +1441,11 @@ class AppAuthApi {
       ),
       unreadCount: (json['okunmamis_sayisi'] as num?)?.toInt() ?? 0,
       myMessageRead: sentByCurrentUser && (lastMessage?['okundu_mu'] == true),
+      aiStatus: _nullableString(json['ai_durumu']?.toString()),
+      aiStatusText: _nullableString(json['ai_durum_metni']?.toString()),
+      aiPlannedAt: DateTime.tryParse(
+        json['ai_planlanan_cevap_at']?.toString() ?? '',
+      ),
     );
   }
 
@@ -1371,6 +1454,7 @@ class AppAuthApi {
   ) {
     final sender = _asMap(json['gonderen']);
     final durationInSeconds = (json['dosya_suresi'] as num?)?.toInt();
+    final translation = _asMap(json['ceviri']);
     return AppConversationMessage(
       id: (json['id'] as num?)?.toInt() ?? 0,
       conversationId: (json['sohbet_id'] as num?)?.toInt() ?? 0,
@@ -1385,6 +1469,15 @@ class AppAuthApi {
           : Duration(seconds: durationInSeconds),
       isRead: json['okundu_mu'] == true,
       isAiGenerated: json['ai_tarafindan_uretildi_mi'] == true,
+      languageCode: _nullableString(json['dil_kodu']?.toString()),
+      languageName: _nullableString(json['dil_adi']?.toString()),
+      translatedText: _nullableString(translation?['metin']?.toString()),
+      translationTargetLanguageCode: _nullableString(
+        translation?['hedef_dil_kodu']?.toString(),
+      ),
+      translationTargetLanguageName: _nullableString(
+        translation?['hedef_dil_adi']?.toString(),
+      ),
       createdAt: DateTime.tryParse(json['created_at']?.toString() ?? ''),
     );
   }

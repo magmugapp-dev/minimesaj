@@ -11,6 +11,7 @@ import 'package:magmug/features/profile/widgets/profile_overview_widgets.dart'
 import 'package:shared_preferences/shared_preferences.dart';
 
 const Duration _conversationRefreshCooldown = Duration(seconds: 12);
+const int _conversationMessagePageSize = 50;
 final Map<int, DateTime> _lastConversationRefreshAt = <int, DateTime>{};
 final Set<int> _conversationRefreshInFlight = <int>{};
 final Map<int, AppMatchCandidate> _chatPeerProfileCache =
@@ -38,6 +39,9 @@ class ChatMessage {
   final ChatBubbleSide side;
   final ChatMessageType type;
   final String? text;
+  final String? translatedText;
+  final String? translationLanguageName;
+  final String? languageName;
   final String? asset;
   final Duration? duration;
   final String time;
@@ -48,6 +52,9 @@ class ChatMessage {
     required this.type,
     required this.time,
     this.text,
+    this.translatedText,
+    this.translationLanguageName,
+    this.languageName,
     this.asset,
     this.duration,
   });
@@ -56,6 +63,9 @@ class ChatMessage {
     : id = null,
       type = ChatMessageType.typing,
       text = null,
+      translatedText = null,
+      translationLanguageName = null,
+      languageName = null,
       asset = null,
       duration = null,
       time = '';
@@ -68,6 +78,8 @@ class ChatPeer {
   final String status;
   final String? avatarAsset;
   final String? avatarUrl;
+  final String? languageCode;
+  final String? languageName;
   final bool online;
 
   const ChatPeer({
@@ -76,6 +88,8 @@ class ChatPeer {
     required this.status,
     this.avatarAsset,
     this.avatarUrl,
+    this.languageCode,
+    this.languageName,
     this.online = true,
   });
 
@@ -84,12 +98,21 @@ class ChatPeer {
     final normalizedHandle = username.isEmpty
         ? ''
         : (username.startsWith('@') ? username : '@$username');
+    final baseStatus =
+        conversation.statusText ??
+        (conversation.online ? 'Cevrimici' : 'Aktif degil');
+    final languageName = conversation.peerLanguageName?.trim();
+    final status = languageName == null || languageName.isEmpty
+        ? baseStatus
+        : '$baseStatus • $languageName';
 
     return ChatPeer(
       name: conversation.peerName,
       handle: normalizedHandle,
-      status: conversation.online ? 'Cevrimici' : 'Aktif degil',
+      status: status,
       avatarUrl: conversation.peerProfileImageUrl,
+      languageCode: conversation.peerLanguageCode,
+      languageName: conversation.peerLanguageName,
       online: conversation.online,
     );
   }
@@ -132,6 +155,7 @@ final conversationMessagesProvider = FutureProvider.autoDispose
       final localStore = ChatLocalStore.instance;
       final cachedMessages = await localStore.getConversationMessages(
         conversationId,
+        limit: _conversationMessagePageSize,
       );
       if (cachedMessages.isNotEmpty) {
         if (_shouldRefreshConversation(conversationId)) {
@@ -195,7 +219,9 @@ final chatPeerProfileProvider = FutureProvider.autoDispose
       }
     });
 
-final chatGiftsProvider = FutureProvider.autoDispose<List<AppGift>>((ref) async {
+final chatGiftsProvider = FutureProvider.autoDispose<List<AppGift>>((
+  ref,
+) async {
   final session = await ref.watch(appAuthProvider.future);
   final token = session?.token;
   if (token == null || token.trim().isEmpty) {
@@ -451,6 +477,9 @@ bool _sameMessageList(
         a.fileDuration != b.fileDuration ||
         a.isRead != b.isRead ||
         a.isAiGenerated != b.isAiGenerated ||
+        a.languageCode != b.languageCode ||
+        a.languageName != b.languageName ||
+        a.translatedText != b.translatedText ||
         !_sameMessageMoment(a.createdAt, b.createdAt)) {
       return false;
     }
@@ -465,6 +494,34 @@ bool _sameMessageMoment(DateTime? left, DateTime? right) {
   }
 
   return left.millisecondsSinceEpoch == right.millisecondsSinceEpoch;
+}
+
+List<AppConversationMessage> _mergeConversationMessages(
+  Iterable<AppConversationMessage> left,
+  Iterable<AppConversationMessage> right,
+) {
+  final merged = <int, AppConversationMessage>{};
+
+  for (final message in left) {
+    merged[message.id] = message;
+  }
+  for (final message in right) {
+    merged[message.id] = message;
+  }
+
+  final result = merged.values.toList(growable: false);
+  result.sort((a, b) {
+    final leftMoment = a.createdAt?.millisecondsSinceEpoch ?? 0;
+    final rightMoment = b.createdAt?.millisecondsSinceEpoch ?? 0;
+    final momentCompare = leftMoment.compareTo(rightMoment);
+    if (momentCompare != 0) {
+      return momentCompare;
+    }
+
+    return a.id.compareTo(b.id);
+  });
+
+  return result;
 }
 
 String _initialsOfName(String fullName) {
@@ -809,6 +866,8 @@ class _MessageBubble extends StatelessWidget {
         content = _TextBubble(
           isMe: isMe,
           text: message.text ?? '',
+          translatedText: message.translatedText,
+          translationLanguageName: message.translationLanguageName,
           theme: theme,
         );
     }
@@ -881,6 +940,7 @@ void _showMessageActions(
   BuildContext context, {
   required AppConversationMessage message,
   required ChatPeer peer,
+  VoidCallback? onTranslate,
 }) {
   showCupertinoModalPopup<void>(
     context: context,
@@ -894,6 +954,17 @@ void _showMessageActions(
         style: TextStyle(fontFamily: AppFont.family),
       ),
       actions: [
+        if (onTranslate != null)
+          CupertinoActionSheetAction(
+            onPressed: () {
+              Navigator.of(sheetContext).pop();
+              onTranslate();
+            },
+            child: Text(
+              message.translatedText == null ? 'Cevir' : 'Ceviriyi Yenile',
+              style: const TextStyle(fontFamily: AppFont.family),
+            ),
+          ),
         CupertinoActionSheetAction(
           isDestructiveAction: true,
           onPressed: () {
@@ -924,11 +995,15 @@ void _showMessageActions(
 class _TextBubble extends StatelessWidget {
   final bool isMe;
   final String text;
+  final String? translatedText;
+  final String? translationLanguageName;
   final _ChatThemePalette theme;
 
   const _TextBubble({
     required this.isMe,
     required this.text,
+    this.translatedText,
+    this.translationLanguageName,
     required this.theme,
   });
 
@@ -952,19 +1027,57 @@ class _TextBubble extends StatelessWidget {
           );
     final textColor = isMe ? AppColors.white : theme.incomingText;
 
+    final translation = translatedText?.trim();
+
     return Container(
       constraints: const BoxConstraints(maxWidth: 258),
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
       decoration: bg.copyWith(borderRadius: radius),
-      child: Text(
-        text,
-        style: TextStyle(
-          fontFamily: AppFont.family,
-          fontWeight: FontWeight.w500,
-          fontSize: 14,
-          height: 1.45,
-          color: textColor,
-        ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            text,
+            style: TextStyle(
+              fontFamily: AppFont.family,
+              fontWeight: FontWeight.w500,
+              fontSize: 14,
+              height: 1.45,
+              color: textColor,
+            ),
+          ),
+          if (!isMe && translation != null && translation.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            Container(
+              height: 1,
+              color: textColor.withValues(alpha: 0.14),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              translationLanguageName == null
+                  ? 'Ceviri'
+                  : 'Ceviri • $translationLanguageName',
+              style: TextStyle(
+                fontFamily: AppFont.family,
+                fontWeight: FontWeight.w700,
+                fontSize: 10.5,
+                color: textColor.withValues(alpha: 0.62),
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              translation,
+              style: TextStyle(
+                fontFamily: AppFont.family,
+                fontWeight: FontWeight.w600,
+                fontSize: 13,
+                height: 1.42,
+                color: textColor,
+              ),
+            ),
+          ],
+        ],
       ),
     );
   }
@@ -1412,6 +1525,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   bool? _blockedOverride;
   int? _themeIndex;
   String? _inputError;
+  String? _peerStatusOverride;
   int? _realtimeConversationId;
   String? _realtimeToken;
 
@@ -1434,6 +1548,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.conversation?.id != widget.conversation?.id) {
       _themeIndex = null;
+      _peerStatusOverride = null;
       unawaited(_bindRealtimeSubscription(force: true));
       unawaited(_loadThemeSelection());
     }
@@ -1465,7 +1580,20 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   ChatPeer get _peer {
     final conversation = widget.conversation;
     if (conversation != null) {
-      return ChatPeer.fromConversation(conversation);
+      final basePeer = ChatPeer.fromConversation(conversation);
+      if (_peerStatusOverride != null && _peerStatusOverride!.trim().isNotEmpty) {
+        return ChatPeer(
+          name: basePeer.name,
+          handle: basePeer.handle,
+          status: _peerStatusOverride!,
+          avatarAsset: basePeer.avatarAsset,
+          avatarUrl: basePeer.avatarUrl,
+          languageCode: basePeer.languageCode,
+          languageName: basePeer.languageName,
+          online: basePeer.online,
+        );
+      }
+      return basePeer;
     }
     return _emptyChatPeer;
   }
@@ -1546,6 +1674,16 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   void _handleRealtimeEvent(ChatRealtimeEvent event) {
     if (!mounted) {
       return;
+    }
+
+    if (event.type == ChatRealtimeEventType.aiStatus) {
+      final nextStatusText = event.payload['status_text']?.toString();
+      setState(() {
+        _peerStatusOverride =
+            nextStatusText == null || nextStatusText.trim().isEmpty
+            ? null
+            : nextStatusText;
+      });
     }
 
     ref.invalidate(conversationMessagesProvider(event.conversationId));
@@ -1914,7 +2052,7 @@ class _ChatMessagesBody extends StatelessWidget {
   }
 }
 
-class _LiveChatMessagesBody extends ConsumerWidget {
+class _LiveChatMessagesBody extends ConsumerStatefulWidget {
   final AppConversationPreview conversation;
   final ChatPeer peer;
   final _ChatThemePalette theme;
@@ -1926,58 +2064,406 @@ class _LiveChatMessagesBody extends ConsumerWidget {
   });
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<_LiveChatMessagesBody> createState() =>
+      _LiveChatMessagesBodyState();
+}
+
+class _LiveChatMessagesBodyState extends ConsumerState<_LiveChatMessagesBody> {
+  late final ScrollController _scrollController;
+  List<AppConversationMessage> _messages = const <AppConversationMessage>[];
+  bool _initialLoading = true;
+  bool _loadingOlder = false;
+  bool _refreshingLatest = false;
+  bool _hasMoreOlder = true;
+  int _highestFetchedPage = 0;
+  String? _errorText;
+  String? _aiStatus;
+  int? _lastHandledRefreshTick;
+
+  @override
+  void initState() {
+    super.initState();
+    _scrollController = ScrollController()..addListener(_handleScroll);
+    _lastHandledRefreshTick = ref.read(conversationFeedRefreshProvider);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) {
+        return;
+      }
+      unawaited(_loadInitialMessages());
+    });
+  }
+
+  @override
+  void didUpdateWidget(covariant _LiveChatMessagesBody oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.conversation.id != widget.conversation.id) {
+      _messages = const <AppConversationMessage>[];
+      _initialLoading = true;
+      _loadingOlder = false;
+      _refreshingLatest = false;
+      _hasMoreOlder = true;
+      _highestFetchedPage = 0;
+      _errorText = null;
+      _lastHandledRefreshTick = ref.read(conversationFeedRefreshProvider);
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) {
+          return;
+        }
+        unawaited(_loadInitialMessages());
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _scrollController
+      ..removeListener(_handleScroll)
+      ..dispose();
+    super.dispose();
+  }
+
+  void _handleScroll() {
+    if (!_scrollController.hasClients ||
+        _scrollController.position.pixels > 96) {
+      return;
+    }
+    unawaited(_loadOlderMessages());
+  }
+
+  bool _isNearBottom() {
+    if (!_scrollController.hasClients) {
+      return true;
+    }
+
+    return _scrollController.position.maxScrollExtent -
+            _scrollController.position.pixels <=
+        88;
+  }
+
+  void _scrollToBottom({bool animated = true}) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_scrollController.hasClients) {
+        return;
+      }
+
+      final target = _scrollController.position.maxScrollExtent;
+      if (animated) {
+        _scrollController.animateTo(
+          target,
+          duration: const Duration(milliseconds: 220),
+          curve: Curves.easeOutCubic,
+        );
+        return;
+      }
+
+      _scrollController.jumpTo(target);
+    });
+  }
+
+  Future<void> _markConversationRead(String token) async {
+    final api = AppAuthApi();
+    try {
+      await api.markConversationRead(
+        token,
+        conversationId: widget.conversation.id,
+      );
+    } catch (_) {
+      // Keep chat readable when read receipts fail.
+    } finally {
+      api.close();
+    }
+  }
+
+  Future<void> _loadInitialMessages() async {
+    final authState = ref.read(appAuthProvider).asData?.value;
+    final token = authState?.token;
+    final conversationId = widget.conversation.id;
+
+    if (token == null || token.trim().isEmpty) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _initialLoading = false;
+        _errorText = 'Mesajlari gormek icin once giris yapmalisin.';
+      });
+      return;
+    }
+
+    setState(() {
+      _initialLoading = true;
+      _errorText = null;
+      _messages = const <AppConversationMessage>[];
+      _loadingOlder = false;
+      _refreshingLatest = false;
+      _hasMoreOlder = true;
+      _highestFetchedPage = 0;
+    });
+
+    final localStore = ChatLocalStore.instance;
+    final cachedMessages = await localStore.getConversationMessages(
+      conversationId,
+      limit: _conversationMessagePageSize,
+    );
+    if (!mounted || widget.conversation.id != conversationId) {
+      return;
+    }
+
+    if (cachedMessages.isNotEmpty) {
+      setState(() {
+        _messages = cachedMessages;
+        _initialLoading = false;
+        _errorText = null;
+      });
+      _scrollToBottom(animated: false);
+    }
+
+    final api = AppAuthApi();
+    try {
+      final page = await api.fetchConversationMessagesPage(
+        token,
+        conversationId: conversationId,
+        page: 1,
+      );
+      if (!mounted || widget.conversation.id != conversationId) {
+        return;
+      }
+
+      await localStore.upsertConversationMessages(page.messages);
+      unawaited(_markConversationRead(token));
+
+      setState(() {
+        _messages = _mergeConversationMessages(const [], page.messages);
+        _initialLoading = false;
+        _errorText = null;
+        _highestFetchedPage = 1;
+        _hasMoreOlder = page.hasMore;
+        _aiStatus = page.aiStatus;
+      });
+      _scrollToBottom(animated: false);
+    } catch (error) {
+      if (!mounted || widget.conversation.id != conversationId) {
+        return;
+      }
+
+      if (cachedMessages.isNotEmpty) {
+        setState(() => _initialLoading = false);
+      } else {
+        setState(() {
+          _initialLoading = false;
+          _errorText = AppAuthErrorFormatter.messageFrom(error);
+        });
+      }
+    } finally {
+      api.close();
+    }
+  }
+
+  Future<void> _refreshLatestMessages({bool scrollToBottom = false}) async {
+    if (_refreshingLatest) {
+      return;
+    }
+
+    final authState = ref.read(appAuthProvider).asData?.value;
+    final token = authState?.token;
+    final conversationId = widget.conversation.id;
+    if (token == null || token.trim().isEmpty) {
+      return;
+    }
+
+    _refreshingLatest = true;
+    final api = AppAuthApi();
+    try {
+      final page = await api.fetchConversationMessagesPage(
+        token,
+        conversationId: conversationId,
+        page: 1,
+      );
+      if (!mounted || widget.conversation.id != conversationId) {
+        return;
+      }
+
+      await ChatLocalStore.instance.upsertConversationMessages(page.messages);
+      unawaited(_markConversationRead(token));
+
+      final previousLastId = _messages.isNotEmpty ? _messages.last.id : null;
+      final mergedMessages = _mergeConversationMessages(
+        _messages,
+        page.messages,
+      );
+      final nextLastId = mergedMessages.isNotEmpty
+          ? mergedMessages.last.id
+          : null;
+
+      setState(() {
+        _messages = mergedMessages;
+        _errorText = null;
+        _aiStatus = page.aiStatus;
+        if (_highestFetchedPage == 0) {
+          _highestFetchedPage = 1;
+          _hasMoreOlder = page.hasMore;
+        }
+      });
+
+      if (scrollToBottom || previousLastId != nextLastId) {
+        _scrollToBottom(animated: previousLastId != null);
+      }
+    } catch (_) {
+      // Keep the current message list visible when refresh fails.
+    } finally {
+      _refreshingLatest = false;
+      api.close();
+    }
+  }
+
+  Future<void> _loadOlderMessages() async {
+    if (_loadingOlder || !_hasMoreOlder || _highestFetchedPage == 0) {
+      return;
+    }
+
+    final authState = ref.read(appAuthProvider).asData?.value;
+    final token = authState?.token;
+    final conversationId = widget.conversation.id;
+    if (token == null || token.trim().isEmpty) {
+      return;
+    }
+
+    final previousOffset = _scrollController.hasClients
+        ? _scrollController.position.pixels
+        : 0.0;
+    final previousMaxExtent = _scrollController.hasClients
+        ? _scrollController.position.maxScrollExtent
+        : 0.0;
+    final nextPageNumber = _highestFetchedPage + 1;
+
+    setState(() => _loadingOlder = true);
+
+    final api = AppAuthApi();
+    try {
+      final page = await api.fetchConversationMessagesPage(
+        token,
+        conversationId: conversationId,
+        page: nextPageNumber,
+      );
+      if (!mounted || widget.conversation.id != conversationId) {
+        return;
+      }
+
+      await ChatLocalStore.instance.upsertConversationMessages(page.messages);
+
+      setState(() {
+        _messages = _mergeConversationMessages(page.messages, _messages);
+        _loadingOlder = false;
+        _errorText = null;
+        _highestFetchedPage = nextPageNumber;
+        _hasMoreOlder = page.hasMore;
+      });
+
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || !_scrollController.hasClients) {
+          return;
+        }
+
+        final newMaxExtent = _scrollController.position.maxScrollExtent;
+        final delta = newMaxExtent - previousMaxExtent;
+        _scrollController.jumpTo(previousOffset + delta);
+      });
+    } catch (_) {
+      if (!mounted || widget.conversation.id != conversationId) {
+        return;
+      }
+
+      setState(() => _loadingOlder = false);
+    } finally {
+      api.close();
+    }
+  }
+
+  Future<void> _translateMessage(AppConversationMessage message) async {
+    final authState = ref.read(appAuthProvider).asData?.value;
+    final token = authState?.token;
+    if (token == null || token.trim().isEmpty) {
+      return;
+    }
+
+    final api = AppAuthApi();
+    try {
+      final translated = await api.translateConversationMessage(
+        token,
+        message: message,
+      );
+      await ChatLocalStore.instance.upsertConversationMessage(translated);
+      if (!mounted || widget.conversation.id != message.conversationId) {
+        return;
+      }
+
+      setState(() {
+        _messages = _messages
+            .map((item) => item.id == translated.id ? translated : item)
+            .toList(growable: false);
+      });
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      await showCupertinoDialog<void>(
+        context: context,
+        builder: (dialogContext) => CupertinoAlertDialog(
+          title: const Text(
+            'Ceviri alinamadi',
+            style: TextStyle(fontFamily: AppFont.family),
+          ),
+          content: Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: Text(
+              AppAuthErrorFormatter.messageFrom(error),
+              style: const TextStyle(fontFamily: AppFont.family),
+            ),
+          ),
+          actions: [
+            CupertinoDialogAction(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: const Text(
+                'Tamam',
+                style: TextStyle(fontFamily: AppFont.family),
+              ),
+            ),
+          ],
+        ),
+      );
+    } finally {
+      api.close();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final currentUserId = ref.watch(appAuthProvider).asData?.value?.user?.id;
     if (currentUserId == null) {
       return const Center(child: CupertinoActivityIndicator(radius: 14));
     }
 
-    final messagesAsync = ref.watch(
-      conversationMessagesProvider(conversation.id),
-    );
-
-    return messagesAsync.when(
-      data: (messages) {
-        if (messages.isEmpty) {
-          return const _ChatEmptyBody();
+    final refreshTick = ref.watch(conversationFeedRefreshProvider);
+    if (_lastHandledRefreshTick != refreshTick) {
+      _lastHandledRefreshTick = refreshTick;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) {
+          return;
         }
+        unawaited(_refreshLatestMessages(scrollToBottom: _isNearBottom()));
+      });
+    }
 
-        final uiMessages = messages
-            .map((message) => _chatMessageFromApi(message, currentUserId))
-            .toList();
+    if (_initialLoading && _messages.isEmpty) {
+      return const Center(child: CupertinoActivityIndicator(radius: 14));
+    }
 
-        return ListView.builder(
-          physics: const BouncingScrollPhysics(),
-          padding: const EdgeInsets.only(top: 16, bottom: 16),
-          itemCount: uiMessages.length,
-          itemBuilder: (context, index) {
-            final apiMessage = messages[index];
-            final uiMessage = uiMessages[index];
-            final canReportMessage =
-                !apiMessage.isFromUser(currentUserId) && uiMessage.id != null;
-
-            return _MessageBubble(
-              message: uiMessage,
-              peer: peer,
-              theme: theme,
-              onReport: canReportMessage
-                  ? () => _showMessageActions(
-                      context,
-                      message: apiMessage,
-                      peer: peer,
-                    )
-                  : null,
-            );
-          },
-        );
-      },
-      loading: () =>
-          const Center(child: CupertinoActivityIndicator(radius: 14)),
-      error: (error, _) => Center(
+    if (_errorText != null && _messages.isEmpty) {
+      return Center(
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 24),
           child: Text(
-            AppAuthErrorFormatter.messageFrom(error),
+            _errorText!,
             textAlign: TextAlign.center,
             style: const TextStyle(
               fontFamily: AppFont.family,
@@ -1986,7 +2472,84 @@ class _LiveChatMessagesBody extends ConsumerWidget {
             ),
           ),
         ),
-      ),
+      );
+    }
+
+    if (_messages.isEmpty) {
+      if (_aiStatus == 'typing' || _aiStatus == 'queued') {
+        return ListView(
+          controller: _scrollController,
+          physics: const BouncingScrollPhysics(),
+          padding: const EdgeInsets.only(top: 16, bottom: 16),
+          children: [
+            _MessageBubble(
+              message: const ChatMessage.typing(),
+              peer: widget.peer,
+              theme: widget.theme,
+            ),
+          ],
+        );
+      }
+
+      return const _ChatEmptyBody();
+    }
+
+    final uiMessages = _messages
+        .map((message) => _chatMessageFromApi(message, currentUserId))
+        .toList(growable: true);
+
+    if (_aiStatus == 'typing' || _aiStatus == 'queued') {
+      uiMessages.add(const ChatMessage.typing());
+    }
+    final extraTopItemCount = _loadingOlder ? 1 : 0;
+
+    return ListView.builder(
+      controller: _scrollController,
+      physics: const BouncingScrollPhysics(),
+      padding: const EdgeInsets.only(top: 16, bottom: 16),
+      itemCount: uiMessages.length + extraTopItemCount,
+      itemBuilder: (context, index) {
+        if (_loadingOlder && index == 0) {
+          return const Padding(
+            padding: EdgeInsets.only(bottom: 10),
+            child: Center(child: CupertinoActivityIndicator(radius: 11)),
+          );
+        }
+
+        final messageIndex = index - extraTopItemCount;
+        final uiMessage = uiMessages[messageIndex];
+        if (messageIndex >= _messages.length) {
+          return _MessageBubble(
+            message: uiMessage,
+            peer: widget.peer,
+            theme: widget.theme,
+          );
+        }
+
+        final apiMessage = _messages[messageIndex];
+        final canReportMessage =
+            !apiMessage.isFromUser(currentUserId) && uiMessage.id != null;
+        final canTranslateMessage =
+            canReportMessage &&
+            apiMessage.type == 'metin' &&
+            (apiMessage.text?.trim().isNotEmpty ?? false);
+
+        return _MessageBubble(
+          message: uiMessage,
+          peer: widget.peer,
+          theme: widget.theme,
+          onReport: canReportMessage
+              ? () => _showMessageActions(
+                  context,
+                  message: apiMessage,
+                  peer: widget.peer,
+                  onTranslate: canTranslateMessage
+                      ? () => _translateMessage(apiMessage)
+                      : null,
+                )
+              : null,
+        );
+      },
     );
   }
 }
@@ -2008,6 +2571,9 @@ ChatMessage _chatMessageFromApi(
         : ChatBubbleSide.them,
     type: type,
     text: message.text,
+    translatedText: message.translatedText,
+    translationLanguageName: message.translationTargetLanguageName,
+    languageName: message.languageName,
     asset: message.fileUrl,
     duration: message.fileDuration,
     time: _formatChatClock(message.createdAt),
@@ -2076,10 +2642,7 @@ class _ChatProfileScreenState extends ConsumerState<ChatProfileScreen> {
       }
       showCupertinoModalPopup<void>(
         context: context,
-        builder: (_) => GiftSheet(
-          targetUserId: peerId,
-          peerName: peer.name,
-        ),
+        builder: (_) => GiftSheet(targetUserId: peerId, peerName: peer.name),
       );
     }
 
@@ -2557,10 +3120,7 @@ class _GiftCountBadge extends StatelessWidget {
             ),
           ),
           const SizedBox(width: 6),
-          Text(
-            giftCount.icon,
-            style: const TextStyle(fontSize: 14, height: 1),
-          ),
+          Text(giftCount.icon, style: const TextStyle(fontSize: 14, height: 1)),
         ],
       ),
     );
@@ -3867,9 +4427,13 @@ class _GiftSheetState extends ConsumerState<GiftSheet> {
   @override
   Widget build(BuildContext context) {
     final authGemBalance = ref.watch(
-      appAuthProvider.select((session) => session.asData?.value?.user?.gemBalance),
+      appAuthProvider.select(
+        (session) => session.asData?.value?.user?.gemBalance,
+      ),
     );
-    final matchGemBalance = ref.watch(matchProvider.select((s) => s.gemBalance));
+    final matchGemBalance = ref.watch(
+      matchProvider.select((s) => s.gemBalance),
+    );
     final gem = _gemOverride ?? authGemBalance ?? matchGemBalance;
     final giftsAsync = ref.watch(chatGiftsProvider);
     final gifts = giftsAsync.asData?.value ?? const <AppGift>[];

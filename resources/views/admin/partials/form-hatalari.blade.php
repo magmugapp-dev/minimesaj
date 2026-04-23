@@ -9,7 +9,6 @@
             </div>
             <div class="min-w-0">
                 <h3 class="studio-alert__title">Kaydetmeden önce birkaç alanı düzeltelim.</h3>
-                <p class="studio-alert__copy">Aşağıdaki doğrulama mesajları formu tamamlamanıza yardımcı olur.</p>
                 <ul class="studio-alert__list">
                     @foreach ($errors->all() as $hata)
                         <li>{{ $hata }}</li>

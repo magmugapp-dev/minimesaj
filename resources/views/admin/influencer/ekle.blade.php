@@ -14,36 +14,10 @@
     @endphp
 
     <div class="studio studio--influencer" x-data="{ provider: '{{ old('saglayici_tipi', 'gemini') }}' }">
-        <section class="studio-hero">
-            <div class="studio-hero__inner">
-                <div>
-                    <a href="{{ route('admin.influencer.index') }}" class="studio-back">
-                        <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke-width="1.7" stroke="currentColor">
-                            <path stroke-linecap="round" stroke-linejoin="round" d="M10.5 19.5 3 12m0 0 7.5-7.5M3 12h18" />
-                        </svg>
-                        Influencer listesi
-                    </a>
-                    <p class="studio-eyebrow">Influencer Create</p>
-                    <h2 class="studio-heading">Yeni influencer hesabı</h2>
-                    <div class="studio-chipbar">
-                        <span class="studio-chip">Panel erişimi</span>
-                        <span class="studio-chip">Instagram bağlantısı</span>
-                        <span class="studio-chip">AI hazır</span>
-                    </div>
-                </div>
-
-                <div class="studio-panelstack">
-                    <div class="studio-panel">
-                        <p class="studio-panel__meta">Varsayılan model</p>
-                        <p class="studio-panel__title">gemini-2.5-flash</p>
-                    </div>
-                    <div class="studio-panel">
-                        <p class="studio-panel__meta">İlk durum</p>
-                        <p class="studio-panel__title">Instagram aktif</p>
-                    </div>
-                </div>
-            </div>
-        </section>
+        <div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <a href="{{ route('admin.influencer.index') }}" class="studio-button studio-button--ghost">Influencer listesi</a>
+            <h1 class="text-2xl font-semibold text-slate-950">Yeni influencer hesabi</h1>
+        </div>
 
         <div class="studio-grid studio-grid--create">
             <form method="POST" action="{{ route('admin.influencer.kaydet') }}" class="studio-main">
@@ -54,7 +28,6 @@
                 <section id="erisim" class="studio-card scroll-mt-24">
                     <div class="studio-card__header">
                         <div>
-                            <p class="studio-kicker">Erişim</p>
                             <h3 class="studio-title">Panel ve Instagram</h3>
                         </div>
                     </div>
@@ -65,7 +38,7 @@
                             <input id="kullanici_adi" type="text" name="kullanici_adi" value="{{ old('kullanici_adi') }}" required class="studio-input" placeholder="burcin_panel">
                         </div>
                         <div x-data="{ showPassword: false }">
-                            <label class="studio-label" for="sifre">Şifre</label>
+                            <label class="studio-label" for="sifre">Sifre</label>
                             <div class="relative">
                                 <input id="sifre" x-bind:type="showPassword ? 'text' : 'password'" name="sifre" required minlength="6" class="studio-input pr-12" placeholder="En az 6 karakter">
                                 <button type="button" @click="showPassword = !showPassword" class="absolute inset-y-0 right-4 flex items-center text-slate-400 transition hover:text-slate-700">
@@ -90,7 +63,6 @@
                 <section id="profil" class="studio-card scroll-mt-24">
                     <div class="studio-card__header">
                         <div>
-                            <p class="studio-kicker">Profil</p>
                             <h3 class="studio-title">Kimlik</h3>
                         </div>
                     </div>
@@ -139,7 +111,6 @@
                 <section id="cekirdek" class="studio-card scroll-mt-24">
                     <div class="studio-card__header">
                         <div>
-                            <p class="studio-kicker">AI</p>
                             <h3 class="studio-title">Karakter ve model</h3>
                         </div>
                     </div>
@@ -223,7 +194,6 @@
 
             <aside class="studio-sidebar">
                 <section class="studio-card">
-                    <p class="studio-kicker">Bölümler</p>
                     <nav class="studio-nav mt-4">
                         @foreach ($sections as $section)
                             <a href="#{{ $section['id'] }}" class="studio-nav__link">
@@ -237,7 +207,6 @@
                 </section>
 
                 <section class="studio-card">
-                    <p class="studio-kicker">Özet</p>
                     <div class="studio-meta mt-4">
                         <div class="studio-meta__item">
                             <p class="studio-meta__eyebrow">Durum</p>
@@ -251,7 +220,6 @@
                 </section>
 
                 <section class="studio-card">
-                    <p class="studio-kicker">Aksiyonlar</p>
                     <div class="studio-stack mt-4">
                         <a href="{{ route('admin.influencer.index') }}" class="studio-linkcard">
                             <span>Influencer listesi</span>

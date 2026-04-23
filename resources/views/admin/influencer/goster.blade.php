@@ -38,40 +38,10 @@
     @endphp
 
     <div class="studio studio--influencer">
-        <section class="studio-hero">
-            <div class="studio-hero__inner">
-                <div>
-                    <a href="{{ route('admin.influencer.index') }}" class="studio-back">
-                        <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke-width="1.7" stroke="currentColor">
-                            <path stroke-linecap="round" stroke-linejoin="round" d="M10.5 19.5 3 12m0 0 7.5-7.5M3 12h18" />
-                        </svg>
-                        Influencer listesi
-                    </a>
-                    <p class="studio-eyebrow">Influencer Profile</p>
-                    <h2 class="studio-heading">{{ $tamAd }}</h2>
-                    <div class="studio-chipbar">
-                        <span class="studio-chip">{{ '@' . $kullanici->kullanici_adi }}</span>
-                        <span class="studio-chip">{{ $igHesap?->instagram_kullanici_adi ? '@' . ltrim($igHesap->instagram_kullanici_adi, '@') : 'Instagram yok' }}</span>
-                        <span class="studio-chip">{{ $ayar?->aktif_mi ? 'AI aktif' : 'AI pasif' }}</span>
-                    </div>
-                </div>
-
-                <div class="studio-panelstack">
-                    <div class="studio-panel">
-                        <p class="studio-panel__meta">Durum</p>
-                        <p class="studio-panel__title">{{ ucfirst($kullanici->hesap_durumu) }}</p>
-                    </div>
-                    <div class="studio-panel">
-                        <p class="studio-panel__meta">Model</p>
-                        <p class="studio-panel__title">{{ $ayar?->model_adi ?? 'Tanımsız' }}</p>
-                    </div>
-                    <div class="studio-panel">
-                        <p class="studio-panel__meta">Instagram</p>
-                        <p class="studio-panel__title">{{ $kullanici->instagramHesaplari->count() }} hesap</p>
-                    </div>
-                </div>
-            </div>
-        </section>
+        <div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <a href="{{ route('admin.influencer.index') }}" class="studio-button studio-button--ghost">Influencer listesi</a>
+            <h1 class="text-2xl font-semibold text-slate-950">{{ $tamAd }}</h1>
+        </div>
 
         @if (session('basari'))
             <div class="studio-notice studio-notice--success">{{ session('basari') }}</div>
@@ -83,17 +53,14 @@
                     <div class="studio-stat">
                         <p class="studio-stat__label">Eşleşme</p>
                         <p class="studio-stat__value">{{ number_format($kullanici->eslesmeler_count) }}</p>
-                        <p class="studio-stat__meta">Toplam eşleşme</p>
                     </div>
                     <div class="studio-stat">
                         <p class="studio-stat__label">DM mesaj</p>
                         <p class="studio-stat__value">{{ number_format($toplamMesaj) }}</p>
-                        <p class="studio-stat__meta">Instagram mesajları</p>
                     </div>
                     <div class="studio-stat">
                         <p class="studio-stat__label">AI görev</p>
                         <p class="studio-stat__value">{{ number_format($toplamGorev) }}</p>
-                        <p class="studio-stat__meta">Toplam görev</p>
                     </div>
                 </section>
 
@@ -226,7 +193,6 @@
 
             <aside class="studio-sidebar">
                 <section class="studio-card">
-                    <p class="studio-kicker">Özet</p>
                     <div class="studio-meta mt-4">
                         <div class="studio-meta__item">
                             <p class="studio-meta__eyebrow">Hesap</p>
@@ -248,7 +214,6 @@
                 </section>
 
                 <section class="studio-card">
-                    <p class="studio-kicker">Durum</p>
                     <div class="studio-pill-list mt-4">
                         <span class="studio-pill {{ $durumPill }}">{{ ucfirst($kullanici->hesap_durumu) }}</span>
                         <span class="studio-pill {{ $ayar?->aktif_mi ? 'studio-pill--success' : 'studio-pill--neutral' }}">{{ $ayar?->aktif_mi ? 'AI aktif' : 'AI pasif' }}</span>
@@ -257,7 +222,6 @@
                 </section>
 
                 <section class="studio-card">
-                    <p class="studio-kicker">Aksiyonlar</p>
                     <div class="studio-stack mt-4">
                         <a href="{{ route('admin.influencer.duzenle', $kullanici) }}" class="studio-linkcard">
                             <span>Düzenle</span>

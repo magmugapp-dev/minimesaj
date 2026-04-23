@@ -4,7 +4,10 @@ namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Models\AiAyar;
+use App\Models\AiPersonaProfile;
 use App\Models\User;
+use App\Services\YapayZeka\V2\AiEngineConfigService;
+use App\Support\Language;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
@@ -270,6 +273,19 @@ class AiController extends Controller
                 'il' => 'İstanbul',
                 'ilce' => 'Kadıköy',
                 'biyografi' => 'Müzik ve seyahat tutkunu',
+                'ana_dil_kodu' => 'tr',
+                'ana_dil_adi' => 'Turkish',
+                'ikinci_diller' => ['English'],
+                'persona_ulke' => 'Türkiye',
+                'persona_bolge' => 'Marmara',
+                'persona_sehir' => 'İstanbul',
+                'meslek' => 'Grafik tasarımcı',
+                'sektor' => 'Tasarım',
+                'egitim' => 'Üniversite',
+                'yas_araligi' => '24-28',
+                'gunluk_rutin' => 'Sabah kahve, gün içinde tasarım işleri, akşam yürüyüş.',
+                'hobiler' => 'Müzik, fotoğraf, küçük kafeler',
+                'konusma_imzasi' => 'Kısa, doğal ve hafif şakacı yazar.',
                 // AI Ayarları
                 'aktif_mi' => true,
                 'saglayici_tipi' => 'gemini',
@@ -479,6 +495,12 @@ class AiController extends Controller
                     'max_output_tokens' => $kayit['max_output_tokens'] ?? 1024,
                 ]);
 
+                $personaPayload = $this->personaPayloadFromJson($kayit, $kullanici);
+                AiPersonaProfile::query()->updateOrCreate(
+                    ['ai_user_id' => $kullanici->id],
+                    $personaPayload
+                );
+
                 $olusturulanlar[] = $kayit['kullanici_adi'];
             }
 
@@ -510,5 +532,63 @@ class AiController extends Controller
                 ->withInput()
                 ->with('hata', 'Bir hata oluştu: ' . $e->getMessage());
         }
+    }
+
+    private function personaPayloadFromJson(array $kayit, User $kullanici): array
+    {
+        $payload = [
+            'ai_engine_config_id' => app(AiEngineConfigService::class)->activeConfig()->id,
+            'aktif_mi' => $kayit['aktif_mi'] ?? true,
+            'dating_aktif_mi' => true,
+            'instagram_aktif_mi' => true,
+            'ilk_mesaj_atar_mi' => $kayit['ilk_mesaj_atar_mi'] ?? true,
+            'persona_ozeti' => $kayit['persona_ozeti'] ?? $kayit['kisilik_aciklamasi'] ?? $kullanici->biyografi,
+            'konusma_tonu' => $kayit['konusma_tonu'] ?? null,
+            'konusma_stili' => $kayit['konusma_stili'] ?? null,
+            'mizah_seviyesi' => $kayit['mizah_seviyesi'] ?? 5,
+            'flort_seviyesi' => $kayit['flort_seviyesi'] ?? 4,
+            'emoji_seviyesi' => $kayit['emoji_seviyesi'] ?? 3,
+            'giriskenlik_seviyesi' => $kayit['giriskenlik_seviyesi'] ?? 5,
+            'utangaclik_seviyesi' => $kayit['utangaclik_seviyesi'] ?? 3,
+            'duygusallik_seviyesi' => $kayit['duygusallik_seviyesi'] ?? 5,
+            'mesaj_uzunlugu_min' => $kayit['mesaj_uzunlugu_min'] ?? 18,
+            'mesaj_uzunlugu_max' => $kayit['mesaj_uzunlugu_max'] ?? 220,
+            'minimum_cevap_suresi_saniye' => $kayit['minimum_cevap_suresi_saniye'] ?? 4,
+            'maksimum_cevap_suresi_saniye' => $kayit['maksimum_cevap_suresi_saniye'] ?? 24,
+            'saat_dilimi' => $kayit['saat_dilimi'] ?? config('app.timezone'),
+            'ana_dil_kodu' => Language::normalizeCode($kayit['ana_dil_kodu'] ?? $kullanici->dil) ?: 'tr',
+            'ana_dil_adi' => $kayit['ana_dil_adi'] ?? null,
+            'ikinci_diller' => $kayit['ikinci_diller'] ?? null,
+            'persona_ulke' => $kayit['persona_ulke'] ?? $kullanici->ulke,
+            'persona_bolge' => $kayit['persona_bolge'] ?? null,
+            'persona_sehir' => $kayit['persona_sehir'] ?? $kullanici->il,
+            'persona_mahalle' => $kayit['persona_mahalle'] ?? $kullanici->ilce,
+            'kulturel_koken' => $kayit['kulturel_koken'] ?? null,
+            'uyruk' => $kayit['uyruk'] ?? null,
+            'yasam_tarzi' => $kayit['yasam_tarzi'] ?? null,
+            'meslek' => $kayit['meslek'] ?? null,
+            'sektor' => $kayit['sektor'] ?? null,
+            'egitim' => $kayit['egitim'] ?? null,
+            'okul_bolum' => $kayit['okul_bolum'] ?? null,
+            'yas_araligi' => $kayit['yas_araligi'] ?? null,
+            'gunluk_rutin' => $kayit['gunluk_rutin'] ?? null,
+            'hobiler' => $kayit['hobiler'] ?? null,
+            'sevdigi_mekanlar' => $kayit['sevdigi_mekanlar'] ?? null,
+            'aile_arkadas_notu' => $kayit['aile_arkadas_notu'] ?? null,
+            'iliski_gecmisi_tonu' => $kayit['iliski_gecmisi_tonu'] ?? null,
+            'konusma_imzasi' => $kayit['konusma_imzasi'] ?? null,
+            'argo_seviyesi' => $kayit['argo_seviyesi'] ?? 2,
+            'cevap_ritmi' => $kayit['cevap_ritmi'] ?? null,
+            'emoji_aliskanligi' => $kayit['emoji_aliskanligi'] ?? null,
+            'kacinilacak_persona_detaylari' => $kayit['kacinilacak_persona_detaylari'] ?? null,
+        ];
+
+        $payload['ana_dil_adi'] = $payload['ana_dil_adi'] ?: Language::name($payload['ana_dil_kodu']);
+
+        if (is_string($payload['ikinci_diller'])) {
+            $payload['ikinci_diller'] = array_values(array_filter(array_map('trim', preg_split('/[\r\n,]+/', $payload['ikinci_diller']) ?: [])));
+        }
+
+        return $payload;
     }
 }

@@ -21,7 +21,7 @@ class ChatLocalStore {
     final databasesPath = await getDatabasesPath();
     final db = await openDatabase(
       path.join(databasesPath, 'magmug_chat_cache.db'),
-      version: 3,
+      version: 4,
       onCreate: (db, version) async {
         await _createSchema(db);
       },
@@ -58,6 +58,29 @@ class ChatLocalStore {
             'ALTER TABLE conversation_previews ADD COLUMN cached_peer_profile_image_path TEXT',
           );
         }
+        if (oldVersion < 4) {
+          await db.execute(
+            'ALTER TABLE conversation_messages ADD COLUMN language_code TEXT',
+          );
+          await db.execute(
+            'ALTER TABLE conversation_messages ADD COLUMN language_name TEXT',
+          );
+          await db.execute(
+            'ALTER TABLE conversation_messages ADD COLUMN translated_text TEXT',
+          );
+          await db.execute(
+            'ALTER TABLE conversation_messages ADD COLUMN translation_target_language_code TEXT',
+          );
+          await db.execute(
+            'ALTER TABLE conversation_messages ADD COLUMN translation_target_language_name TEXT',
+          );
+          await db.execute(
+            'ALTER TABLE conversation_previews ADD COLUMN peer_language_code TEXT',
+          );
+          await db.execute(
+            'ALTER TABLE conversation_previews ADD COLUMN peer_language_name TEXT',
+          );
+        }
       },
     );
     _database = db;
@@ -80,6 +103,11 @@ class ChatLocalStore {
         file_duration_ms INTEGER,
         is_read INTEGER NOT NULL,
         is_ai_generated INTEGER NOT NULL,
+        language_code TEXT,
+        language_name TEXT,
+        translated_text TEXT,
+        translation_target_language_code TEXT,
+        translation_target_language_name TEXT,
         created_at_ms INTEGER
       )
     ''');
@@ -95,6 +123,8 @@ class ChatLocalStore {
         peer_username TEXT NOT NULL,
         peer_profile_image_url TEXT,
         cached_peer_profile_image_path TEXT,
+        peer_language_code TEXT,
+        peer_language_name TEXT,
         online INTEGER NOT NULL,
         last_message TEXT,
         last_message_type TEXT,
@@ -141,6 +171,8 @@ class ChatLocalStore {
         'peer_username': conversation.peerUsername,
         'peer_profile_image_url': conversation.peerProfileImageUrl,
         'cached_peer_profile_image_path': cachedAvatarPath,
+        'peer_language_code': conversation.peerLanguageCode,
+        'peer_language_name': conversation.peerLanguageName,
         'online': conversation.online ? 1 : 0,
         'last_message': conversation.lastMessage,
         'last_message_type': conversation.lastMessageType,
@@ -155,17 +187,26 @@ class ChatLocalStore {
   }
 
   Future<List<AppConversationMessage>> getConversationMessages(
-    int conversationId,
-  ) async {
+    int conversationId, {
+    int? limit,
+  }) async {
     final db = await _db;
+    final useRecentWindow = limit != null && limit > 0;
     final rows = await db.query(
       'conversation_messages',
       where: 'conversation_id = ?',
       whereArgs: [conversationId],
-      orderBy: 'created_at_ms ASC, id ASC',
+      orderBy: useRecentWindow
+          ? 'created_at_ms DESC, id DESC'
+          : 'created_at_ms ASC, id ASC',
+      limit: useRecentWindow ? limit : null,
     );
+    final messages = rows.map(_messageFromRow).toList(growable: false);
+    if (!useRecentWindow) {
+      return messages;
+    }
 
-    return rows.map(_messageFromRow).toList(growable: false);
+    return messages.reversed.toList(growable: false);
   }
 
   Future<void> upsertConversationMessages(
@@ -223,6 +264,11 @@ class ChatLocalStore {
       'file_duration_ms': message.fileDuration?.inMilliseconds,
       'is_read': message.isRead ? 1 : 0,
       'is_ai_generated': message.isAiGenerated ? 1 : 0,
+      'language_code': message.languageCode,
+      'language_name': message.languageName,
+      'translated_text': message.translatedText,
+      'translation_target_language_code': message.translationTargetLanguageCode,
+      'translation_target_language_name': message.translationTargetLanguageName,
       'created_at_ms': message.createdAt?.millisecondsSinceEpoch,
     };
   }
@@ -260,6 +306,13 @@ class ChatLocalStore {
           : Duration(milliseconds: fileDurationMs),
       isRead: (row['is_read'] as num?)?.toInt() == 1,
       isAiGenerated: (row['is_ai_generated'] as num?)?.toInt() == 1,
+      languageCode: row['language_code']?.toString(),
+      languageName: row['language_name']?.toString(),
+      translatedText: row['translated_text']?.toString(),
+      translationTargetLanguageCode: row['translation_target_language_code']
+          ?.toString(),
+      translationTargetLanguageName: row['translation_target_language_name']
+          ?.toString(),
       createdAt: createdAtMs == null
           ? null
           : DateTime.fromMillisecondsSinceEpoch(createdAtMs),
@@ -284,6 +337,8 @@ class ChatLocalStore {
       peerName: row['peer_name']?.toString() ?? '',
       peerUsername: row['peer_username']?.toString() ?? '',
       peerProfileImageUrl: resolvedPeerAvatarUrl,
+      peerLanguageCode: row['peer_language_code']?.toString(),
+      peerLanguageName: row['peer_language_name']?.toString(),
       online: (row['online'] as num?)?.toInt() == 1,
       lastMessage: row['last_message']?.toString(),
       lastMessageType: row['last_message_type']?.toString(),
