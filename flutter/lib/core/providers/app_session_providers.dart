@@ -107,6 +107,21 @@ class AppAuthController extends AsyncNotifier<AppAuthState?> {
     });
   }
 
+  Future<void> setGemBalance(int gemBalance) async {
+    final current = state.asData?.value;
+    final user = current?.user;
+    if (current == null || user == null) {
+      return;
+    }
+
+    final next = AppAuthState(
+      token: current.token,
+      user: user.copyWith(gemBalance: gemBalance),
+    );
+    state = AsyncData(next);
+    await AppSessionStorage.saveSession(next.toSession());
+  }
+
   Future<void> signOut() async {
     final current = state.asData?.value;
 

@@ -108,6 +108,19 @@ ChatPeer _chatPeerFromCandidate(AppMatchCandidate candidate) {
   );
 }
 
+ChatPeer _chatPeerFromGiftSender(AppGiftSender sender) {
+  final username = sender.username.trim();
+  return ChatPeer(
+    name: sender.displayName,
+    handle: username.isEmpty
+        ? ''
+        : (username.startsWith('@') ? username : '@$username'),
+    status: 'Profil',
+    avatarUrl: sender.profileImageUrl,
+    online: false,
+  );
+}
+
 final conversationMessagesProvider = FutureProvider.autoDispose
     .family<List<AppConversationMessage>, int>((ref, conversationId) async {
       final session = await ref.watch(appAuthProvider.future);
@@ -181,6 +194,21 @@ final chatPeerProfileProvider = FutureProvider.autoDispose
         api.close();
       }
     });
+
+final chatGiftsProvider = FutureProvider.autoDispose<List<AppGift>>((ref) async {
+  final session = await ref.watch(appAuthProvider.future);
+  final token = session?.token;
+  if (token == null || token.trim().isEmpty) {
+    return const [];
+  }
+
+  final api = AppAuthApi();
+  try {
+    return await api.fetchGifts(token);
+  } finally {
+    api.close();
+  }
+});
 
 @immutable
 class _ChatThemePalette {
@@ -1380,7 +1408,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   late final TextEditingController _messageController;
   ChatRealtimeSubscription? _realtimeSubscription;
   bool _isSending = false;
-  bool _isMuted = false;
+  bool? _mutedOverride;
+  bool? _blockedOverride;
   int? _themeIndex;
   String? _inputError;
   int? _realtimeConversationId;
@@ -1555,8 +1584,38 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
       if (!mounted) {
         return;
       }
+      final message = AppAuthErrorFormatter.messageFrom(error);
+      if (error is BlockedByUserApiException ||
+          message.toLowerCase().contains('engelledi')) {
+        await showCupertinoDialog<void>(
+          context: context,
+          builder: (dialogContext) => CupertinoAlertDialog(
+            title: const Text(
+              'Mesaj Gonderilemedi',
+              style: TextStyle(fontFamily: AppFont.family),
+            ),
+            content: Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Text(
+                message,
+                style: const TextStyle(fontFamily: AppFont.family),
+              ),
+            ),
+            actions: [
+              CupertinoDialogAction(
+                onPressed: () => Navigator.of(dialogContext).pop(),
+                child: const Text(
+                  'Tamam',
+                  style: TextStyle(fontFamily: AppFont.family),
+                ),
+              ),
+            ],
+          ),
+        );
+        return;
+      }
       setState(() {
-        _inputError = AppAuthErrorFormatter.messageFrom(error);
+        _inputError = message;
       });
     } finally {
       api.close();
@@ -1571,6 +1630,14 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   @override
   Widget build(BuildContext context) {
     final hasConversation = widget.conversation != null;
+    final peerProfile = hasConversation
+        ? ref
+              .watch(chatPeerProfileProvider(widget.conversation!.peerId))
+              .asData
+              ?.value
+        : null;
+    final isMuted = _mutedOverride ?? peerProfile?.muted ?? false;
+    final isBlocked = _blockedOverride ?? peerProfile?.blocked ?? false;
     final theme = _themeIndex == null
         ? _chatThemeForPeer(widget.conversation?.peerId)
         : _chatThemes[_themeIndex!];
@@ -1625,8 +1692,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
         builder: (_) => MuteConversationSheet(
           targetUserId: widget.conversation!.peerId,
           peerName: _peer.name,
-          initiallyMuted: _isMuted,
-          onChanged: (muted) => setState(() => _isMuted = muted),
+          initiallyMuted: isMuted,
+          onChanged: (muted) => setState(() => _mutedOverride = muted),
         ),
       );
     }
@@ -1665,7 +1732,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                 openMute();
               },
               child: Text(
-                _isMuted ? 'Sessizden Cikar' : 'Sessize Al',
+                isMuted ? 'Sessizden Cikar' : 'Sessize Al',
                 style: const TextStyle(fontFamily: AppFont.family),
               ),
             ),
@@ -1689,7 +1756,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
               ),
             ),
             CupertinoActionSheetAction(
-              isDestructiveAction: true,
+              isDestructiveAction: !isBlocked,
               onPressed: () {
                 Navigator.of(ctx).pop();
                 showCupertinoModalPopup<void>(
@@ -1697,12 +1764,15 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                   builder: (_) => BlockConfirmSheet(
                     targetUserId: widget.conversation?.peerId,
                     targetDisplayName: _peer.name,
+                    initiallyBlocked: isBlocked,
+                    onChanged: (blocked) =>
+                        setState(() => _blockedOverride = blocked),
                   ),
                 );
               },
-              child: const Text(
-                'Engelle',
-                style: TextStyle(fontFamily: AppFont.family),
+              child: Text(
+                isBlocked ? 'Engelden Cikar' : 'Engelle',
+                style: const TextStyle(fontFamily: AppFont.family),
               ),
             ),
           ],
@@ -1960,6 +2030,7 @@ String _formatChatClock(DateTime? value) {
 class ChatProfileScreen extends ConsumerStatefulWidget {
   final ChatPeer? peer;
   final AppConversationPreview? conversation;
+  final int? profileUserId;
   final int? selectedThemeIndex;
   final ValueChanged<int>? onThemeSelected;
 
@@ -1967,6 +2038,7 @@ class ChatProfileScreen extends ConsumerStatefulWidget {
     super.key,
     this.peer,
     this.conversation,
+    this.profileUserId,
     this.selectedThemeIndex,
     this.onThemeSelected,
   });
@@ -1981,7 +2053,7 @@ class _ChatProfileScreenState extends ConsumerState<ChatProfileScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final peerId = widget.conversation?.peerId;
+    final peerId = widget.profileUserId ?? widget.conversation?.peerId;
     final profileAsync = peerId == null
         ? null
         : ref.watch(chatPeerProfileProvider(peerId));
@@ -1997,6 +2069,19 @@ class _ChatProfileScreenState extends ConsumerState<ChatProfileScreen> {
     final galleryMedia = _galleryMediaForProfile(profile, peer.avatarUrl);
     final isMuted = _mutedOverride ?? profile?.muted ?? false;
     final isBlocked = _blockedOverride ?? profile?.blocked ?? false;
+
+    void openGift() {
+      if (peerId == null) {
+        return;
+      }
+      showCupertinoModalPopup<void>(
+        context: context,
+        builder: (_) => GiftSheet(
+          targetUserId: peerId,
+          peerName: peer.name,
+        ),
+      );
+    }
 
     void openMute() {
       if (peerId == null) {
@@ -2106,6 +2191,17 @@ class _ChatProfileScreenState extends ConsumerState<ChatProfileScreen> {
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
                       _ProfileActionChip(
+                        label: 'Hediye Gonder',
+                        gradient: false,
+                        icon: const Icon(
+                          CupertinoIcons.gift_fill,
+                          size: 20,
+                          color: AppColors.black,
+                        ),
+                        onTap: openGift,
+                      ),
+                      const SizedBox(width: 18),
+                      _ProfileActionChip(
                         label: isMuted ? 'Sessizden Cikar' : 'Sessize Al',
                         gradient: false,
                         icon: Icon(
@@ -2124,6 +2220,11 @@ class _ChatProfileScreenState extends ConsumerState<ChatProfileScreen> {
                     media: galleryMedia,
                     loading: profileAsync?.isLoading == true,
                   ),
+                  if ((profile?.receivedGifts ?? const <AppReceivedGift>[])
+                      .isNotEmpty) ...[
+                    const SizedBox(height: 24),
+                    _GiftSendersSection(gifts: profile!.receivedGifts),
+                  ],
                   const SizedBox(height: 24),
                   _ChatThemeSection(
                     peerId: peerId,
@@ -2136,7 +2237,7 @@ class _ChatProfileScreenState extends ConsumerState<ChatProfileScreen> {
                     onBlock: () => showCupertinoModalPopup<void>(
                       context: context,
                       builder: (_) => BlockConfirmSheet(
-                        targetUserId: widget.conversation?.peerId,
+                        targetUserId: peerId,
                         targetDisplayName: peer.name,
                         initiallyBlocked: isBlocked,
                         onChanged: (blocked) =>
@@ -2146,7 +2247,7 @@ class _ChatProfileScreenState extends ConsumerState<ChatProfileScreen> {
                     onReport: () => showCupertinoModalPopup<void>(
                       context: context,
                       builder: (_) => ReportSheet(
-                        targetId: widget.conversation?.peerId,
+                        targetId: peerId,
                         targetDisplayName: peer.name,
                       ),
                     ),
@@ -2222,6 +2323,297 @@ class _ProfileActionChip extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+class _GiftSendersSection extends StatelessWidget {
+  final List<AppReceivedGift> gifts;
+
+  const _GiftSendersSection({required this.gifts});
+
+  @override
+  Widget build(BuildContext context) {
+    final senderEntries = <int, _GiftSenderEntry>{};
+
+    for (final gift in gifts) {
+      final sender = gift.sender;
+      final senderId = sender?.id;
+      if (sender == null || senderId == null || senderId <= 0) {
+        continue;
+      }
+
+      final current = senderEntries[senderId];
+      senderEntries[senderId] = _GiftSenderEntry(
+        sender: sender,
+        totalGiftCount: (current?.totalGiftCount ?? 0) + 1,
+        giftCounts: _mergeGiftCounts(current?.giftCounts, gift),
+      );
+    }
+
+    if (senderEntries.isEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    final entries = senderEntries.values.toList();
+    entries.sort((a, b) => b.totalGiftCount.compareTo(a.totalGiftCount));
+
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppColors.white,
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Hediye Gonderenler',
+            style: TextStyle(
+              fontFamily: AppFont.family,
+              fontWeight: FontWeight.w800,
+              fontSize: 15,
+              color: AppColors.black,
+            ),
+          ),
+          const SizedBox(height: 12),
+          ListView.separated(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            itemCount: entries.length,
+            separatorBuilder: (_, _) => const SizedBox(height: 10),
+            itemBuilder: (context, index) {
+              final entry = entries[index];
+              return _GiftSenderListItem(
+                entry: entry,
+                onTap: () => Navigator.of(context).push(
+                  cupertinoRoute(
+                    ChatProfileScreen(
+                      peer: _chatPeerFromGiftSender(entry.sender),
+                      profileUserId: entry.sender.id,
+                    ),
+                  ),
+                ),
+              );
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  Map<String, _GiftTypeCount> _mergeGiftCounts(
+    Map<String, _GiftTypeCount>? current,
+    AppReceivedGift gift,
+  ) {
+    final next = <String, _GiftTypeCount>{...?current};
+    final key = '${gift.giftId ?? 0}:${gift.name}:${gift.icon}';
+    final existing = next[key];
+
+    next[key] = _GiftTypeCount(
+      giftId: gift.giftId,
+      name: gift.name,
+      icon: gift.icon,
+      count: (existing?.count ?? 0) + 1,
+    );
+
+    return next;
+  }
+}
+
+class _GiftTypeCount {
+  final int? giftId;
+  final String name;
+  final String icon;
+  final int count;
+
+  const _GiftTypeCount({
+    required this.giftId,
+    required this.name,
+    required this.icon,
+    required this.count,
+  });
+}
+
+class _GiftSenderEntry {
+  final AppGiftSender sender;
+  final int totalGiftCount;
+  final Map<String, _GiftTypeCount> giftCounts;
+
+  const _GiftSenderEntry({
+    required this.sender,
+    required this.totalGiftCount,
+    required this.giftCounts,
+  });
+
+  List<_GiftTypeCount> get sortedGiftCounts {
+    final values = giftCounts.values.toList();
+    values.sort((a, b) => b.count.compareTo(a.count));
+    return values;
+  }
+}
+
+class _GiftSenderListItem extends StatelessWidget {
+  final _GiftSenderEntry entry;
+  final VoidCallback onTap;
+
+  const _GiftSenderListItem({required this.entry, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return PressableScale(
+      onTap: onTap,
+      scale: 0.98,
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: AppColors.grayField,
+          borderRadius: BorderRadius.circular(18),
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _GiftSenderAvatar(sender: entry.sender, size: 44),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    entry.sender.displayName,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontFamily: AppFont.family,
+                      fontWeight: FontWeight.w800,
+                      fontSize: 13,
+                      color: AppColors.black,
+                    ),
+                  ),
+                  const SizedBox(height: 3),
+                  Text(
+                    '${entry.totalGiftCount} hediye gonderdi',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontFamily: AppFont.family,
+                      fontSize: 11,
+                      color: AppColors.gray,
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      for (final giftCount in entry.sortedGiftCounts)
+                        _GiftCountBadge(giftCount: giftCount),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            const Padding(
+              padding: EdgeInsets.only(top: 4),
+              child: Icon(
+                CupertinoIcons.chevron_forward,
+                size: 16,
+                color: AppColors.gray,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _GiftCountBadge extends StatelessWidget {
+  final _GiftTypeCount giftCount;
+
+  const _GiftCountBadge({required this.giftCount});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: AppColors.white,
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            '${giftCount.count}',
+            style: const TextStyle(
+              fontFamily: AppFont.family,
+              fontWeight: FontWeight.w800,
+              fontSize: 12,
+              color: AppColors.black,
+            ),
+          ),
+          const SizedBox(width: 6),
+          Text(
+            giftCount.icon,
+            style: const TextStyle(fontSize: 14, height: 1),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _GiftSenderAvatar extends StatelessWidget {
+  final AppGiftSender? sender;
+  final double size;
+
+  const _GiftSenderAvatar({this.sender, this.size = 34});
+
+  @override
+  Widget build(BuildContext context) {
+    final imageUrl = sender?.profileImageUrl?.trim();
+    final initialSource = sender?.displayName.trim();
+    final initial = initialSource == null || initialSource.isEmpty
+        ? '?'
+        : initialSource.substring(0, 1).toUpperCase();
+
+    return ClipOval(
+      child: Container(
+        width: size,
+        height: size,
+        color: const Color(0xFFE8E8FF),
+        child: imageUrl == null || imageUrl.isEmpty
+            ? Center(
+                child: Text(
+                  initial,
+                  style: TextStyle(
+                    fontFamily: AppFont.family,
+                    fontWeight: FontWeight.w800,
+                    fontSize: size * 0.38,
+                    color: AppColors.indigo,
+                  ),
+                ),
+              )
+            : Image.network(
+                imageUrl,
+                fit: BoxFit.cover,
+                errorBuilder: (_, _, _) => Center(
+                  child: Text(
+                    initial,
+                    style: TextStyle(
+                      fontFamily: AppFont.family,
+                      fontWeight: FontWeight.w800,
+                      fontSize: size * 0.38,
+                      color: AppColors.indigo,
+                    ),
+                  ),
+                ),
+              ),
+      ),
     );
   }
 }
@@ -2935,6 +3327,10 @@ class _MuteConversationSheetState extends ConsumerState<MuteConversationSheet> {
       if (!mounted) {
         return;
       }
+      _chatPeerProfileCache.remove(widget.targetUserId);
+      ref.invalidate(chatPeerProfileProvider(widget.targetUserId));
+      unawaited(ref.read(appAuthProvider.notifier).refreshCurrentUser());
+      unawaited(ref.read(matchProvider.notifier).refreshSummary());
       Navigator.of(context).maybePop();
     } catch (error) {
       if (!mounted) {
@@ -3396,15 +3792,6 @@ class _VoiceRecorderSheetState extends State<VoiceRecorderSheet> {
 
 // ------ Sheet: Gift -----------------------------------------------------------
 
-@immutable
-class _GiftItem {
-  final String emoji;
-  final String name;
-  final int cost;
-
-  const _GiftItem(this.emoji, this.name, this.cost);
-}
-
 class GiftSheet extends ConsumerStatefulWidget {
   final int targetUserId;
   final String peerName;
@@ -3420,24 +3807,13 @@ class GiftSheet extends ConsumerStatefulWidget {
 }
 
 class _GiftSheetState extends ConsumerState<GiftSheet> {
-  int _selectedGift = 1;
+  int _selectedGift = 0;
   bool _sending = false;
   String? _notice;
+  int? _gemOverride;
 
-  static const List<_GiftItem> _gifts = [
-    _GiftItem('\u{1F339}', 'Gul', 5),
-    _GiftItem('\u{1F49D}', 'Kalp Kutu', 10),
-    _GiftItem('\u{1F9F8}', 'Ayi', 15),
-    _GiftItem('\u{1F36B}', 'Cikolata', 8),
-    _GiftItem('\u{1F48D}', 'Yuzuk', 50),
-    _GiftItem('\u{2615}', 'Kahve', 3),
-    _GiftItem('\u{1F490}', 'Buket', 20),
-    _GiftItem('\u{2B50}', 'Yildiz', 7),
-    _GiftItem('\u{1F451}', 'Tac', 30),
-  ];
-
-  Future<void> _sendGift() async {
-    if (_sending) {
+  Future<void> _sendGift(List<AppGift> gifts) async {
+    if (_sending || gifts.isEmpty) {
       return;
     }
     final token = ref.read(appAuthProvider).asData?.value?.token;
@@ -3446,7 +3822,8 @@ class _GiftSheetState extends ConsumerState<GiftSheet> {
       return;
     }
 
-    final gift = _gifts[_selectedGift];
+    final selectedIndex = _selectedGift.clamp(0, gifts.length - 1).toInt();
+    final gift = gifts[selectedIndex];
     setState(() {
       _sending = true;
       _notice = null;
@@ -3454,15 +3831,25 @@ class _GiftSheetState extends ConsumerState<GiftSheet> {
 
     final api = AppAuthApi();
     try {
-      await api.sendGift(
+      final currentGem = await api.sendGift(
         token,
         receiverUserId: widget.targetUserId,
-        giftType: gift.name,
-        pointValue: gift.cost,
+        giftId: gift.id,
       );
       if (!mounted) {
         return;
       }
+      if (currentGem != null) {
+        setState(() => _gemOverride = currentGem);
+        await ref.read(appAuthProvider.notifier).setGemBalance(currentGem);
+      }
+      if (!mounted) {
+        return;
+      }
+      _chatPeerProfileCache.remove(widget.targetUserId);
+      ref.invalidate(chatPeerProfileProvider(widget.targetUserId));
+      unawaited(ref.read(appAuthProvider.notifier).refreshCurrentUser());
+      unawaited(ref.read(matchProvider.notifier).refreshSummary());
       Navigator.of(context).maybePop();
     } catch (error) {
       if (!mounted) {
@@ -3479,8 +3866,18 @@ class _GiftSheetState extends ConsumerState<GiftSheet> {
 
   @override
   Widget build(BuildContext context) {
-    final gem = ref.watch(matchProvider.select((s) => s.gemBalance));
-    final selectedCost = _gifts[_selectedGift].cost;
+    final authGemBalance = ref.watch(
+      appAuthProvider.select((session) => session.asData?.value?.user?.gemBalance),
+    );
+    final matchGemBalance = ref.watch(matchProvider.select((s) => s.gemBalance));
+    final gem = _gemOverride ?? authGemBalance ?? matchGemBalance;
+    final giftsAsync = ref.watch(chatGiftsProvider);
+    final gifts = giftsAsync.asData?.value ?? const <AppGift>[];
+    final hasGifts = gifts.isNotEmpty;
+    final safeSelectedIndex = hasGifts
+        ? _selectedGift.clamp(0, gifts.length - 1).toInt()
+        : 0;
+    final selectedCost = hasGifts ? gifts[safeSelectedIndex].cost : 0;
 
     return _AdaptiveChatSheet(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 20),
@@ -3531,22 +3928,39 @@ class _GiftSheetState extends ConsumerState<GiftSheet> {
             ],
           ),
           const SizedBox(height: 16),
-          GridView.builder(
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: 3,
-              mainAxisSpacing: 10,
-              crossAxisSpacing: 10,
-              childAspectRatio: 0.92,
+          giftsAsync.when(
+            loading: () => const SizedBox(
+              height: 170,
+              child: Center(child: CupertinoActivityIndicator(radius: 13)),
             ),
-            itemCount: _gifts.length,
-            itemBuilder: (context, i) {
-              final selected = _selectedGift == i;
-              return _GiftTile(
-                gift: _gifts[i],
-                selected: selected,
-                onTap: () => setState(() => _selectedGift = i),
+            error: (error, _) => _GiftStateMessage(
+              message: AppAuthErrorFormatter.messageFrom(error),
+            ),
+            data: (items) {
+              if (items.isEmpty) {
+                return const _GiftStateMessage(
+                  message: 'Su anda gonderilebilir hediye bulunmuyor.',
+                );
+              }
+
+              return GridView.builder(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: 3,
+                  mainAxisSpacing: 10,
+                  crossAxisSpacing: 10,
+                  childAspectRatio: 0.92,
+                ),
+                itemCount: items.length,
+                itemBuilder: (context, i) {
+                  final selected = safeSelectedIndex == i;
+                  return _GiftTile(
+                    gift: items[i],
+                    selected: selected,
+                    onTap: () => setState(() => _selectedGift = i),
+                  );
+                },
               );
             },
           ),
@@ -3568,7 +3982,8 @@ class _GiftSheetState extends ConsumerState<GiftSheet> {
           _SendGiftButton(
             cost: selectedCost,
             sending: _sending,
-            onTap: _sending ? null : _sendGift,
+            enabled: hasGifts,
+            onTap: _sending || !hasGifts ? null : () => _sendGift(gifts),
           ),
         ],
       ),
@@ -3576,8 +3991,37 @@ class _GiftSheetState extends ConsumerState<GiftSheet> {
   }
 }
 
+class _GiftStateMessage extends StatelessWidget {
+  final String message;
+
+  const _GiftStateMessage({required this.message});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      height: 150,
+      alignment: Alignment.center,
+      padding: const EdgeInsets.symmetric(horizontal: 20),
+      decoration: BoxDecoration(
+        color: AppColors.grayField,
+        borderRadius: BorderRadius.circular(18),
+      ),
+      child: Text(
+        message,
+        textAlign: TextAlign.center,
+        style: const TextStyle(
+          fontFamily: AppFont.family,
+          fontWeight: FontWeight.w600,
+          fontSize: 13,
+          color: AppColors.gray,
+        ),
+      ),
+    );
+  }
+}
+
 class _GiftTile extends StatelessWidget {
-  final _GiftItem gift;
+  final AppGift gift;
   final bool selected;
   final VoidCallback onTap;
 
@@ -3609,7 +4053,7 @@ class _GiftTile extends StatelessWidget {
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 Text(
-                  gift.emoji,
+                  gift.icon,
                   style: const TextStyle(fontSize: 34, height: 1.1),
                 ),
                 const SizedBox(height: 6),
@@ -3665,11 +4109,13 @@ class _GiftTile extends StatelessWidget {
 class _SendGiftButton extends StatelessWidget {
   final int cost;
   final bool sending;
+  final bool enabled;
   final VoidCallback? onTap;
 
   const _SendGiftButton({
     required this.cost,
     required this.sending,
+    this.enabled = true,
     required this.onTap,
   });
 
@@ -3681,7 +4127,8 @@ class _SendGiftButton extends StatelessWidget {
         height: 56,
         padding: const EdgeInsets.symmetric(horizontal: 12),
         decoration: BoxDecoration(
-          gradient: AppColors.primary,
+          gradient: enabled ? AppColors.primary : null,
+          color: enabled ? null : const Color(0xFFE5E7EB),
           borderRadius: BorderRadius.circular(40),
           boxShadow: const [
             BoxShadow(
@@ -4131,6 +4578,10 @@ class _BlockConfirmSheetState extends ConsumerState<BlockConfirmSheet> {
         await api.blockUser(token, userId: targetUserId);
         widget.onChanged?.call(true);
       }
+      _chatPeerProfileCache.remove(targetUserId);
+      ref.invalidate(chatPeerProfileProvider(targetUserId));
+      unawaited(ref.read(appAuthProvider.notifier).refreshCurrentUser());
+      unawaited(ref.read(matchProvider.notifier).refreshSummary());
       ref.read(conversationFeedRefreshProvider.notifier).state++;
       if (!mounted) {
         return;

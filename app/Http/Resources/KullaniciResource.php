@@ -67,6 +67,10 @@ class KullaniciResource extends JsonResource
                     })
                     ->value('sessiz_bitis_tarihi')
             ),
+            'alinan_hediyeler' => $this->when(
+                $profilDetayiGoruntuleniyor,
+                fn () => HediyeGonderimiResource::collection($this->whenLoaded('aldigiHediyeler'))
+            ),
             'fotograflar' => FotografResource::collection($this->whenLoaded('fotograflar')),
             'ai_ayar' => new AiAyarResource($this->whenLoaded('aiAyar')),
             'created_at' => $this->created_at,

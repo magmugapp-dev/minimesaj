@@ -15,8 +15,9 @@ class HediyeGonderRequest extends FormRequest
     {
         return [
             'alici_user_id' => 'required|exists:users,id',
-            'hediye_tipi' => 'required|string|max:50',
-            'puan_degeri' => 'required|integer|min:1|max:10000',
+            'hediye_id' => 'nullable|integer|exists:hediyeler,id',
+            'hediye_tipi' => 'required_without:hediye_id|string|max:50',
+            'puan_degeri' => 'nullable|integer|min:1|max:10000',
             'mesaj' => 'nullable|string|max:500',
         ];
     }

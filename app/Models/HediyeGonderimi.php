@@ -12,6 +12,7 @@ class HediyeGonderimi extends Model
     protected $fillable = [
         'gonderen_user_id',
         'alici_user_id',
+        'hediye_id',
         'hediye_adi',
         'puan_bedeli',
     ];
@@ -29,6 +30,11 @@ class HediyeGonderimi extends Model
     public function alici(): BelongsTo
     {
         return $this->belongsTo(User::class, 'alici_user_id');
+    }
+
+    public function hediye(): BelongsTo
+    {
+        return $this->belongsTo(Hediye::class, 'hediye_id');
     }
 
     public function getHediyeTipiAttribute(): string

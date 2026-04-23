@@ -18,6 +18,7 @@ class DatabaseSeeder extends Seeder
         $this->call([
             AdminSeeder::class,
             AyarSeeder::class,
+            HediyeSeeder::class,
             PuanPaketiSeeder::class,
             AbonelikPaketiSeeder::class,
             GelistirmeSeeder::class,

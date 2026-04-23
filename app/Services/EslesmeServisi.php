@@ -134,7 +134,7 @@ class EslesmeServisi
         return [
             'mevcut_puan' => (int) $user->mevcut_puan,
             'gunluk_ucretsiz_hak' => (int) $user->gunluk_ucretsiz_hak,
-            'eslesme_baslatma_maliyeti' => $this->eslesmeBaslatmaMaliyeti(),
+            'eslesme_baslatma_maliyeti' => $this->eslesmeBaslatmaMaliyeti($user),
             'cevrimici_kisi_sayisi' => (clone $adaySorgusu)->where('cevrim_ici_mi', true)->count(),
             'bekleyen_kisi_sayisi' => (clone $adaySorgusu)->count(),
             'filtreler' => $this->filtreleriDiziyeDonustur($user),
@@ -170,7 +170,7 @@ class EslesmeServisi
     {
         $user = $this->gunlukHaklariYenile($user->fresh());
         $aday = $this->sonrakiAday($user);
-        $maliyet = $this->eslesmeBaslatmaMaliyeti();
+        $maliyet = $this->eslesmeBaslatmaMaliyeti($user);
         $ucretsizHak = max(0, (int) $user->gunluk_ucretsiz_hak);
 
         if (!$aday) {
@@ -335,17 +335,18 @@ class EslesmeServisi
 
     private function sonrakiAday(User $user): ?User
     {
-        $sorgu = $this->oncelikliAdaySorgusu($user)->with('fotograflar');
+        foreach ($this->adayHavuzuSirasi($user) as [$cinsiyet, $sadeceCevrimici]) {
+            $aday = $this->adaySec(
+                $this->adaySorgusu($user, $cinsiyet, $sadeceCevrimici)->with('fotograflar'),
+                $user,
+            );
 
-        if ($user->super_eslesme_aktif_mi) {
-            return $sorgu->inRandomOrder()
-                ->limit(40)
-                ->get()
-                ->sortByDesc(fn(User $aday) => $this->uyumlulukPuani($user, $aday))
-                ->first();
+            if ($aday) {
+                return $aday;
+            }
         }
 
-        return $sorgu->inRandomOrder()->first();
+        return null;
     }
 
     private function oncelikliAdaySorgusu(User $user): Builder
@@ -360,7 +361,7 @@ class EslesmeServisi
         return $this->adaySorgusu($user);
     }
 
-    private function adaySorgusu(User $user): Builder
+    private function adaySorgusu(User $user, ?string $zorunluCinsiyet = null, bool $sadeceCevrimici = false): Builder
     {
         $haricTutulanlar = $this->haricTutulanKullaniciIdleri($user);
 
@@ -370,10 +371,50 @@ class EslesmeServisi
             ->where('is_admin', false)
             ->whereNotIn('id', $haricTutulanlar);
 
-        $this->cinsiyetFiltresiUygula($sorgu, $user);
+        if ($sadeceCevrimici) {
+            $sorgu->where('cevrim_ici_mi', true);
+        }
+
+        $this->cinsiyetFiltresiUygula($sorgu, $user, $zorunluCinsiyet);
         $this->yasFiltresiUygula($sorgu, $user);
 
         return $sorgu->orderByRaw("CASE WHEN hesap_tipi = 'user' THEN 0 ELSE 1 END");
+    }
+
+    private function adaySec(Builder $sorgu, User $user): ?User
+    {
+        if ($user->super_eslesme_aktif_mi) {
+            return $sorgu->inRandomOrder()
+                ->limit(40)
+                ->get()
+                ->sortByDesc(fn(User $aday) => $this->uyumlulukPuani($user, $aday))
+                ->first();
+        }
+
+        return $sorgu->inRandomOrder()->first();
+    }
+
+    private function adayHavuzuSirasi(User $user): array
+    {
+        $filtre = $user->eslesme_cinsiyet_filtresi;
+
+        if (in_array($filtre, ['kadin', 'erkek'], true)) {
+            return [
+                [$filtre, true],
+                [$filtre, false],
+            ];
+        }
+
+        $oncelikliCinsiyet = $this->oranliCinsiyetSec($user);
+        $yedekCinsiyet = $oncelikliCinsiyet === 'kadin' ? 'erkek' : 'kadin';
+
+        return [
+            [$oncelikliCinsiyet, true],
+            [$yedekCinsiyet, true],
+            [$oncelikliCinsiyet, false],
+            [$yedekCinsiyet, false],
+            [null, false],
+        ];
     }
 
     private function haricTutulanKullaniciIdleri(User $user): Collection
@@ -410,9 +451,13 @@ $gecilen = EslesmeGecilenKullanici::query()
             ->values();
     }
 
-    private function cinsiyetFiltresiUygula(Builder $sorgu, User $user): void
+    private function cinsiyetFiltresiUygula(Builder $sorgu, User $user, ?string $zorunluCinsiyet = null): void
     {
-        match ($user->eslesme_cinsiyet_filtresi) {
+        $cinsiyet = in_array($user->eslesme_cinsiyet_filtresi, ['kadin', 'erkek'], true)
+            ? $user->eslesme_cinsiyet_filtresi
+            : $zorunluCinsiyet;
+
+        match ($cinsiyet) {
             'kadin' => $sorgu->where('cinsiyet', 'kadin'),
             'erkek' => $sorgu->where('cinsiyet', 'erkek'),
             default => null,
@@ -440,9 +485,47 @@ $gecilen = EslesmeGecilenKullanici::query()
         ];
     }
 
-    private function eslesmeBaslatmaMaliyeti(): int
+    private function eslesmeBaslatmaMaliyeti(?User $user = null): int
     {
-        return max(1, (int) $this->ayarServisi->al('eslesme_baslatma_maliyeti', 8));
+        $varsayilan = max(1, (int) $this->ayarServisi->al('eslesme_baslatma_maliyeti', 8));
+
+        if ($user === null || !in_array($user->eslesme_cinsiyet_filtresi, ['erkek', 'kadin'], true)) {
+            return $varsayilan;
+        }
+
+        $tur = $user->super_eslesme_aktif_mi ? 'super' : 'normal';
+        $anahtar = "{$tur}_eslesme_{$user->eslesme_cinsiyet_filtresi}_maliyeti";
+
+        return max(1, (int) $this->ayarServisi->al($anahtar, $varsayilan));
+    }
+
+    private function oranliCinsiyetSec(User $user): string
+    {
+        $kadinOrani = $this->cinsiyetCikmaOrani($user, 'kadin');
+        $erkekOrani = $this->cinsiyetCikmaOrani($user, 'erkek');
+        $toplam = $kadinOrani + $erkekOrani;
+
+        if ($toplam <= 0) {
+            return random_int(1, 2) === 1 ? 'kadin' : 'erkek';
+        }
+
+        return random_int(1, $toplam) <= $kadinOrani ? 'kadin' : 'erkek';
+    }
+
+    private function cinsiyetCikmaOrani(User $user, string $cinsiyet): int
+    {
+        $tur = $user->super_eslesme_aktif_mi ? 'super' : 'normal';
+        $varsayilan = match ([$tur, $cinsiyet]) {
+            ['normal', 'kadin'] => 34,
+            ['normal', 'erkek'] => 66,
+            ['super', 'kadin'] => 51,
+            ['super', 'erkek'] => 49,
+            default => 50,
+        };
+
+        $oran = (int) $this->ayarServisi->al("{$tur}_eslesme_{$cinsiyet}_cikma_orani", $varsayilan);
+
+        return max(0, min(100, $oran));
     }
 
     private function gunlukHaklariYenile(User $user): User

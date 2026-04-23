@@ -130,6 +130,12 @@
                             '<path stroke-linecap="round" stroke-linejoin="round" d="M12 3l1.912 3.873 4.274.621-3.093 3.015.73 4.257L12 12.75l-3.823 2.016.73-4.257L5.814 7.494l4.274-.621L12 3z"/><path stroke-linecap="round" stroke-linejoin="round" d="M6.75 19.5h10.5"/>',
                     ],
                     [
+                        'route' => 'admin.hediyeler.index',
+                        'etiket' => 'Hediyeler',
+                        'svg' =>
+                            '<path stroke-linecap="round" stroke-linejoin="round" d="M21 11.25v7.5A2.25 2.25 0 0118.75 21H5.25A2.25 2.25 0 013 18.75v-7.5m18 0H3m18 0A2.25 2.25 0 0018.75 9H5.25A2.25 2.25 0 003 11.25m9 9.75V9m0 0H8.25A2.25 2.25 0 116 6.75C6 5.507 7.007 4.5 8.25 4.5c1.5 0 2.625 1.5 3.75 4.5zm0 0h3.75A2.25 2.25 0 1018 6.75c0-1.243-1.007-2.25-2.25-2.25-1.5 0-2.625 1.5-3.75 4.5z"/>',
+                    ],
+                    [
                         'route' => 'admin.finansal.aboneler',
                         'etiket' => 'Aboneler',
                         'svg' =>

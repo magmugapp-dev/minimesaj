@@ -31,6 +31,9 @@ class ProfilController extends Controller
                     ->where('aktif_mi', true)
                     ->orderBy('sira_no')
                     ->orderByDesc('ana_fotograf_mi'),
+                'aldigiHediyeler' => fn ($query) => $query
+                    ->with(['hediye', 'gonderen:id,ad,soyad,kullanici_adi,profil_resmi'])
+                    ->latest(),
                 'aiAyar',
             ])
         );

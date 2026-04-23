@@ -11,6 +11,14 @@ use Laravel\Sanctum\Sanctum;
 
 beforeEach(function () {
     Cache::forget('ayar:eslesme_baslatma_maliyeti');
+    Cache::forget('ayar:normal_eslesme_kadin_cikma_orani');
+    Cache::forget('ayar:normal_eslesme_erkek_cikma_orani');
+    Cache::forget('ayar:super_eslesme_kadin_cikma_orani');
+    Cache::forget('ayar:super_eslesme_erkek_cikma_orani');
+    Cache::forget('ayar:normal_eslesme_kadin_maliyeti');
+    Cache::forget('ayar:normal_eslesme_erkek_maliyeti');
+    Cache::forget('ayar:super_eslesme_kadin_maliyeti');
+    Cache::forget('ayar:super_eslesme_erkek_maliyeti');
     Cache::forget('ayar:gunluk_ucretsiz_hak');
 });
 
@@ -375,6 +383,90 @@ it('starts a match, returns a filtered online candidate, and spends points once'
         'referans_tipi' => 'user',
         'referans_id' => $uygunAday->id,
     ]);
+});
+
+it('uses panel gender ratios for all-filter candidate selection and gender-filter cost', function () {
+    Ayar::query()->updateOrCreate(
+        ['anahtar' => 'eslesme_baslatma_maliyeti'],
+        ['deger' => '8', 'grup' => 'puan_sistemi', 'tip' => 'integer'],
+    );
+    Ayar::query()->updateOrCreate(
+        ['anahtar' => 'normal_eslesme_kadin_cikma_orani'],
+        ['deger' => '100', 'grup' => 'puan_sistemi', 'tip' => 'integer'],
+    );
+    Ayar::query()->updateOrCreate(
+        ['anahtar' => 'normal_eslesme_erkek_cikma_orani'],
+        ['deger' => '0', 'grup' => 'puan_sistemi', 'tip' => 'integer'],
+    );
+
+    $kullanici = User::factory()->create([
+        'mevcut_puan' => 30,
+        'gunluk_ucretsiz_hak' => 0,
+        'son_hak_yenileme_tarihi' => now(),
+        'eslesme_cinsiyet_filtresi' => 'tum',
+        'super_eslesme_aktif_mi' => false,
+    ]);
+
+    $kadinAday = User::factory()->create([
+        'cinsiyet' => 'kadin',
+        'cevrim_ici_mi' => true,
+        'hesap_durumu' => 'aktif',
+    ]);
+
+    User::factory()->create([
+        'cinsiyet' => 'erkek',
+        'cevrim_ici_mi' => true,
+        'hesap_durumu' => 'aktif',
+    ]);
+
+    Sanctum::actingAs($kullanici);
+
+    $this->getJson('/api/dating/eslesme-merkezi')
+        ->assertOk()
+        ->assertJsonPath('eslesme_baslatma_maliyeti', 8);
+
+    $this->postJson('/api/dating/eslesme-baslat')
+        ->assertOk()
+        ->assertJsonPath('durum', 'aday_bulundu')
+        ->assertJsonPath('aday.id', $kadinAday->id)
+        ->assertJsonPath('mevcut_puan', 22)
+        ->assertJsonPath('eslesme_baslatma_maliyeti', 8);
+
+    expect($kullanici->fresh()->mevcut_puan)->toBe(22);
+
+    $this->assertDatabaseHas('puan_hareketleri', [
+        'user_id' => $kullanici->id,
+        'islem_tipi' => 'harcama',
+        'puan_miktari' => -8,
+        'referans_tipi' => 'user',
+        'referans_id' => $kadinAday->id,
+    ]);
+
+    Ayar::query()->updateOrCreate(
+        ['anahtar' => 'normal_eslesme_kadin_maliyeti'],
+        ['deger' => '19', 'grup' => 'puan_sistemi', 'tip' => 'integer'],
+    );
+    Cache::forget('ayar:normal_eslesme_kadin_maliyeti');
+
+    $kadinFiltreliKullanici = User::factory()->create([
+        'mevcut_puan' => 40,
+        'gunluk_ucretsiz_hak' => 0,
+        'son_hak_yenileme_tarihi' => now(),
+        'eslesme_cinsiyet_filtresi' => 'kadin',
+        'super_eslesme_aktif_mi' => false,
+    ]);
+
+    User::factory()->create([
+        'cinsiyet' => 'kadin',
+        'cevrim_ici_mi' => true,
+        'hesap_durumu' => 'aktif',
+    ]);
+
+    Sanctum::actingAs($kadinFiltreliKullanici);
+
+    $this->getJson('/api/dating/eslesme-merkezi')
+        ->assertOk()
+        ->assertJsonPath('eslesme_baslatma_maliyeti', 19);
 });
 
 it('does not spend points when no online candidate matches the filters', function () {

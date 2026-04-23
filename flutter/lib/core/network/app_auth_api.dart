@@ -306,6 +306,31 @@ class AppAuthApi {
     return packages;
   }
 
+  Future<List<AppGift>> fetchGifts(String token) async {
+    final response = await _client.get(
+      AppApi.uri(AppApi.giftListPath),
+      headers: {'Accept': 'application/json', 'Authorization': 'Bearer $token'},
+    );
+
+    final payload = _decodeJsonMap(response);
+    if (response.statusCode == 401 || response.statusCode == 403) {
+      throw const UnauthorizedApiException('Oturum suresi doldu.');
+    }
+    if (response.statusCode >= 400) {
+      throw ApiException(_extractErrorMessage(payload));
+    }
+
+    final gifts = _extractDataList(payload)
+        .map(AppGift.fromJson)
+        .where((gift) => gift.active && gift.id > 0 && gift.cost > 0)
+        .toList();
+    gifts.sort((a, b) {
+      final order = a.order.compareTo(b.order);
+      return order == 0 ? a.id.compareTo(b.id) : order;
+    });
+    return gifts;
+  }
+
   Future<void> verifyPurchase(
     String token, {
     required String platform,
@@ -687,7 +712,7 @@ class AppAuthApi {
       throw const UnauthorizedApiException('Oturum suresi doldu.');
     }
     if (response.statusCode >= 400) {
-      throw ApiException(_extractErrorMessage(payload));
+      throw _extractApiException(payload);
     }
 
     final message = _conversationMessageFromJson(_unwrapDataMap(payload));
@@ -859,11 +884,10 @@ class AppAuthApi {
     }
   }
 
-  Future<void> sendGift(
+  Future<int?> sendGift(
     String token, {
     required int receiverUserId,
-    required String giftType,
-    required int pointValue,
+    required int giftId,
   }) async {
     final response = await _client.post(
       AppApi.uri(AppApi.sendGiftPath),
@@ -874,8 +898,7 @@ class AppAuthApi {
       },
       body: jsonEncode({
         'alici_user_id': receiverUserId,
-        'hediye_tipi': giftType,
-        'puan_degeri': pointValue,
+        'hediye_id': giftId,
       }),
     );
 
@@ -886,6 +909,8 @@ class AppAuthApi {
     if (response.statusCode >= 400) {
       throw ApiException(_extractErrorMessage(payload));
     }
+
+    return (payload['mevcut_puan'] as num?)?.toInt();
   }
 
   Future<void> registerNotificationDevice(
@@ -1232,7 +1257,9 @@ class AppAuthApi {
   }
 
   static ApiException _extractApiException(Map<String, dynamic> payload) {
-    final code = payload['kod']?.toString().trim().toLowerCase();
+    final code =
+        payload['kod']?.toString().trim().toLowerCase() ??
+        payload['durum']?.toString().trim().toLowerCase();
     final updateUrl =
         _nullableString(payload['guncelleme_url']?.toString()) ??
         _nullableString(payload['update_url']?.toString());
@@ -1246,6 +1273,10 @@ class AppAuthApi {
         updateUrl: updateUrl,
         minimumVersion: minimumVersion,
       );
+    }
+
+    if (code == 'engellendi' || code == 'blocked_by_user') {
+      return BlockedByUserApiException(_extractErrorMessage(payload));
     }
 
     return ApiException(_extractErrorMessage(payload));

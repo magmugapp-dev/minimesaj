@@ -64,6 +64,106 @@ class AppProfilePhoto {
 }
 
 @immutable
+class AppGift {
+  final int id;
+  final String code;
+  final String name;
+  final String icon;
+  final int cost;
+  final bool active;
+  final int order;
+
+  const AppGift({
+    required this.id,
+    required this.code,
+    required this.name,
+    required this.icon,
+    required this.cost,
+    required this.active,
+    required this.order,
+  });
+
+  factory AppGift.fromJson(Map<String, dynamic> json) {
+    return AppGift(
+      id: (json['id'] as num?)?.toInt() ?? 0,
+      code: json['kod']?.toString() ?? '',
+      name: json['ad']?.toString() ?? '',
+      icon: _nullableString(json['ikon']?.toString()) ?? '\u{1F381}',
+      cost: (json['puan_bedeli'] as num?)?.toInt() ?? 0,
+      active: json['aktif'] != false,
+      order: (json['sira'] as num?)?.toInt() ?? 0,
+    );
+  }
+}
+
+@immutable
+class AppGiftSender {
+  final int id;
+  final String firstName;
+  final String surname;
+  final String username;
+  final String? profileImageUrl;
+
+  const AppGiftSender({
+    required this.id,
+    required this.firstName,
+    required this.surname,
+    required this.username,
+    this.profileImageUrl,
+  });
+
+  String get displayName {
+    final value = '$firstName $surname'.trim();
+    return value.isEmpty ? username : value;
+  }
+
+  factory AppGiftSender.fromJson(Map<String, dynamic> json) {
+    return AppGiftSender(
+      id: (json['id'] as num?)?.toInt() ?? 0,
+      firstName: json['ad']?.toString() ?? '',
+      surname: json['soyad']?.toString() ?? '',
+      username: json['kullanici_adi']?.toString() ?? '',
+      profileImageUrl: _nullableString(json['profil_resmi']?.toString()),
+    );
+  }
+}
+
+@immutable
+class AppReceivedGift {
+  final int id;
+  final int? giftId;
+  final String name;
+  final String icon;
+  final int cost;
+  final AppGiftSender? sender;
+  final DateTime? createdAt;
+
+  const AppReceivedGift({
+    required this.id,
+    this.giftId,
+    required this.name,
+    required this.icon,
+    required this.cost,
+    this.sender,
+    this.createdAt,
+  });
+
+  factory AppReceivedGift.fromJson(Map<String, dynamic> json) {
+    final sender = _asMap(json['gonderen']);
+
+    return AppReceivedGift(
+      id: (json['id'] as num?)?.toInt() ?? 0,
+      giftId: (json['hediye_id'] as num?)?.toInt(),
+      name: json['hediye_adi']?.toString() ?? 'Hediye',
+      icon: _nullableString(json['hediye_ikon']?.toString()) ?? '\u{1F381}',
+      cost: (json['puan_bedeli'] as num?)?.toInt() ?? 0,
+      sender: sender == null ? null : AppGiftSender.fromJson(sender),
+      createdAt: DateTime.tryParse(json['created_at']?.toString() ?? ''),
+    );
+  }
+}
+
+@immutable
 class AppMatchFilters {
   final String genderCode;
   final String ageCode;
@@ -129,6 +229,7 @@ class AppMatchCandidate {
   final bool online;
   final bool premiumActive;
   final List<AppProfilePhoto> photos;
+  final List<AppReceivedGift> receivedGifts;
   final bool muted;
   final bool blocked;
   final DateTime? muteEndsAt;
@@ -145,6 +246,7 @@ class AppMatchCandidate {
     required this.online,
     required this.premiumActive,
     required this.photos,
+    this.receivedGifts = const [],
     this.muted = false,
     this.blocked = false,
     this.muteEndsAt,
@@ -182,6 +284,14 @@ class AppMatchCandidate {
             );
           }).toList()
         : const <AppProfilePhoto>[];
+    final rawGifts = json['alinan_hediyeler'];
+    final receivedGifts = rawGifts is List
+        ? rawGifts.whereType<Map>().map((item) {
+            return AppReceivedGift.fromJson(
+              item.map((key, value) => MapEntry(key.toString(), value)),
+            );
+          }).toList()
+        : const <AppReceivedGift>[];
 
     return AppMatchCandidate(
       id: (json['id'] as num?)?.toInt() ?? 0,
@@ -195,6 +305,7 @@ class AppMatchCandidate {
       online: json['cevrim_ici_mi'] == true,
       premiumActive: json['premium_aktif_mi'] == true,
       photos: photos,
+      receivedGifts: receivedGifts,
       muted: json['sessize_alindi_mi'] == true,
       blocked: json['engellendi_mi'] == true,
       muteEndsAt: DateTime.tryParse(

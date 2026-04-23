@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Dating;
 
+use App\Exceptions\MesajlasmaEngeliException;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Dating\MesajGonderRequest;
 use App\Http\Resources\MesajResource;
@@ -33,7 +34,15 @@ class MesajController extends Controller
 
         $veri = $request->validated();
 
-        $mesaj = $this->mesajServisi->gonder($sohbet, $request->user(), $veri);
+        try {
+            $mesaj = $this->mesajServisi->gonder($sohbet, $request->user(), $veri);
+        } catch (MesajlasmaEngeliException $exception) {
+            return response()->json([
+                'durum' => 'engellendi',
+                'kod' => 'engellendi',
+                'message' => $exception->getMessage(),
+            ], 422);
+        }
 
         return (new MesajResource($mesaj->load('gonderen:id,ad,kullanici_adi,profil_resmi')))
             ->response()

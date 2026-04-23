@@ -2,10 +2,12 @@
 
 namespace App\Services;
 
+use App\Exceptions\MesajlasmaEngeliException;
 use App\Events\MesajGonderildi;
 use App\Events\MesajlarOkundu;
 use App\Events\YapayZekaCevabiHazir;
 use App\Jobs\YapayZekaCevapGorevi;
+use App\Models\Engelleme;
 use App\Models\Mesaj;
 use App\Models\SessizeAlinanKullanici;
 use App\Models\Sohbet;
@@ -29,6 +31,17 @@ class MesajServisi
     public function gonder(Sohbet $sohbet, User $gonderen, array $veri): Mesaj
     {
         return DB::transaction(function () use ($sohbet, $gonderen, $veri) {
+            $eslesme = $sohbet->eslesme;
+            $karsiTarafId = $eslesme->user_id === $gonderen->id
+                ? $eslesme->eslesen_user_id
+                : $eslesme->user_id;
+
+            if ($this->gonderenKarsiTarafTarafindanEngellenmis((int) $gonderen->id, (int) $karsiTarafId)) {
+                throw new MesajlasmaEngeliException();
+            }
+
+            $karsiTaraf = User::find($karsiTarafId);
+
             $mesaj = Mesaj::create([
                 'sohbet_id' => $sohbet->id,
                 'gonderen_user_id' => $gonderen->id,
@@ -45,13 +58,6 @@ class MesajServisi
                 'son_mesaj_tarihi' => $mesaj->created_at,
                 'toplam_mesaj_sayisi' => DB::raw('toplam_mesaj_sayisi + 1'),
             ]);
-
-            $eslesme = $sohbet->eslesme;
-            $karsiTarafId = $eslesme->user_id === $gonderen->id
-                ? $eslesme->eslesen_user_id
-                : $eslesme->user_id;
-
-            $karsiTaraf = User::find($karsiTarafId);
 
             if ($karsiTaraf?->hesap_tipi === 'ai') {
                 $this->aiKullaniciHazirlamaServisi->hazirla($karsiTaraf);
@@ -183,5 +189,13 @@ class MesajServisi
             'ai_pasif' => 'ai_pasif',
             default => 'bekliyor',
         };
+    }
+
+    private function gonderenKarsiTarafTarafindanEngellenmis(int $gonderenId, int $karsiTarafId): bool
+    {
+        return Engelleme::query()
+            ->where('engelleyen_user_id', $karsiTarafId)
+            ->where('engellenen_user_id', $gonderenId)
+            ->exists();
     }
 }

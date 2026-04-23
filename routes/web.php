@@ -7,6 +7,7 @@ use App\Http\Controllers\Admin\EngelController;
 use App\Http\Controllers\Admin\EslesmeController;
 use App\Http\Controllers\Admin\FinansalController;
 use App\Http\Controllers\Admin\GirisController;
+use App\Http\Controllers\Admin\HediyeController;
 use App\Http\Controllers\Admin\InfluencerController;
 use App\Http\Controllers\Admin\InstagramController;
 use App\Http\Controllers\Admin\IstatistikController;
@@ -90,6 +91,12 @@ Route::prefix('admin')->group(function () {
         Route::get('finansal/abonelik-paketleri/{abonelikPaketi}/duzenle', [AbonelikPaketiController::class, 'edit'])->name('admin.finansal.abonelik-paketleri.edit');
         Route::put('finansal/abonelik-paketleri/{abonelikPaketi}', [AbonelikPaketiController::class, 'update'])->name('admin.finansal.abonelik-paketleri.update');
         Route::delete('finansal/abonelik-paketleri/{abonelikPaketi}', [AbonelikPaketiController::class, 'destroy'])->name('admin.finansal.abonelik-paketleri.destroy');
+        Route::get('finansal/hediyeler', [HediyeController::class, 'index'])->name('admin.hediyeler.index');
+        Route::get('finansal/hediyeler/ekle', [HediyeController::class, 'create'])->name('admin.hediyeler.create');
+        Route::post('finansal/hediyeler', [HediyeController::class, 'store'])->name('admin.hediyeler.store');
+        Route::get('finansal/hediyeler/{hediye}/duzenle', [HediyeController::class, 'edit'])->name('admin.hediyeler.edit');
+        Route::put('finansal/hediyeler/{hediye}', [HediyeController::class, 'update'])->name('admin.hediyeler.update');
+        Route::delete('finansal/hediyeler/{hediye}', [HediyeController::class, 'destroy'])->name('admin.hediyeler.destroy');
 
         // Instagram
         Route::get('instagram', [InstagramController::class, 'index'])->name('admin.instagram.index');

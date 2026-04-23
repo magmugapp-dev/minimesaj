@@ -30,6 +30,7 @@ class AppApi {
   static const String paymentPackagesPath = '/api/odeme/paketler';
   static const String subscriptionPackagesPath = '/api/odeme/abonelik-paketler';
   static const String verifyPaymentPath = '/api/odeme/dogrula';
+  static const String giftListPath = '/api/hediyeler';
   static const String sendGiftPath = '/api/hediye/gonder';
 
   static String datingChatMessagesPath(int conversationId) =>

@@ -139,6 +139,10 @@ class UnauthorizedApiException extends ApiException {
   const UnauthorizedApiException(super.message);
 }
 
+class BlockedByUserApiException extends ApiException {
+  const BlockedByUserApiException(super.message);
+}
+
 class AppUpdateRequiredException extends ApiException {
   final String? updateUrl;
   final String? minimumVersion;

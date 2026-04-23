@@ -115,6 +115,7 @@ Route::middleware(['auth:sanctum', 'throttle:api'])->group(function () {
     });
 
     // ── Hediye ───────────────────────────────────────────────────────
+    Route::get('hediyeler', [\App\Http\Controllers\Odeme\HediyeController::class, 'index']);
     Route::post('hediye/gonder', [\App\Http\Controllers\Odeme\HediyeController::class, 'gonder']);
 
     // ── Admin / İstatistik ───────────────────────────────────────────
