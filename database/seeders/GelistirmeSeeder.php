@@ -15,6 +15,7 @@ use App\Models\User;
 use App\Models\UserFotografi;
 use App\Notifications\YeniEslesme;
 use App\Notifications\YeniMesaj;
+use App\Services\YapayZeka\GeminiSaglayici;
 use App\Support\MediaUrl;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Collection;
@@ -82,7 +83,7 @@ class GelistirmeSeeder extends Seeder
             ], [
                 'aktif_mi' => true,
                 'saglayici_tipi' => 'gemini',
-                'model_adi' => 'gemini-2.5-flash',
+                'model_adi' => GeminiSaglayici::MODEL_ADI,
                 'yedek_saglayici_tipi' => 'openai',
                 'yedek_model_adi' => 'gpt-4.1-mini',
                 'kisilik_tipi' => $kisilik,

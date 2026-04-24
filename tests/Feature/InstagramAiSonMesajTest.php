@@ -66,7 +66,7 @@ function instagramSonMesajAiAyariOlustur(User $aiUser): AiAyar
         'user_id' => $aiUser->id,
         'aktif_mi' => true,
         'saglayici_tipi' => 'gemini',
-        'model_adi' => 'gemini-2.5-flash',
+        'model_adi' => 'gemini-3.1-auto-quality',
         'hafiza_aktif_mi' => true,
         'kisilik_tipi' => 'samimi',
         'konusma_tonu' => 'dogal',
@@ -129,7 +129,7 @@ it('invalidates older pending instagram ai work when a newer message arrives', f
         'deneme_sayisi' => 1,
         'cevap_metni' => 'Eski cevap',
         'saglayici_tipi' => 'gemini',
-        'model_adi' => 'gemini-2.5-flash',
+        'model_adi' => 'gemini-3.1-auto-quality',
     ]);
 
     Sanctum::actingAs($aiUser);

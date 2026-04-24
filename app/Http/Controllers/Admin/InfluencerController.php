@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\AiAyar;
 use App\Models\InstagramHesap;
 use App\Models\User;
+use App\Services\YapayZeka\GeminiSaglayici;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
@@ -115,7 +116,7 @@ class InfluencerController extends Controller
                 'aktif_mi' => true,
                 'saglayici_tipi' => $request->input('saglayici_tipi'),
                 'model_adi' => $request->input('saglayici_tipi') === 'gemini'
-                    ? 'gemini-2.5-flash'
+                    ? GeminiSaglayici::MODEL_ADI
                     : $request->input('model_adi'),
                 'kisilik_tipi' => $request->input('kisilik_tipi'),
                 'kisilik_aciklamasi' => $request->input('kisilik_aciklamasi'),
@@ -172,7 +173,7 @@ class InfluencerController extends Controller
         if (! $kullanici->aiAyar) {
             $kullanici->aiAyar()->create([
                 'saglayici_tipi' => 'gemini',
-                'model_adi' => 'gemini-2.5-flash',
+                'model_adi' => GeminiSaglayici::MODEL_ADI,
             ]);
             $kullanici->load('aiAyar');
         }
@@ -232,7 +233,7 @@ class InfluencerController extends Controller
         $aiAyarlari['ilk_mesaj_atar_mi'] = $request->boolean('ilk_mesaj_atar_mi');
 
         if (($aiAyarlari['saglayici_tipi'] ?? null) === 'gemini') {
-            $aiAyarlari['model_adi'] = 'gemini-2.5-flash';
+            $aiAyarlari['model_adi'] = GeminiSaglayici::MODEL_ADI;
         }
 
         // Instagram hesap bilgileri

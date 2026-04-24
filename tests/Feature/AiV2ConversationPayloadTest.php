@@ -60,7 +60,7 @@ it('uses persona language for ai messages and conversation peer payload', functi
         'ana_dil_adi' => 'Ingilizce',
         'konusma_tonu' => 'dogal',
         'konusma_stili' => 'akici',
-        'metadata' => ['model_adi' => 'gemini-2.5-flash'],
+        'metadata' => ['model_adi' => 'gemini-3.1-auto-quality'],
     ]);
 
     $eslesme = Eslesme::query()->create([

@@ -5,6 +5,7 @@ namespace App\Services\YapayZeka\V2;
 use App\Models\AiEngineConfig;
 use App\Models\AiPersonaProfile;
 use App\Models\User;
+use App\Services\YapayZeka\GeminiModelPolicy;
 use App\Services\YapayZeka\GeminiSaglayici;
 use App\Services\YapayZeka\V2\Channels\AiChannelAdapterInterface;
 use App\Services\YapayZeka\V2\Data\AiConversationStateSnapshot;
@@ -242,13 +243,13 @@ class AiResponseGenerator
     private function resolvePersonaModel(AiEngineConfig $config, AiPersonaProfile $persona): string
     {
         $allowedModels = array_keys(config('ai_studio_dropdowns.models', []));
-        $personaModel = data_get($persona->metadata, 'model_adi');
+        $personaModel = GeminiModelPolicy::normalizeConfiguredModel(data_get($persona->metadata, 'model_adi'));
 
-        if (is_string($personaModel) && in_array($personaModel, $allowedModels, true)) {
+        if (in_array($personaModel, $allowedModels, true)) {
             return $personaModel;
         }
 
-        return $config->model_adi ?: 'gemini-2.5-flash';
+        return GeminiModelPolicy::normalizeConfiguredModel($config->model_adi);
     }
 
     private function behaviorSummary(AiPersonaProfile $persona): string

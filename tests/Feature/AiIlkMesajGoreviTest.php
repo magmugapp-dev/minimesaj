@@ -17,7 +17,7 @@ it('creates an opening ai message after a match', function () {
         'user_id' => $aiUser->id,
         'aktif_mi' => true,
         'saglayici_tipi' => 'gemini',
-        'model_adi' => 'gemini-2.5-flash',
+        'model_adi' => 'gemini-3.1-auto-quality',
         'ilk_mesaj_atar_mi' => true,
         'hafiza_aktif_mi' => true,
         'kisilik_tipi' => 'samimi',
@@ -55,7 +55,7 @@ it('creates an opening ai message after a match', function () {
         ): array {
             return [
                 'cevap' => 'Selam, eslesmemize sevindim.',
-                'model' => 'gemini-2.5-flash',
+                'model' => 'gemini-3.1-auto-quality',
                 'giris_token' => 0,
                 'cikis_token' => 0,
             ];

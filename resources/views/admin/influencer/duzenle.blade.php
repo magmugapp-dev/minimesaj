@@ -98,7 +98,7 @@
                         <div><label class="studio-label" for="saglayici_tipi">Sağlayıcı</label><select id="saglayici_tipi" name="saglayici_tipi" class="studio-select" x-model="provider"><option value="gemini">Google Gemini</option><option value="openai">OpenAI</option></select></div>
                         <div>
                             <label class="studio-label" for="model_adi_openai">Model</label>
-                            <input type="hidden" name="model_adi" value="gemini-2.5-flash" x-bind:disabled="provider !== 'gemini'">
+                            <input type="hidden" name="model_adi" value="{{ \App\Services\YapayZeka\GeminiSaglayici::MODEL_ADI }}" x-bind:disabled="provider !== 'gemini'">
                             <select id="model_adi_openai" name="model_adi" class="studio-select" x-bind:disabled="provider !== 'openai'">
                                 @foreach ($anaModelSecenekleri as $model)
                                     <option value="{{ $model }}" @selected(old('model_adi', $ayar->model_adi) === $model)>{{ $model }}</option>

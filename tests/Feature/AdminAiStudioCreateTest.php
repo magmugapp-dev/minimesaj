@@ -31,8 +31,8 @@ it('creates a new ai persona from the v2 studio form', function () {
         ->and($user->dil)->toBe('de')
         ->and($persona->ana_dil_adi)->toBe('Almanca')
         ->and($persona->meslek)->toBe('Grafik tasarimci')
-        ->and(data_get($persona->metadata, 'model_adi'))->toBe('gemini-2.5-flash')
-        ->and($legacy->model_adi)->toBe('gemini-2.5-flash')
+        ->and(data_get($persona->metadata, 'model_adi'))->toBe('gemini-3.1-auto-quality')
+        ->and($legacy->model_adi)->toBe('gemini-3.1-auto-quality')
         ->and($legacy->mizah_seviyesi)->toBe(6)
         ->and($legacy->kiskanclik_seviyesi)->toBe(6);
 });
@@ -149,7 +149,7 @@ function studioPayload(array $overrides = []): array
         'dogum_yili' => 1998,
         'biyografi' => 'Sohbet etmeyi seven kozmopolit bir karakter.',
         'ulke' => 'Almanya',
-        'model_adi' => 'gemini-2.5-flash',
+        'model_adi' => 'gemini-3.1-auto-quality',
         'aktif_mi' => '1',
         'dating_aktif_mi' => '1',
         'instagram_aktif_mi' => '1',

@@ -72,7 +72,7 @@ function aiAyariOlustur(User $aiUser): AiAyar
         'user_id' => $aiUser->id,
         'aktif_mi' => true,
         'saglayici_tipi' => 'gemini',
-        'model_adi' => 'gemini-2.5-flash',
+        'model_adi' => 'gemini-3.1-auto-quality',
         'hafiza_aktif_mi' => true,
         'kisilik_tipi' => 'samimi',
         'konusma_tonu' => 'dogal',

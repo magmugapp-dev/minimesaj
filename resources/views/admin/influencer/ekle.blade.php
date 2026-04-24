@@ -136,7 +136,7 @@
                     <div class="studio-form-grid studio-form-grid--2 mt-6">
                         <div>
                             <label class="studio-label" for="model_adi_openai">Model</label>
-                            <input type="hidden" name="model_adi" value="gemini-2.5-flash" x-bind:disabled="provider !== 'gemini'">
+                            <input type="hidden" name="model_adi" value="{{ \App\Services\YapayZeka\GeminiSaglayici::MODEL_ADI }}" x-bind:disabled="provider !== 'gemini'">
                             <select id="model_adi_openai" name="model_adi" class="studio-select" x-bind:disabled="provider !== 'openai'">
                                 @foreach ($openAiModelleri as $model)
                                     <option value="{{ $model }}" @selected(old('model_adi', 'gpt-4.1-mini') === $model)>{{ $model }}</option>

@@ -10,6 +10,7 @@ use App\Models\YapayZekaGorevi;
 use App\Services\MesajServisi;
 use App\Services\YapayZeka\AiServisi;
 use App\Services\YapayZeka\AiMesajZamanlamaServisi;
+use App\Services\YapayZeka\GeminiSaglayici;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -58,7 +59,7 @@ class YapayZekaCevapGorevi implements ShouldQueue
                 'hata_mesaji' => null,
                 'cevap_metni' => null,
                 'saglayici_tipi' => $this->aiUser->aiAyar?->saglayici_tipi ?? 'gemini',
-                'model_adi' => $this->aiUser->aiAyar?->model_adi ?? 'gemini-2.5-flash',
+                'model_adi' => $this->aiUser->aiAyar?->model_adi ?? GeminiSaglayici::MODEL_ADI,
                 'giris_token_sayisi' => null,
                 'cikis_token_sayisi' => null,
                 'istek_baslatildi_at' => $istekBaslangici,

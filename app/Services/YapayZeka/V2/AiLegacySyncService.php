@@ -4,6 +4,7 @@ namespace App\Services\YapayZeka\V2;
 
 use App\Models\InstagramAiGorevi;
 use App\Models\YapayZekaGorevi;
+use App\Services\YapayZeka\GeminiSaglayici;
 use App\Services\YapayZeka\V2\Data\AiGenerationResult;
 use App\Services\YapayZeka\V2\Data\AiTurnContext;
 use Carbon\CarbonInterface;
@@ -44,7 +45,7 @@ class AiLegacySyncService
                     'istek_baslatildi_at' => null,
                     'son_parca_at' => null,
                     'hata_mesaji' => null,
-                    'model_adi' => $context->aiUser->aiAyar?->model_adi ?? 'gemini-2.5-flash',
+                    'model_adi' => $context->aiUser->aiAyar?->model_adi ?? GeminiSaglayici::MODEL_ADI,
                     'saglayici_tipi' => $context->aiUser->aiAyar?->saglayici_tipi ?? 'gemini',
                 ]
             );

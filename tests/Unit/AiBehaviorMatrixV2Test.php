@@ -90,7 +90,7 @@ it('adds behavior matrix context and model override to generation prompts', func
                 'cevap' => json_encode(['reply' => 'Merhaba, buradayim.', 'memory' => []], JSON_UNESCAPED_UNICODE),
                 'giris_token' => 12,
                 'cikis_token' => 8,
-                'model' => $parametreler['model_adi'] ?? 'gemini-2.5-flash',
+                'model' => $parametreler['model_adi'] ?? 'gemini-3.1-auto-quality',
             ];
         }
     };
@@ -148,7 +148,7 @@ it('adds behavior matrix context and model override to generation prompts', func
     $config = AiEngineConfig::query()->create([
         'ad' => 'Test Motor',
         'saglayici_tipi' => 'gemini',
-        'model_adi' => 'gemini-2.5-flash',
+        'model_adi' => 'gemini-3.1-auto-quality',
         'aktif_mi' => true,
         'temperature' => 0.8,
         'top_p' => 0.9,
@@ -186,7 +186,7 @@ it('adds behavior matrix context and model override to generation prompts', func
         'zeka_seviyesi' => 8,
         'mesaj_uzunlugu_min' => 20,
         'mesaj_uzunlugu_max' => 180,
-        'metadata' => ['model_adi' => 'gemini-2.5-flash'],
+        'metadata' => ['model_adi' => 'gemini-3.1-auto-quality'],
     ]);
 
     $state = new AiConversationStateSnapshot(30, 35, 25, 70, 'happy', 0, 'sinema', 'curious', 'warm_opening', null, 'idle');
@@ -196,7 +196,7 @@ it('adds behavior matrix context and model override to generation prompts', func
     $generator = new AiResponseGenerator($gemini, $engineService, $guardrails, new AiJsonResponseParser());
     $result = $generator->generate($context, $adapter, $config, $persona, $state, $plan, new Collection());
 
-    expect($capture->parametreler['model_adi'])->toBe('gemini-2.5-flash')
+    expect($capture->parametreler['model_adi'])->toBe('gemini-3.1-auto-quality')
         ->and($capture->mesajlar[0]['content'])->toContain('Davranis matrisi')
         ->and($capture->mesajlar[0]['content'])->toContain('Mizah 9/10')
         ->and($result->promptSummary)->toContain('Davranis matrisi');
@@ -219,7 +219,7 @@ it('adds surfaced contradiction context and enforces persona language in generat
                 'cevap' => json_encode(['reply' => 'I remember you mentioned Bursa before. Is it Mardin now?', 'memory' => []], JSON_UNESCAPED_UNICODE),
                 'giris_token' => 10,
                 'cikis_token' => 10,
-                'model' => $parametreler['model_adi'] ?? 'gemini-2.5-flash',
+                'model' => $parametreler['model_adi'] ?? 'gemini-3.1-auto-quality',
             ];
         }
     };
@@ -272,7 +272,7 @@ it('adds surfaced contradiction context and enforces persona language in generat
     $config = AiEngineConfig::query()->create([
         'ad' => 'Test Motor',
         'saglayici_tipi' => 'gemini',
-        'model_adi' => 'gemini-2.5-flash',
+        'model_adi' => 'gemini-3.1-auto-quality',
         'aktif_mi' => true,
         'guardrail_modu' => 'strict',
     ]);
@@ -307,7 +307,7 @@ it('adds surfaced contradiction context and enforces persona language in generat
         'zeka_seviyesi' => 6,
         'mesaj_uzunlugu_min' => 20,
         'mesaj_uzunlugu_max' => 180,
-        'metadata' => ['model_adi' => 'gemini-2.5-flash'],
+        'metadata' => ['model_adi' => 'gemini-3.1-auto-quality'],
     ]);
 
     $state = new AiConversationStateSnapshot(30, 30, 30, 70, 'neutral', 0, 'sehir', 'curious', 'keep_flow', null, 'idle');
@@ -376,7 +376,7 @@ it('backfills new behavior defaults when ensuring a persona profile', function (
     $user->aiAyar()->create([
         'aktif_mi' => true,
         'saglayici_tipi' => 'gemini',
-        'model_adi' => 'gemini-2.5-flash',
+        'model_adi' => 'gemini-3.1-auto-quality',
         'kiskanclik_seviyesi' => 4,
         'zeka_seviyesi' => 7,
     ]);
@@ -387,5 +387,5 @@ it('backfills new behavior defaults when ensuring a persona profile', function (
         ->and($profile->empati_seviyesi)->not()->toBeNull()
         ->and($profile->kiskanclik_seviyesi)->toBe(4)
         ->and($profile->zeka_seviyesi)->toBe(7)
-        ->and(data_get($profile->metadata, 'model_adi'))->toBe('gemini-2.5-flash');
+        ->and(data_get($profile->metadata, 'model_adi'))->toBe('gemini-3.1-auto-quality');
 });

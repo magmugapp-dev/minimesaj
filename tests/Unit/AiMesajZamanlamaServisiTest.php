@@ -24,7 +24,7 @@ it('ignores minute based random delay for dating replies', function () {
         'user_id' => $aiUser->id,
         'aktif_mi' => true,
         'saglayici_tipi' => 'gemini',
-        'model_adi' => 'gemini-2.5-flash',
+        'model_adi' => 'gemini-3.1-auto-quality',
         'minimum_cevap_suresi_saniye' => 5,
         'maksimum_cevap_suresi_saniye' => 40,
         'rastgele_gecikme_dakika' => 15,

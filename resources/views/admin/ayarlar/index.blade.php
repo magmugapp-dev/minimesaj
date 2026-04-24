@@ -6,7 +6,7 @@
     @php
         $modelSecenekleri = [
             'gemini_varsayilan_model' => [
-                'gemini-2.5-flash' => 'Gemini 2.5 Flash',
+                'gemini-3.1-auto-quality' => 'Gemini 3.1 Auto (Kalite Oncelikli)',
             ],
             'openai_varsayilan_model' => [
                 'gpt-4.1-nano' => 'GPT-4.1 Nano',

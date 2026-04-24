@@ -8,6 +8,7 @@ use App\Models\InstagramAiGorevi;
 use App\Models\InstagramHesap;
 use App\Models\InstagramMesaj;
 use App\Services\YapayZeka\AiServisi;
+use App\Services\YapayZeka\GeminiSaglayici;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -62,7 +63,7 @@ class InstagramAiCevapGorevi implements ShouldQueue
                 'hata_mesaji' => null,
                 'cevap_metni' => null,
                 'saglayici_tipi' => $this->hesap->user->aiAyar?->saglayici_tipi ?? 'gemini',
-                'model_adi' => $this->hesap->user->aiAyar?->model_adi ?? 'gemini-2.5-flash',
+                'model_adi' => $this->hesap->user->aiAyar?->model_adi ?? GeminiSaglayici::MODEL_ADI,
                 'istek_baslatildi_at' => $istekBaslangici,
                 'son_parca_at' => null,
                 'tamamlandi_at' => null,

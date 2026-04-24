@@ -13,7 +13,7 @@ return new class extends Migration
             $table->id();
             $table->string('ad')->default('Varsayilan Motor');
             $table->string('saglayici_tipi')->default('gemini');
-            $table->string('model_adi')->default('gemini-2.5-flash');
+            $table->string('model_adi')->default('gemini-3.1-auto-quality');
             $table->boolean('aktif_mi')->default(true);
             $table->decimal('temperature', 4, 2)->default(0.9);
             $table->decimal('top_p', 4, 2)->default(0.95);
@@ -149,7 +149,7 @@ return new class extends Migration
         $engineConfigId = DB::table('ai_engine_configs')->insertGetId([
             'ad' => 'Varsayilan Motor',
             'saglayici_tipi' => 'gemini',
-            'model_adi' => 'gemini-2.5-flash',
+            'model_adi' => 'gemini-3.1-auto-quality',
             'aktif_mi' => true,
             'temperature' => 0.9,
             'top_p' => 0.95,

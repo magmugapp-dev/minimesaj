@@ -368,7 +368,7 @@ function createDeferredTurnLog(
         'durum' => 'typing',
         'cevap_plani' => ['aim' => 'keep_flow'],
         'cevap_metni' => 'Aksam biraz yorucuydu ama simdi iyiyim.',
-        'model_adi' => 'gemini-2.5-flash',
+        'model_adi' => 'gemini-3.1-auto-quality',
         'prompt_ozeti' => 'Kisa ve samimi cevap',
         'baslatildi_at' => now()->subSeconds(5),
         'metadata' => [

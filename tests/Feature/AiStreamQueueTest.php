@@ -21,7 +21,7 @@ it('dispatches dating ai replies to the default queue and creates a pending task
         'user_id' => $aiUser->id,
         'aktif_mi' => true,
         'saglayici_tipi' => 'gemini',
-        'model_adi' => 'gemini-2.5-flash',
+        'model_adi' => 'gemini-3.1-auto-quality',
         'hafiza_aktif_mi' => true,
         'kisilik_tipi' => 'samimi',
         'konusma_tonu' => 'dogal',
@@ -101,7 +101,7 @@ it('provisions gemini settings for ai users before queueing a dating reply', fun
     expect($aiUser->aiAyar)->not->toBeNull();
     expect($aiUser->aiAyar->aktif_mi)->toBeTruthy();
     expect($aiUser->aiAyar->saglayici_tipi)->toBe('gemini');
-    expect($aiUser->aiAyar->model_adi)->toBe('gemini-2.5-flash');
+    expect($aiUser->aiAyar->model_adi)->toBe('gemini-3.1-auto-quality');
     expect($aiUser->aiAyar->minimum_cevap_suresi_saniye)->toBe(5);
 
     Queue::assertPushed(YapayZekaCevapGorevi::class, function (YapayZekaCevapGorevi $job) use ($sohbet, $mesaj, $aiUser) {
@@ -115,7 +115,7 @@ it('provisions gemini settings for ai users before queueing a dating reply', fun
         'ai_user_id' => $aiUser->id,
         'durum' => 'cevap_akisi_bekleniyor',
         'saglayici_tipi' => 'gemini',
-        'model_adi' => 'gemini-2.5-flash',
+        'model_adi' => 'gemini-3.1-auto-quality',
     ]);
 });
 
@@ -133,7 +133,7 @@ it('queues dating ai turn jobs in local env instead of executing them inline', f
             'user_id' => $aiUser->id,
             'aktif_mi' => true,
             'saglayici_tipi' => 'gemini',
-            'model_adi' => 'gemini-2.5-flash',
+            'model_adi' => 'gemini-3.1-auto-quality',
             'minimum_cevap_suresi_saniye' => 0,
             'maksimum_cevap_suresi_saniye' => 10,
         ]);

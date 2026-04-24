@@ -4,6 +4,7 @@ namespace App\Services\YapayZeka\V2;
 
 use App\Models\AiPersonaProfile;
 use App\Models\User;
+use App\Services\YapayZeka\GeminiModelPolicy;
 use App\Support\Language;
 
 class AiPersonaService
@@ -79,7 +80,9 @@ class AiPersonaService
             'hafta_sonu_uyku_baslangic' => $legacy?->hafta_sonu_uyku_baslangic ?: '02:00',
             'hafta_sonu_uyku_bitis' => $legacy?->hafta_sonu_uyku_bitis ?: '10:00',
             'metadata' => [
-                'model_adi' => $legacy?->model_adi ?: $this->engineConfigService->activeConfig()->model_adi,
+                'model_adi' => GeminiModelPolicy::normalizeConfiguredModel(
+                    $legacy?->model_adi ?: $this->engineConfigService->activeConfig()->model_adi
+                ),
             ],
         ]);
 
@@ -112,10 +115,15 @@ class AiPersonaService
             $defaults['ana_dil_adi'] = Language::name($defaults['ana_dil_kodu']);
         }
 
-        if (!data_get($profile->metadata, 'model_adi')) {
+        $metadataModel = data_get($profile->metadata, 'model_adi');
+        $normalizedMetadataModel = GeminiModelPolicy::normalizeConfiguredModel(
+            $metadataModel ?: $legacy?->model_adi ?: $this->engineConfigService->activeConfig()->model_adi
+        );
+
+        if ($metadataModel !== $normalizedMetadataModel) {
             $defaults['metadata'] = array_merge(
                 $profile->metadata ?? [],
-                ['model_adi' => $legacy?->model_adi ?: $this->engineConfigService->activeConfig()->model_adi]
+                ['model_adi' => $normalizedMetadataModel]
             );
         }
 

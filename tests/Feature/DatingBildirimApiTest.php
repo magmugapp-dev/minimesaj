@@ -288,7 +288,7 @@ it('includes ai users in discovery and starts a direct match conversation', func
         'user_id' => $aiKullanici->id,
         'aktif_mi' => true,
         'saglayici_tipi' => 'gemini',
-        'model_adi' => 'gemini-2.5-flash',
+        'model_adi' => 'gemini-3.1-auto-quality',
     ]);
 });
 

@@ -19,7 +19,6 @@ use Illuminate\Support\Str;
 
 class AiServisi
 {
-    private const GEMINI_FLASH_MODEL = 'gemini-2.5-flash';
     private const BAGLAM_MESAJ_LIMITI = 7;
     private const HAFIZA_LIMITI = 10;
 
@@ -122,6 +121,7 @@ class AiServisi
             || !$ayar->aktif_mi
             || $ayar->saglayici_tipi !== 'gemini'
             || blank($ayar->model_adi)
+            || GeminiModelPolicy::normalizeConfiguredModel($ayar->model_adi) !== $ayar->model_adi
         ) {
             return $this->aiKullaniciHazirlamaServisi->hazirla($aiUser);
         }
@@ -744,7 +744,7 @@ class AiServisi
     private function normalizeModel(?string $saglayici, ?string $model): ?string
     {
         if ($saglayici === 'gemini') {
-            return self::GEMINI_FLASH_MODEL;
+            return GeminiModelPolicy::normalizeConfiguredModel($model);
         }
 
         return $model;

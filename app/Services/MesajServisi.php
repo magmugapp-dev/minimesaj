@@ -17,6 +17,7 @@ use App\Models\YapayZekaGorevi;
 use App\Notifications\YeniMesaj;
 use App\Services\YapayZeka\AiKullaniciHazirlamaServisi;
 use App\Services\YapayZeka\AiMesajZamanlamaServisi;
+use App\Services\YapayZeka\GeminiSaglayici;
 use App\Services\YapayZeka\V2\AiPersonaService;
 use App\Support\AiMessageTextSanitizer;
 use App\Support\Language;
@@ -97,7 +98,7 @@ class MesajServisi
                             'hata_mesaji' => null,
                             'cevap_metni' => null,
                             'saglayici_tipi' => $aiUser->aiAyar?->saglayici_tipi ?? 'gemini',
-                            'model_adi' => $aiUser->aiAyar?->model_adi ?? 'gemini-2.5-flash',
+                            'model_adi' => $aiUser->aiAyar?->model_adi ?? GeminiSaglayici::MODEL_ADI,
                             'istek_baslatildi_at' => null,
                             'son_parca_at' => null,
                             'tamamlandi_at' => null,

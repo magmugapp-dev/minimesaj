@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\AiAyar;
 use App\Models\AiPersonaProfile;
 use App\Models\User;
+use App\Services\YapayZeka\GeminiSaglayici;
 use App\Services\YapayZeka\V2\AiEngineConfigService;
 use App\Support\Language;
 use Illuminate\Http\Request;
@@ -82,7 +83,7 @@ class AiController extends Controller
         if (! $kullanici->aiAyar) {
             $kullanici->aiAyar()->create([
                 'saglayici_tipi' => 'gemini',
-                'model_adi' => 'gemini-2.5-flash',
+                'model_adi' => GeminiSaglayici::MODEL_ADI,
             ]);
             $kullanici->load('aiAyar');
         }
@@ -151,11 +152,11 @@ class AiController extends Controller
         $aiAyarlari['hafiza_aktif_mi'] = $request->boolean('hafiza_aktif_mi');
 
         if (($aiAyarlari['saglayici_tipi'] ?? null) === 'gemini') {
-            $aiAyarlari['model_adi'] = 'gemini-2.5-flash';
+            $aiAyarlari['model_adi'] = GeminiSaglayici::MODEL_ADI;
         }
 
         if (($aiAyarlari['yedek_saglayici_tipi'] ?? null) === 'gemini') {
-            $aiAyarlari['yedek_model_adi'] = 'gemini-2.5-flash';
+            $aiAyarlari['yedek_model_adi'] = GeminiSaglayici::MODEL_ADI;
         }
 
         // JSON alanları satır satırdan array'e çevir
@@ -245,7 +246,7 @@ class AiController extends Controller
             'aktif_mi' => true,
             'saglayici_tipi' => $request->input('saglayici_tipi'),
             'model_adi' => $request->input('saglayici_tipi') === 'gemini'
-                ? 'gemini-2.5-flash'
+                ? GeminiSaglayici::MODEL_ADI
                 : $request->input('model_adi'),
             'kisilik_tipi' => $request->input('kisilik_tipi'),
             'kisilik_aciklamasi' => $request->input('kisilik_aciklamasi'),
@@ -289,7 +290,7 @@ class AiController extends Controller
                 // AI Ayarları
                 'aktif_mi' => true,
                 'saglayici_tipi' => 'gemini',
-                'model_adi' => 'gemini-2.5-flash',
+                'model_adi' => GeminiSaglayici::MODEL_ADI,
                 'yedek_saglayici_tipi' => null,
                 'yedek_model_adi' => null,
                 'kisilik_tipi' => 'eglenceli',
@@ -447,11 +448,11 @@ class AiController extends Controller
                     'aktif_mi' => $kayit['aktif_mi'] ?? true,
                     'saglayici_tipi' => $kayit['saglayici_tipi'],
                     'model_adi' => $kayit['saglayici_tipi'] === 'gemini'
-                        ? 'gemini-2.5-flash'
+                        ? GeminiSaglayici::MODEL_ADI
                         : $kayit['model_adi'],
                     'yedek_saglayici_tipi' => $kayit['yedek_saglayici_tipi'] ?? null,
                     'yedek_model_adi' => ($kayit['yedek_saglayici_tipi'] ?? null) === 'gemini'
-                        ? 'gemini-2.5-flash'
+                        ? GeminiSaglayici::MODEL_ADI
                         : ($kayit['yedek_model_adi'] ?? null),
                     'kisilik_tipi' => $kayit['kisilik_tipi'] ?? null,
                     'kisilik_aciklamasi' => $kayit['kisilik_aciklamasi'] ?? null,

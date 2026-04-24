@@ -5,6 +5,7 @@ namespace App\Services\YapayZeka;
 use App\Contracts\AiSaglayiciInterface;
 use App\Exceptions\AiSaglayiciHatasi;
 use App\Models\Ayar;
+use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\RequestException;
 use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Http;
@@ -13,15 +14,14 @@ use Illuminate\Support\Str;
 
 class GeminiSaglayici implements AiSaglayiciInterface
 {
-    public const MODEL_ADI = 'gemini-2.5-flash';
-    private const MAX_DENEME = 2;
+    public const MODEL_ADI = GeminiModelPolicy::AUTO_QUALITY;
     private const GECICI_HATA_KODLARI = [429, 500, 503];
     private const RESPONSE_MIME_TYPE = 'application/json';
     private const STREAM_TIMEOUT_SANIYE = 90;
 
     public function tamamla(array $mesajlar, array $parametreler = []): array
     {
-        $parametreler['model_adi'] = $this->cozulenModelAdi($parametreler['model_adi'] ?? null);
+        $parametreler['model_adi'] = GeminiModelPolicy::normalizeConfiguredModel($parametreler['model_adi'] ?? null);
         return $this->tamamlaStream($mesajlar, $parametreler);
     }
 
@@ -30,18 +30,22 @@ class GeminiSaglayici implements AiSaglayiciInterface
         array $parametreler = [],
         ?callable $parcaCallback = null
     ): array {
-        $model = $this->cozulenModelAdi($parametreler['model_adi'] ?? null);
+        $configuredModel = GeminiModelPolicy::normalizeConfiguredModel($parametreler['model_adi'] ?? null);
         $apiKey = Ayar::where('anahtar', 'gemini_api_key')->value('deger');
 
         if (empty($apiKey)) {
             if (app()->environment('testing')) {
-                return $this->testingFallbackResponse($mesajlar, $model, $parcaCallback);
+                return $this->testingFallbackResponse(
+                    $mesajlar,
+                    GeminiModelPolicy::defaultConcreteModel(),
+                    $parcaCallback
+                );
             }
 
             throw new AiSaglayiciHatasi(
                 'Gemini API key tanimlanmamis. Admin panelinden Gemini anahtarini ekleyin.',
                 'gemini',
-                $model
+                $configuredModel
             );
         }
 
@@ -77,7 +81,7 @@ class GeminiSaglayici implements AiSaglayiciInterface
             ];
         }
 
-        return $this->modelIleStreamDene($model, $apiKey, $govde, $parcaCallback);
+        return $this->modelIleStreamDene($configuredModel, $apiKey, $govde, $parcaCallback);
     }
 
     public function saglayiciAdi(): string
@@ -85,127 +89,237 @@ class GeminiSaglayici implements AiSaglayiciInterface
         return 'gemini';
     }
 
-    private function cozulenModelAdi(?string $modelAdi): string
-    {
-        $normalized = trim((string) $modelAdi);
-
-        if ($normalized !== '' && Str::startsWith(Str::lower($normalized), 'gemini')) {
-            return $normalized;
-        }
-
-        return self::MODEL_ADI;
-    }
-
     private function modelIleStreamDene(
-        string $model,
+        string $configuredModel,
         string $apiKey,
         array $govde,
         ?callable $parcaCallback = null
     ): array {
-        $url = "https://generativelanguage.googleapis.com/v1beta/models/{$model}:streamGenerateContent?alt=sse&key={$apiKey}";
-        $sonHata = null;
+        $models = GeminiModelPolicy::concreteModelChain($configuredModel);
+        $perModelBudgets = GeminiModelPolicy::perModelAttemptBudgets($configuredModel);
+        $maxAttempts = array_sum($perModelBudgets);
+        $attemptedModels = [];
+        $attemptsPerModel = array_fill(0, count($models), 0);
+        $currentModelIndex = 0;
+        $attemptIndex = 0;
+        $lastError = null;
 
-        for ($deneme = 1; $deneme <= self::MAX_DENEME; $deneme++) {
+        while ($currentModelIndex < count($models) && $attemptIndex < $maxAttempts) {
+            $model = $models[$currentModelIndex];
+            $attemptsPerModel[$currentModelIndex]++;
+            $attemptIndex++;
+            $attemptedModels[] = $model;
+
             try {
-                $yanit = Http::withHeaders([
-                    'Content-Type' => 'application/json',
-                    'Accept' => 'text/event-stream',
-                ])
-                    ->withOptions([
-                        'stream' => true,
-                        'read_timeout' => self::STREAM_TIMEOUT_SANIYE,
-                    ])
-                    ->timeout(self::STREAM_TIMEOUT_SANIYE)
-                    ->send('POST', $url, [
-                        'json' => $govde,
-                    ])
-                    ->throw();
-
-                $streamSonucu = $this->streamYanitiAyikla($yanit, $model, $parcaCallback);
-                $cevapMetni = trim($streamSonucu['cevap']);
-
-                if ($cevapMetni === '') {
-                    $bosCevapYenidenDenenebilir = $this->bosCevapYenidenDenenebilirMi($streamSonucu['son_veri'] ?? []);
-
-                    throw new AiSaglayiciHatasi(
-                        $this->bosCevapMesajiniOlustur($streamSonucu['son_veri'] ?? [], $model),
-                        'gemini',
-                        $model,
-                        $bosCevapYenidenDenenebilir,
-                        $yanit->status(),
-                        ['deneme' => $deneme]
-                    );
-                }
-
-                $tokenKullanimi = $streamSonucu['usageMetadata'] ?? [];
-
-                return [
-                    'cevap' => $cevapMetni,
-                    'giris_token' => $tokenKullanimi['promptTokenCount'] ?? 0,
-                    'cikis_token' => $tokenKullanimi['candidatesTokenCount'] ?? 0,
-                    'model' => $model,
-                ];
-            } catch (RequestException $e) {
-                $durumKodu = $e->response?->status();
-                $yenidenDenenebilir = $durumKodu !== null
-                    && in_array($durumKodu, self::GECICI_HATA_KODLARI, true);
-
-                $sonHata = new AiSaglayiciHatasi(
-                    $this->requestHatasiniOzetle($e),
-                    'gemini',
+                $result = $this->tekModelIleStreamDene(
                     $model,
-                    $yenidenDenenebilir,
-                    $durumKodu,
-                    ['deneme' => $deneme]
+                    $apiKey,
+                    $govde,
+                    $parcaCallback,
+                    $configuredModel,
+                    $attemptIndex,
+                    $attemptedModels,
                 );
 
-                if ($deneme < self::MAX_DENEME && $yenidenDenenebilir) {
-                    $this->geciciHataBekletVeLogla($durumKodu, $model, $deneme, $sonHata->getMessage());
-                    continue;
+                if (count(array_unique($attemptedModels)) > 1 || $configuredModel !== $model) {
+                    Log::channel('ai')->info('Gemini model zinciri bir model secimiyle tamamlandi.', [
+                        'configured_model' => $configuredModel,
+                        'attempted_models' => array_values(array_unique($attemptedModels)),
+                        'final_model' => $model,
+                        'attempt_index' => $attemptIndex,
+                    ]);
                 }
 
-                throw $sonHata;
+                return $result;
             } catch (AiSaglayiciHatasi $e) {
-                $sonHata = $e;
+                $lastError = $this->baglamEklenmisHata($e, [
+                    'configured_model' => $configuredModel,
+                    'attempt_index' => $attemptIndex,
+                    'attempted_models' => $attemptedModels,
+                ]);
 
-                if ($deneme < self::MAX_DENEME && $e->yenidenDenenebilir) {
-                    $this->geciciHataBekletVeLogla($e->durumKodu ?? 200, $model, $deneme, $e->getMessage());
+                $decision = $this->hatayiSiniflandir($lastError);
+                $currentBudget = $perModelBudgets[$currentModelIndex] ?? 1;
+                $sameModelBudgetLeft = $attemptsPerModel[$currentModelIndex] < $currentBudget
+                    && $attemptIndex < $maxAttempts;
+                $hasNextModel = $currentModelIndex < (count($models) - 1)
+                    && $attemptIndex < $maxAttempts;
+
+                if ($decision['action'] === 'retry_same_model' && $sameModelBudgetLeft) {
+                    $this->geciciHataBekletVeLogla(
+                        $decision['status_code'],
+                        $model,
+                        $attemptIndex,
+                        $lastError->getMessage(),
+                        $configuredModel,
+                        $attemptedModels,
+                        $decision['reason'],
+                    );
+
                     continue;
                 }
 
-                throw $e;
-            } catch (\Throwable $e) {
-                $sonHata = new AiSaglayiciHatasi(
-                    'Gemini stream istegi beklenmeyen sekilde basarisiz oldu: ' . Str::limit($e->getMessage(), 240),
-                    'gemini',
-                    $model,
-                    true,
-                    null,
-                    ['deneme' => $deneme],
-                    $e
+                if ($decision['action'] === 'next_model' && $hasNextModel) {
+                    $this->fallbackModelGecisiniLogla(
+                        $configuredModel,
+                        $model,
+                        $models[$currentModelIndex + 1],
+                        $attemptIndex,
+                        $attemptedModels,
+                        $decision['reason'],
+                        $decision['status_code'],
+                        $lastError->getMessage(),
+                    );
+                    $currentModelIndex++;
+
+                    continue;
+                }
+
+                if ($decision['action'] === 'retry_same_model' && !$sameModelBudgetLeft && $hasNextModel) {
+                    $this->fallbackModelGecisiniLogla(
+                        $configuredModel,
+                        $model,
+                        $models[$currentModelIndex + 1],
+                        $attemptIndex,
+                        $attemptedModels,
+                        'transient_budget_exhausted',
+                        $decision['status_code'],
+                        $lastError->getMessage(),
+                    );
+                    $this->uygunsaBekle($this->yenidenDenemeBeklemeSuresi($attemptIndex));
+                    $currentModelIndex++;
+
+                    continue;
+                }
+
+                throw $this->nihaiHatayiOlustur(
+                    $lastError,
+                    $configuredModel,
+                    $attemptedModels,
+                    $decision['reason'],
                 );
-
-                if ($deneme < self::MAX_DENEME) {
-                    sleep(1);
-                    continue;
-                }
-
-                throw $sonHata;
             }
         }
 
-        if ($sonHata instanceof AiSaglayiciHatasi) {
-            throw $sonHata;
-        }
-
-        throw new AiSaglayiciHatasi(
-            "Gemini tum denemeler tukendi, model: {$model}",
-            'gemini',
-            $model,
-            true,
-            null,
-            ['max_deneme' => self::MAX_DENEME]
+        throw $this->nihaiHatayiOlustur(
+            $lastError,
+            $configuredModel,
+            $attemptedModels,
+            'attempt_budget_exhausted',
         );
+    }
+
+    private function tekModelIleStreamDene(
+        string $model,
+        string $apiKey,
+        array $govde,
+        ?callable $parcaCallback,
+        string $configuredModel,
+        int $attemptIndex,
+        array $attemptedModels
+    ): array {
+        $url = "https://generativelanguage.googleapis.com/v1beta/models/{$model}:streamGenerateContent?alt=sse&key={$apiKey}";
+
+        try {
+            $yanit = Http::withHeaders([
+                'Content-Type' => 'application/json',
+                'Accept' => 'text/event-stream',
+            ])
+                ->withOptions([
+                    'stream' => true,
+                    'read_timeout' => self::STREAM_TIMEOUT_SANIYE,
+                ])
+                ->timeout(self::STREAM_TIMEOUT_SANIYE)
+                ->send('POST', $url, [
+                    'json' => $govde,
+                ])
+                ->throw();
+
+            $streamSonucu = $this->streamYanitiAyikla($yanit, $model, $parcaCallback);
+            $cevapMetni = trim($streamSonucu['cevap']);
+
+            if ($cevapMetni === '') {
+                $bosCevapYenidenDenenebilir = $this->bosCevapYenidenDenenebilirMi($streamSonucu['son_veri'] ?? []);
+
+                throw new AiSaglayiciHatasi(
+                    $this->bosCevapMesajiniOlustur($streamSonucu['son_veri'] ?? [], $model),
+                    'gemini',
+                    $model,
+                    $bosCevapYenidenDenenebilir,
+                    $yanit->status(),
+                    [
+                        'configured_model' => $configuredModel,
+                        'attempt_index' => $attemptIndex,
+                        'attempted_models' => $attemptedModels,
+                        'error_kind' => 'empty_response',
+                    ]
+                );
+            }
+
+            $tokenKullanimi = $streamSonucu['usageMetadata'] ?? [];
+
+            return [
+                'cevap' => $cevapMetni,
+                'giris_token' => $tokenKullanimi['promptTokenCount'] ?? 0,
+                'cikis_token' => $tokenKullanimi['candidatesTokenCount'] ?? 0,
+                'model' => $model,
+                'configured_model' => $configuredModel,
+            ];
+        } catch (RequestException $e) {
+            $durumKodu = $e->response?->status();
+
+            throw new AiSaglayiciHatasi(
+                $this->requestHatasiniOzetle($e),
+                'gemini',
+                $model,
+                $this->durumKoduGeciciMi($durumKodu),
+                $durumKodu,
+                [
+                    'configured_model' => $configuredModel,
+                    'attempt_index' => $attemptIndex,
+                    'attempted_models' => $attemptedModels,
+                    'error_kind' => 'http_request_failed',
+                    'response_body' => $this->normalizeResponseBody((string) $e->response?->body()),
+                ],
+                $e
+            );
+        } catch (ConnectionException $e) {
+            throw new AiSaglayiciHatasi(
+                'Gemini baglanti hatasi: ' . Str::limit($e->getMessage(), 240),
+                'gemini',
+                $model,
+                true,
+                null,
+                [
+                    'configured_model' => $configuredModel,
+                    'attempt_index' => $attemptIndex,
+                    'attempted_models' => $attemptedModels,
+                    'error_kind' => 'connection_exception',
+                ],
+                $e
+            );
+        } catch (AiSaglayiciHatasi $e) {
+            throw $this->baglamEklenmisHata($e, [
+                'configured_model' => $configuredModel,
+                'attempt_index' => $attemptIndex,
+                'attempted_models' => $attemptedModels,
+            ]);
+        } catch (\Throwable $e) {
+            throw new AiSaglayiciHatasi(
+                'Gemini stream istegi beklenmeyen sekilde basarisiz oldu: ' . Str::limit($e->getMessage(), 240),
+                'gemini',
+                $model,
+                true,
+                null,
+                [
+                    'configured_model' => $configuredModel,
+                    'attempt_index' => $attemptIndex,
+                    'attempted_models' => $attemptedModels,
+                    'error_kind' => 'unexpected_exception',
+                ],
+                $e
+            );
+        }
     }
 
     private function mesajlariDonustur(array $mesajlar): array
@@ -444,19 +558,199 @@ class GeminiSaglayici implements AiSaglayiciInterface
     }
 
     private function geciciHataBekletVeLogla(
-        int $durumKodu,
+        ?int $durumKodu,
         string $model,
         int $deneme,
-        string $hataMesaji
+        string $hataMesaji,
+        string $configuredModel,
+        array $attemptedModels,
+        string $fallbackReason
     ): void {
-        $bekleme = 1;
+        $bekleme = $this->yenidenDenemeBeklemeSuresi($deneme);
 
         Log::channel('ai')->info(
-            "Gemini gecici hata ({$durumKodu}), model: {$model}, {$bekleme}s sonra tekrar denenecek.",
-            ['deneme' => $deneme, 'hata' => $hataMesaji]
+            "Gemini gecici hata (" . ($durumKodu ?? 'n/a') . "), model: {$model}, {$bekleme}s sonra tekrar denenecek.",
+            [
+                'configured_model' => $configuredModel,
+                'attempted_models' => array_values(array_unique($attemptedModels)),
+                'attempt_index' => $deneme,
+                'status_code' => $durumKodu,
+                'fallback_reason' => $fallbackReason,
+                'hata' => $hataMesaji,
+            ]
         );
 
-        sleep($bekleme);
+        $this->uygunsaBekle($bekleme);
+    }
+
+    private function fallbackModelGecisiniLogla(
+        string $configuredModel,
+        string $fromModel,
+        string $toModel,
+        int $attemptIndex,
+        array $attemptedModels,
+        string $fallbackReason,
+        ?int $statusCode,
+        string $errorMessage,
+    ): void {
+        Log::channel('ai')->warning('Gemini model fallback devreye alindi.', [
+            'configured_model' => $configuredModel,
+            'attempted_models' => array_values(array_unique($attemptedModels)),
+            'from_model' => $fromModel,
+            'to_model' => $toModel,
+            'final_model' => $toModel,
+            'attempt_index' => $attemptIndex,
+            'fallback_reason' => $fallbackReason,
+            'status_code' => $statusCode,
+            'hata' => $errorMessage,
+        ]);
+    }
+
+    private function baglamEklenmisHata(AiSaglayiciHatasi $hata, array $ekBaglam): AiSaglayiciHatasi
+    {
+        return new AiSaglayiciHatasi(
+            $hata->getMessage(),
+            $hata->saglayici,
+            $hata->model,
+            $hata->yenidenDenenebilir,
+            $hata->durumKodu,
+            array_merge($hata->baglam, $ekBaglam),
+            $hata->getPrevious()
+        );
+    }
+
+    private function hatayiSiniflandir(AiSaglayiciHatasi $hata): array
+    {
+        $statusCode = $hata->durumKodu;
+        $responseBody = (string) ($hata->baglam['response_body'] ?? '');
+        $haystack = Str::lower($responseBody . ' ' . $hata->getMessage());
+
+        if ($this->modelDesteklenmiyorMu($statusCode, $haystack)) {
+            return ['action' => 'next_model', 'reason' => 'model_not_supported', 'status_code' => $statusCode];
+        }
+
+        if ($this->authVeyaYetkiHatasiMi($statusCode, $haystack)) {
+            return ['action' => 'fail', 'reason' => 'auth_or_permission', 'status_code' => $statusCode];
+        }
+
+        if ($this->guvenlikVeyaPolicyHatasiMi($statusCode, $haystack)) {
+            return ['action' => 'fail', 'reason' => 'safety_or_policy', 'status_code' => $statusCode];
+        }
+
+        if ($this->kaliciIstemciHatasiMi($statusCode, $haystack)) {
+            return ['action' => 'fail', 'reason' => 'invalid_request', 'status_code' => $statusCode];
+        }
+
+        if ($hata->yenidenDenenebilir || $this->durumKoduGeciciMi($statusCode)) {
+            return ['action' => 'retry_same_model', 'reason' => 'transient_error', 'status_code' => $statusCode];
+        }
+
+        return ['action' => 'fail', 'reason' => 'provider_error', 'status_code' => $statusCode];
+    }
+
+    private function durumKoduGeciciMi(?int $statusCode): bool
+    {
+        if ($statusCode === null) {
+            return false;
+        }
+
+        return $statusCode >= 500 || in_array($statusCode, self::GECICI_HATA_KODLARI, true);
+    }
+
+    private function modelDesteklenmiyorMu(?int $statusCode, string $haystack): bool
+    {
+        if (!in_array($statusCode, [400, 404], true)) {
+            return false;
+        }
+
+        return str_contains($haystack, 'model')
+            && (
+                str_contains($haystack, 'not found')
+                || str_contains($haystack, 'not supported')
+                || str_contains($haystack, 'unsupported')
+            );
+    }
+
+    private function authVeyaYetkiHatasiMi(?int $statusCode, string $haystack): bool
+    {
+        if (in_array($statusCode, [401, 403], true)) {
+            return true;
+        }
+
+        return str_contains($haystack, 'permission')
+            || str_contains($haystack, 'unauthorized')
+            || str_contains($haystack, 'unauthenticated');
+    }
+
+    private function guvenlikVeyaPolicyHatasiMi(?int $statusCode, string $haystack): bool
+    {
+        return str_contains($haystack, 'safety')
+            || str_contains($haystack, 'block_reason')
+            || str_contains($haystack, 'policy');
+    }
+
+    private function kaliciIstemciHatasiMi(?int $statusCode, string $haystack): bool
+    {
+        if (!in_array($statusCode, [400, 422], true)) {
+            return false;
+        }
+
+        return !str_contains($haystack, 'not supported')
+            && !str_contains($haystack, 'unsupported')
+            && !str_contains($haystack, 'not found');
+    }
+
+    private function yenidenDenemeBeklemeSuresi(int $attemptIndex): int
+    {
+        $base = min(8, 2 ** max(0, $attemptIndex - 1));
+        $jitter = app()->environment('testing') ? 0 : random_int(0, max(1, $base));
+
+        return min(15, $base + $jitter);
+    }
+
+    private function uygunsaBekle(int $seconds): void
+    {
+        if ($seconds <= 0 || app()->environment('testing')) {
+            return;
+        }
+
+        sleep($seconds);
+    }
+
+    private function normalizeResponseBody(string $body): string
+    {
+        $body = preg_replace('/\s+/', ' ', trim($body)) ?? trim($body);
+
+        return $body;
+    }
+
+    private function nihaiHatayiOlustur(
+        ?AiSaglayiciHatasi $lastError,
+        string $configuredModel,
+        array $attemptedModels,
+        string $fallbackReason,
+    ): AiSaglayiciHatasi {
+        $uniqueModels = array_values(array_unique($attemptedModels));
+        $lastModel = $uniqueModels === [] ? GeminiModelPolicy::defaultConcreteModel() : end($uniqueModels);
+        $message = trim(implode(' ', array_filter([
+            $lastError?->getMessage() ?: 'Gemini tum denemeler tukendi.',
+            $uniqueModels === [] ? null : 'Denenen modeller: ' . implode(', ', $uniqueModels) . '.',
+        ])));
+
+        return new AiSaglayiciHatasi(
+            $message,
+            'gemini',
+            $lastError?->model ?: $lastModel,
+            false,
+            $lastError?->durumKodu,
+            array_merge($lastError?->baglam ?? [], [
+                'configured_model' => $configuredModel,
+                'attempted_models' => $uniqueModels,
+                'final_model' => $lastModel,
+                'fallback_reason' => $fallbackReason,
+            ]),
+            $lastError?->getPrevious()
+        );
     }
 
     private function testingFallbackResponse(

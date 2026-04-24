@@ -191,7 +191,7 @@ return [
         // ...100+ örnek
     ],
     'model_adlari' => [
-        'gemini-2.5-flash',
+        'gemini-3.1-auto-quality',
         'gpt-4.1-nano',
         'gpt-4.1-mini',
         'gpt-4o-mini',

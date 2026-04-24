@@ -143,7 +143,7 @@
                             </select></div>
                         <div>
                             <label class="studio-label" for="model_adi_openai">Ana model</label>
-                            <input type="hidden" name="model_adi" value="gemini-2.5-flash"
+                            <input type="hidden" name="model_adi" value="{{ \App\Services\YapayZeka\GeminiSaglayici::MODEL_ADI }}"
                                 x-bind:disabled="provider !== 'gemini'">
                             <select id="model_adi_openai" name="model_adi" class="studio-select"
                                 x-bind:disabled="provider !== 'openai'">
@@ -162,7 +162,7 @@
                             </select></div>
                         <div>
                             <label class="studio-label" for="yedek_model_adi_openai">Yedek model</label>
-                            <input type="hidden" name="yedek_model_adi" value="gemini-2.5-flash"
+                            <input type="hidden" name="yedek_model_adi" value="{{ \App\Services\YapayZeka\GeminiSaglayici::MODEL_ADI }}"
                                 x-bind:disabled="backupProvider !== 'gemini'">
                             <select id="yedek_model_adi_openai" name="yedek_model_adi" class="studio-select"
                                 x-bind:disabled="backupProvider !== 'openai'">
