@@ -21,7 +21,7 @@ class ChatLocalStore {
     final databasesPath = await getDatabasesPath();
     final db = await openDatabase(
       path.join(databasesPath, 'magmug_chat_cache.db'),
-      version: 4,
+      version: 5,
       onCreate: (db, version) async {
         await _createSchema(db);
       },
@@ -80,6 +80,14 @@ class ChatLocalStore {
           await db.execute(
             'ALTER TABLE conversation_previews ADD COLUMN peer_language_name TEXT',
           );
+        }
+        if (oldVersion < 5) {
+          await db.execute('''
+            UPDATE conversation_messages
+            SET translated_text = NULL,
+                translation_target_language_code = NULL,
+                translation_target_language_name = NULL
+          ''');
         }
       },
     );
@@ -266,9 +274,9 @@ class ChatLocalStore {
       'is_ai_generated': message.isAiGenerated ? 1 : 0,
       'language_code': message.languageCode,
       'language_name': message.languageName,
-      'translated_text': message.translatedText,
-      'translation_target_language_code': message.translationTargetLanguageCode,
-      'translation_target_language_name': message.translationTargetLanguageName,
+      'translated_text': null,
+      'translation_target_language_code': null,
+      'translation_target_language_name': null,
       'created_at_ms': message.createdAt?.millisecondsSinceEpoch,
     };
   }

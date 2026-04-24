@@ -202,6 +202,155 @@ it('adds behavior matrix context and model override to generation prompts', func
         ->and($result->promptSummary)->toContain('Davranis matrisi');
 });
 
+it('adds surfaced contradiction context and enforces persona language in generation prompts', function () {
+    $capture = (object) [];
+
+    $gemini = new class($capture) extends GeminiSaglayici
+    {
+        public function __construct(public object $capture)
+        {
+        }
+
+        public function tamamlaStream(array $mesajlar, array $parametreler = [], ?callable $parcaCallback = null): array
+        {
+            $this->capture->mesajlar = $mesajlar;
+
+            return [
+                'cevap' => json_encode(['reply' => 'I remember you mentioned Bursa before. Is it Mardin now?', 'memory' => []], JSON_UNESCAPED_UNICODE),
+                'giris_token' => 10,
+                'cikis_token' => 10,
+                'model' => $parametreler['model_adi'] ?? 'gemini-2.5-flash',
+            ];
+        }
+    };
+
+    $guardrails = new class extends AiGuardrailService
+    {
+        public function requiredInstructions(AiPersonaProfile $persona, string $kanal): array
+        {
+            return [];
+        }
+    };
+
+    $engineService = new class extends AiEngineConfigService
+    {
+        public function modelParameters(AiEngineConfig $config): array
+        {
+            return ['model_adi' => $config->model_adi];
+        }
+    };
+
+    $adapter = new class implements AiChannelAdapterInterface
+    {
+        public function recentMessages(AiTurnContext $context, int $limit = 12): array
+        {
+            return [['role' => 'user', 'content' => "Mardin'de yasiyorum."]];
+        }
+
+        public function counterpartProfileLines(AiTurnContext $context): array
+        {
+            return ['Ad: Deniz'];
+        }
+
+        public function hasNewerIncoming(AiTurnContext $context): bool
+        {
+            return false;
+        }
+
+        public function persistReply(AiTurnContext $context, User $aiUser, string $replyText): mixed
+        {
+            return null;
+        }
+
+        public function markIncomingHandled(AiTurnContext $context): void
+        {
+        }
+    };
+
+    $aiUser = User::factory()->aiKullanici()->create(['dil' => 'tr']);
+    $hedefUser = User::factory()->create();
+    $config = AiEngineConfig::query()->create([
+        'ad' => 'Test Motor',
+        'saglayici_tipi' => 'gemini',
+        'model_adi' => 'gemini-2.5-flash',
+        'aktif_mi' => true,
+        'guardrail_modu' => 'strict',
+    ]);
+
+    $persona = new AiPersonaProfile([
+        'ana_dil_kodu' => 'en',
+        'ana_dil_adi' => 'Ingilizce',
+        'persona_ozeti' => 'Dogal ve sicak bir karakter.',
+        'konusma_tonu' => 'dogal',
+        'konusma_stili' => 'akici',
+        'mizah_seviyesi' => 5,
+        'flort_seviyesi' => 4,
+        'emoji_seviyesi' => 2,
+        'giriskenlik_seviyesi' => 6,
+        'utangaclik_seviyesi' => 3,
+        'duygusallik_seviyesi' => 5,
+        'argo_seviyesi' => 1,
+        'sicaklik_seviyesi' => 7,
+        'empati_seviyesi' => 7,
+        'merak_seviyesi' => 7,
+        'ozguven_seviyesi' => 5,
+        'sabir_seviyesi' => 6,
+        'baskinlik_seviyesi' => 3,
+        'sarkastiklik_seviyesi' => 1,
+        'romantizm_seviyesi' => 4,
+        'oyunculuk_seviyesi' => 4,
+        'ciddiyet_seviyesi' => 5,
+        'gizem_seviyesi' => 4,
+        'hassasiyet_seviyesi' => 5,
+        'enerji_seviyesi' => 5,
+        'kiskanclik_seviyesi' => 1,
+        'zeka_seviyesi' => 6,
+        'mesaj_uzunlugu_min' => 20,
+        'mesaj_uzunlugu_max' => 180,
+        'metadata' => ['model_adi' => 'gemini-2.5-flash'],
+    ]);
+
+    $state = new AiConversationStateSnapshot(30, 30, 30, 70, 'neutral', 0, 'sehir', 'curious', 'keep_flow', null, 'idle');
+    $plan = new AiResponsePlan('clarify_memory_consistency', 'curious', 18, 120, true, 0, 0, 'Kisa ve merakli kal.');
+    $context = new AiTurnContext('dating', 'reply', $aiUser, null, null, $hedefUser);
+
+    $generator = new AiResponseGenerator($gemini, $engineService, $guardrails, new AiJsonResponseParser());
+    $generator->generate(
+        $context,
+        $adapter,
+        $config,
+        $persona,
+        $state,
+        $plan,
+        new Collection(),
+        [[
+            'key' => 'location_city',
+            'label' => 'yasadigin sehir',
+            'previous_value' => 'Bursa',
+            'new_value' => 'Mardin',
+            'priority' => 120,
+            'importance' => 8,
+            'confidence' => 0.9,
+            'should_surface' => true,
+        ]],
+        [
+            'key' => 'location_city',
+            'label' => 'yasadigin sehir',
+            'previous_value' => 'Bursa',
+            'new_value' => 'Mardin',
+            'priority' => 120,
+            'importance' => 8,
+            'confidence' => 0.9,
+            'should_surface' => true,
+        ],
+    );
+
+    expect($capture->mesajlar[0]['content'])->toContain('final cevabi tamamen kendi persona ana dilinde ver')
+        ->and($capture->mesajlar[0]['content'])->toContain('Yuzeye cikarilacak ana fark')
+        ->and($capture->mesajlar[0]['content'])->toContain('Bursa')
+        ->and($capture->mesajlar[0]['content'])->toContain('Mardin');
+});
+
 it('softens risky replies when harsh slider combinations spill into the text', function () {
     $persona = new AiPersonaProfile([
         'argo_seviyesi' => 9,

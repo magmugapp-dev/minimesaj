@@ -47,20 +47,21 @@ it('detects city contradictions before generation context', function () {
 
     $service->analyzeIncoming(
         $context,
-        "Bursa'da yaşıyorum.",
-        $interpreter->interpret("Bursa'da yaşıyorum.", $context),
+        "Bursa'da yasiyorum.",
+        $interpreter->interpret("Bursa'da yasiyorum.", $context),
         $state,
     );
 
     $result = $service->analyzeIncoming(
         $context,
-        "Mardin'de yaşıyorum.",
-        $interpreter->interpret("Mardin'de yaşıyorum.", $context),
+        "Mardin'de yasiyorum.",
+        $interpreter->interpret("Mardin'de yasiyorum.", $context),
         $state,
     );
 
     expect($result['contradictions'])->not->toBeEmpty()
         ->and($result['contradictions'][0]['key'])->toBe('location_city')
+        ->and($result['contradictions'][0]['label'])->toBe('yasadigin sehir')
         ->and($result['contradictions'][0]['should_surface'])->toBeTrue()
         ->and($result['contradictions'][0]['previous_value'])->toContain('Bursa')
         ->and($result['contradictions'][0]['new_value'])->toContain('Mardin');
@@ -74,14 +75,44 @@ it('detects profession contradictions and ignores volatile mood changes', functi
     $service = app(AiMemoryService::class);
     $state = neutralStateSnapshot();
 
-    $service->analyzeIncoming($context, 'Hemşireyim.', $interpreter->interpret('Hemşireyim.', $context), $state);
-    $jobResult = $service->analyzeIncoming($context, 'Avukatım.', $interpreter->interpret('Avukatım.', $context), $state);
+    $service->analyzeIncoming($context, 'Hemsireyim.', $interpreter->interpret('Hemsireyim.', $context), $state);
+    $jobResult = $service->analyzeIncoming($context, 'Avukatim.', $interpreter->interpret('Avukatim.', $context), $state);
 
-    $service->analyzeIncoming($context, 'Bugün çok yorgunum.', $interpreter->interpret('Bugün çok yorgunum.', $context), $state);
-    $moodResult = $service->analyzeIncoming($context, 'Bugün iyiyim.', $interpreter->interpret('Bugün iyiyim.', $context), $state);
+    $service->analyzeIncoming($context, 'Bugun cok yorgunum.', $interpreter->interpret('Bugun cok yorgunum.', $context), $state);
+    $moodResult = $service->analyzeIncoming($context, 'Bugun iyiyim.', $interpreter->interpret('Bugun iyiyim.', $context), $state);
 
     expect($jobResult['contradictions'])->not->toBeEmpty()
         ->and($jobResult['contradictions'][0]['key'])->toBe('job_current')
         ->and($jobResult['contradictions'][0]['should_surface'])->toBeTrue()
         ->and($moodResult['contradictions'])->toBeEmpty();
+});
+
+it('extracts broad stable memory for language education goals and boundaries', function () {
+    $aiUser = User::factory()->aiKullanici()->create();
+    $target = User::factory()->create();
+    $context = deepMemoryContext($aiUser, $target);
+    $interpreter = app(AiMessageInterpreter::class);
+    $service = app(AiMemoryService::class);
+    $state = neutralStateSnapshot();
+
+    $result = $service->analyzeIncoming(
+        $context,
+        'Ana dilim Ingilizce. Universitem Bogazici University. Hedefim yurt disinda master yapmak. Gece gec yazilmasindan rahatsiz olurum.',
+        $interpreter->interpret(
+            'Ana dilim Ingilizce. Universitem Bogazici University. Hedefim yurt disinda master yapmak. Gece gec yazilmasindan rahatsiz olurum.',
+            $context,
+        ),
+        $state,
+    );
+
+    $storedKeys = collect($result['stored'])
+        ->map(fn (int $id) => \App\Models\AiMemory::query()->find($id)?->anahtar)
+        ->filter()
+        ->values()
+        ->all();
+
+    expect($storedKeys)->toContain('language_primary')
+        ->and($storedKeys)->toContain('education_school')
+        ->and($storedKeys)->toContain('goal_current')
+        ->and($storedKeys)->toContain('boundary_current');
 });

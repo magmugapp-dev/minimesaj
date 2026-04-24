@@ -63,7 +63,7 @@ class AiTurnScheduler
         return [
             'planned_at' => $plannedAt,
             'delay_seconds' => $delay,
-            'status_text' => $diff > 12 ? 'Dusunuyor...' : 'Yaziyor...',
+            'status_text' => 'Yaziyor...',
         ];
     }
 

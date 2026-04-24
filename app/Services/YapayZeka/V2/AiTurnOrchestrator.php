@@ -66,6 +66,7 @@ class AiTurnOrchestrator
             )
             : ['extraction' => ['candidates' => [], 'provider' => 'none', 'raw' => null], 'stored' => [], 'contradictions' => []];
         $contradictions = $memoryAnalysis['contradictions'] ?? [];
+        $surfacedContradiction = $this->selectSurfacedContradiction($contradictions);
         $memories = $this->memoryService->recall($context);
         $this->memoryService->markUsed($memories);
         $plan = $this->responsePlanner->plan(
@@ -96,6 +97,7 @@ class AiTurnOrchestrator
                 'memory_extraction' => $memoryAnalysis['extraction'] ?? null,
                 'stored_memory_ids' => $memoryAnalysis['stored'] ?? [],
                 'contradictions' => $contradictions,
+                'surfaced_contradiction' => $surfacedContradiction,
             ],
         ]);
 
@@ -119,11 +121,12 @@ class AiTurnOrchestrator
                     $adapter,
                     $config,
                     $persona,
-                    $stateSnapshot,
-                    $plan,
-                    $memories,
-                    $contradictions,
-                );
+                $stateSnapshot,
+                $plan,
+                $memories,
+                $contradictions,
+                $surfacedContradiction,
+            );
 
             $evaluation = $this->responseEvaluator->evaluate(
                 $generation->replyText,
@@ -142,6 +145,7 @@ class AiTurnOrchestrator
                     $plan,
                     $memories,
                     $contradictions,
+                    $surfacedContradiction,
                     $evaluation['reasons'],
                 );
 
@@ -203,5 +207,24 @@ class AiTurnOrchestrator
         return $kanal === 'instagram'
             ? $this->instagramAdapter
             : $this->datingAdapter;
+    }
+
+    private function selectSurfacedContradiction(array $contradictions): ?array
+    {
+        return collect($contradictions)
+            ->filter(fn (array $signal) => (bool) ($signal['should_surface'] ?? false))
+            ->sort(function (array $left, array $right): int {
+                return [
+                    (int) ($right['priority'] ?? 0),
+                    (int) ($right['importance'] ?? 0),
+                    (float) ($right['confidence'] ?? 0),
+                ] <=> [
+                    (int) ($left['priority'] ?? 0),
+                    (int) ($left['importance'] ?? 0),
+                    (float) ($left['confidence'] ?? 0),
+                ];
+            })
+            ->values()
+            ->first();
     }
 }

@@ -15,7 +15,9 @@ it('renders the redesigned ai studio pages for an admin', function () {
         ->get(route('admin.ai.index'))
         ->assertOk()
         ->assertSeeText('AI Studio')
-        ->assertSeeText('Motor Ayarlari')
+        ->assertSeeText('Motor ayarlari')
+        ->assertSeeText('AI kullanici listesi')
+        ->assertSee('placeholder="AI ara"', false)
         ->assertDontSeeText('Motor, persona ve canli akisi tek panelde yonet.');
 
     $this->actingAs($admin)
@@ -23,7 +25,17 @@ it('renders the redesigned ai studio pages for an admin', function () {
         ->assertOk()
         ->assertSeeText('Yeni AI Persona')
         ->assertSeeText('Kimlik ve Hesap')
-        ->assertSeeText('Davranis Sliderlari');
+        ->assertSeeText('Davranis Sliderlari')
+        ->assertSee('Profilde gorunen kisa tanitim metni.', false)
+        ->assertSee('Karakterin omurgasini, enerjisini, sosyal tavrini ve birinin aklinda nasil kaldigini yaz.', false)
+        ->assertSeeText('Yasam Cevresi')
+        ->assertSeeText('Sanat ve kafe mahallesi')
+        ->assertSeeText('Kulturel Koken')
+        ->assertSeeText('Bati Avrupa')
+        ->assertSeeText('Konusma Tonu')
+        ->assertSeeText('Utangac ama sicak')
+        ->assertSeeText('Cevap Ritmi')
+        ->assertSeeText('Yavas ama derinlikli');
 
     $this->actingAs($admin)
         ->get(route('admin.ai.goster', $aiUser))

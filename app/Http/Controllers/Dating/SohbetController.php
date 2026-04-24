@@ -19,8 +19,10 @@ class SohbetController extends Controller
         })
             ->where('durum', 'aktif')
             ->with([
-                'eslesme.user:id,ad,kullanici_adi,profil_resmi,cevrim_ici_mi,dil',
-                'eslesme.eslesenUser:id,ad,kullanici_adi,profil_resmi,cevrim_ici_mi,dil',
+                'eslesme.user:id,ad,kullanici_adi,profil_resmi,cevrim_ici_mi,dil,hesap_tipi',
+                'eslesme.user.aiPersonaProfile:ai_user_id,ana_dil_kodu,ana_dil_adi',
+                'eslesme.eslesenUser:id,ad,kullanici_adi,profil_resmi,cevrim_ici_mi,dil,hesap_tipi',
+                'eslesme.eslesenUser.aiPersonaProfile:ai_user_id,ana_dil_kodu,ana_dil_adi',
                 'sonMesaj',
             ])
             ->withCount([

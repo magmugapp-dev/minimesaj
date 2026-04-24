@@ -38,6 +38,7 @@ class AiResponseGenerator
         AiResponsePlan $plan,
         Collection $memories,
         array $contradictionSignals = [],
+        ?array $surfacedContradiction = null,
         array $repairNotes = [],
     ): AiGenerationResult {
         $messages = $this->buildMessages(
@@ -49,6 +50,7 @@ class AiResponseGenerator
             $plan,
             $memories,
             $contradictionSignals,
+            $surfacedContradiction,
             $repairNotes,
         );
 
@@ -80,6 +82,7 @@ class AiResponseGenerator
         AiResponsePlan $plan,
         Collection $memories,
         array $contradictionSignals = [],
+        ?array $surfacedContradiction = null,
         array $repairNotes = [],
     ): array {
         $memoryLines = $memories
@@ -110,7 +113,7 @@ class AiResponseGenerator
             $config->sistem_komutu ?: 'Dogal ve insan gibi sohbet et.',
             'Senin kimligin: ' . $this->personaIdentity($context->aiUser, $persona),
             'Davranis matrisi: ' . $this->behaviorSummary($persona),
-            "Cevap dili: {$languageName} ({$languageCode}). Kullanici baska dilde yazsa bile onu anla ama kendi persona ana dilinde cevap ver. Bu dil tercihi genel dil kurallarindan onceliklidir.",
+            "Cevap dili: {$languageName} ({$languageCode}). Kullanici baska dilde yazsa bile onu anla ama final cevabi tamamen kendi persona ana dilinde ver. Bu dil tercihi zorunludur ve diger tum dil egilimlerinden once gelir.",
             'Kanal: ' . $context->kanal,
             'Persona model tercihi: ' . $personaModel . '.',
             'Ton: ' . ($persona->konusma_tonu ?: 'dogal') . ', stil: ' . ($persona->konusma_stili ?: 'samimi'),
@@ -126,7 +129,7 @@ class AiResponseGenerator
             $counterpartLines === [] ? null : "Karsi taraf bilgileri:\n- " . implode("\n- ", $counterpartLines),
             $requiredInstructions === [] ? null : "Zorunlu kurallar:\n- " . implode("\n- ", $requiredInstructions),
             $memoryLines === [] ? null : "Hatirladiklarin:\n" . implode("\n", $memoryLines),
-            $this->contradictionInstruction($contradictionSignals),
+            $this->contradictionInstruction($contradictionSignals, $surfacedContradiction),
             $repairNotes === [] ? null : "Duzenleme notlari:\n- " . implode("\n- ", $repairNotes),
             'Tek mesajlik yanit uret. JSON, maddeleme, aciklama veya sistem dili kullanma.',
             'Kendini yapay zeka, bot, assistant veya model olarak ifsa etme.',
@@ -185,7 +188,7 @@ class AiResponseGenerator
         return trim($name . '. ' . $summary . ($details === [] ? '' : "\n" . implode("\n", $details)));
     }
 
-    private function contradictionInstruction(array $signals): ?string
+    private function contradictionInstruction(array $signals, ?array $surfacedSignal = null): ?string
     {
         $surfaceSignals = collect($signals)
             ->filter(fn (array $signal) => (bool) ($signal['should_surface'] ?? false))
@@ -195,11 +198,35 @@ class AiResponseGenerator
             return null;
         }
 
+        $selected = $surfacedSignal ?: $surfaceSignals->sort(function (array $left, array $right): int {
+            return [
+                (int) ($right['priority'] ?? 0),
+                (int) ($right['importance'] ?? 0),
+                (float) ($right['confidence'] ?? 0),
+            ] <=> [
+                (int) ($left['priority'] ?? 0),
+                (int) ($left['importance'] ?? 0),
+                (float) ($left['confidence'] ?? 0),
+            ];
+        })->first();
+
         $lines = $surfaceSignals
-            ->map(fn (array $signal) => '- ' . ($signal['key'] ?? 'bilgi') . ': once "' . ($signal['previous_value'] ?? '-') . '", simdi "' . ($signal['new_value'] ?? '-') . '"')
+            ->map(fn (array $signal) => '- ' . ($signal['label'] ?? $signal['key'] ?? 'bilgi') . ': once "' . ($signal['previous_value'] ?? '-') . '", simdi "' . ($signal['new_value'] ?? '-') . '"')
             ->all();
 
-        return "Tutarlilik sinyali:\n" . implode("\n", $lines) . "\nBu farki tek mesaj icinde dogalca fark et. Sorgu memuru gibi davranma; insan gibi, yumusak bir merakla sor.";
+        if ($selected === null) {
+            return "Tutarlilik sinyali:\n" . implode("\n", $lines) . "\nBu farki tek mesaj icinde dogalca fark et. Sorgu memuru gibi davranma; insan gibi, yumusak bir merakla sor.";
+        }
+
+        $label = $selected['label'] ?? $selected['key'] ?? 'bilgi';
+        $previous = $selected['previous_value'] ?? '-';
+        $new = $selected['new_value'] ?? '-';
+
+        return "Tutarlilik sinyali:\n"
+            . implode("\n", $lines)
+            . "\nYuzeye cikarilacak ana fark: {$label}. Once \"{$previous}\" demisti, simdi \"{$new}\" diyor."
+            . "\nBu farki tek mesajin icinde mutlaka ama yumusakca fark et."
+            . "\nBunu insan gibi yap: kisa bir sasirma/hatirlama hissi ver, tek bir dogal soru sor, suclayici veya sorgu memuru gibi olma.";
     }
 
     private function resolveModelParameters(AiEngineConfig $config, AiPersonaProfile $persona): array

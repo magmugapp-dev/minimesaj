@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:magmug/app_core.dart';
 import 'package:magmug/features/chat/chat_local_store.dart';
 import 'package:magmug/features/chat/chat_realtime.dart';
+import 'package:magmug/features/chat/chat_translation_policy.dart';
 import 'package:magmug/features/match/match_flow.dart';
 import 'package:magmug/features/profile/widgets/profile_overview_widgets.dart'
     show openProfileMediaViewer;
@@ -839,12 +840,16 @@ class _MessageBubble extends StatelessWidget {
   final ChatPeer peer;
   final _ChatThemePalette theme;
   final VoidCallback? onReport;
+  final bool showTranslateAction;
+  final VoidCallback? onTranslate;
 
   const _MessageBubble({
     required this.message,
     required this.peer,
     required this.theme,
     this.onReport,
+    this.showTranslateAction = false,
+    this.onTranslate,
   });
 
   @override
@@ -868,6 +873,8 @@ class _MessageBubble extends StatelessWidget {
           text: message.text ?? '',
           translatedText: message.translatedText,
           translationLanguageName: message.translationLanguageName,
+          showTranslateAction: showTranslateAction,
+          onTranslate: onTranslate,
           theme: theme,
         );
     }
@@ -940,7 +947,6 @@ void _showMessageActions(
   BuildContext context, {
   required AppConversationMessage message,
   required ChatPeer peer,
-  VoidCallback? onTranslate,
 }) {
   showCupertinoModalPopup<void>(
     context: context,
@@ -954,17 +960,6 @@ void _showMessageActions(
         style: TextStyle(fontFamily: AppFont.family),
       ),
       actions: [
-        if (onTranslate != null)
-          CupertinoActionSheetAction(
-            onPressed: () {
-              Navigator.of(sheetContext).pop();
-              onTranslate();
-            },
-            child: Text(
-              message.translatedText == null ? 'Cevir' : 'Ceviriyi Yenile',
-              style: const TextStyle(fontFamily: AppFont.family),
-            ),
-          ),
         CupertinoActionSheetAction(
           isDestructiveAction: true,
           onPressed: () {
@@ -997,6 +992,8 @@ class _TextBubble extends StatelessWidget {
   final String text;
   final String? translatedText;
   final String? translationLanguageName;
+  final bool showTranslateAction;
+  final VoidCallback? onTranslate;
   final _ChatThemePalette theme;
 
   const _TextBubble({
@@ -1004,6 +1001,8 @@ class _TextBubble extends StatelessWidget {
     required this.text,
     this.translatedText,
     this.translationLanguageName,
+    this.showTranslateAction = false,
+    this.onTranslate,
     required this.theme,
   });
 
@@ -1037,6 +1036,38 @@ class _TextBubble extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: [
+          if (!isMe && showTranslateAction && onTranslate != null) ...[
+            Align(
+              alignment: Alignment.topRight,
+              child: GestureDetector(
+                onTap: onTranslate,
+                behavior: HitTestBehavior.opaque,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 4,
+                  ),
+                  decoration: BoxDecoration(
+                    color: textColor.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(999),
+                    border: Border.all(
+                      color: textColor.withValues(alpha: 0.18),
+                    ),
+                  ),
+                  child: Text(
+                    translation == null ? 'Cevir' : 'Yenile',
+                    style: TextStyle(
+                      fontFamily: AppFont.family,
+                      fontWeight: FontWeight.w700,
+                      fontSize: 10.5,
+                      color: textColor,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 8),
+          ],
           Text(
             text,
             style: TextStyle(
@@ -1329,6 +1360,7 @@ class _ChatInputBar extends StatelessWidget {
   final ChatInputVariant variant;
   final _ChatThemePalette theme;
   final TextEditingController? controller;
+  final FocusNode? focusNode;
   final VoidCallback? onSend;
   final VoidCallback? onLeadingTap;
   final VoidCallback? onMicTap;
@@ -1340,6 +1372,7 @@ class _ChatInputBar extends StatelessWidget {
     this.variant = ChatInputVariant.empty,
     required this.theme,
     this.controller,
+    this.focusNode,
     this.onSend,
     this.onLeadingTap,
     this.onMicTap,
@@ -1398,6 +1431,7 @@ class _ChatInputBar extends StatelessWidget {
                 child: hasComposer
                     ? CupertinoTextField(
                         controller: controller,
+                        focusNode: focusNode,
                         placeholder: 'Mesaj yaz...',
                         textInputAction: TextInputAction.send,
                         onSubmitted: (_) => onSend?.call(),
@@ -1519,19 +1553,29 @@ class ChatScreen extends ConsumerStatefulWidget {
 
 class _ChatScreenState extends ConsumerState<ChatScreen> {
   late final TextEditingController _messageController;
+  late final FocusNode _messageFocusNode;
   ChatRealtimeSubscription? _realtimeSubscription;
+  String? _authToken;
+  int? _currentUserId;
   bool _isSending = false;
   bool? _mutedOverride;
   bool? _blockedOverride;
   int? _themeIndex;
   String? _inputError;
   String? _peerStatusOverride;
+  Timer? _typingDebounce;
+  bool _typingActive = false;
+  bool _peerTyping = false;
   int? _realtimeConversationId;
   String? _realtimeToken;
 
   @override
   void initState() {
     super.initState();
+    final authState = ref.read(appAuthProvider).asData?.value;
+    _authToken = authState?.token;
+    _currentUserId = authState?.user?.id;
+    _messageFocusNode = FocusNode()..addListener(_handleInputFocusChange);
     _messageController = TextEditingController()
       ..addListener(_handleInputChange);
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -1547,6 +1591,16 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   void didUpdateWidget(covariant ChatScreen oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.conversation?.id != widget.conversation?.id) {
+      unawaited(
+        _setConversationTyping(
+          false,
+          force: true,
+          conversationOverride: oldWidget.conversation,
+        ),
+      );
+      _typingDebounce?.cancel();
+      _typingActive = false;
+      _peerTyping = false;
       _themeIndex = null;
       _peerStatusOverride = null;
       unawaited(_bindRealtimeSubscription(force: true));
@@ -1556,11 +1610,16 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
 
   @override
   void dispose() {
+    unawaited(_setConversationTyping(false, force: true));
+    _typingDebounce?.cancel();
     final realtimeSubscription = _realtimeSubscription;
     _realtimeSubscription = null;
     if (realtimeSubscription != null) {
       unawaited(realtimeSubscription.dispose());
     }
+    _messageFocusNode
+      ..removeListener(_handleInputFocusChange)
+      ..dispose();
     _messageController
       ..removeListener(_handleInputChange)
       ..dispose();
@@ -1568,12 +1627,90 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   }
 
   void _handleInputChange() {
+    final hasText = _messageController.text.trim().isNotEmpty;
+
     if (mounted) {
       setState(() {
-        if (_inputError != null && _messageController.text.trim().isNotEmpty) {
+        if (_inputError != null && hasText) {
           _inputError = null;
         }
       });
+    }
+
+    if (!hasText) {
+      unawaited(_setConversationTyping(false, force: true));
+      return;
+    }
+
+    if (_messageFocusNode.hasFocus) {
+      if (!_typingActive) {
+        unawaited(_setConversationTyping(true));
+      }
+      _scheduleTypingStop();
+    }
+  }
+
+  void _handleInputFocusChange() {
+    if (!_messageFocusNode.hasFocus) {
+      unawaited(_setConversationTyping(false, force: true));
+      return;
+    }
+
+    if (_messageController.text.trim().isNotEmpty) {
+      if (!_typingActive) {
+        unawaited(_setConversationTyping(true));
+      }
+      _scheduleTypingStop();
+    }
+  }
+
+  void _scheduleTypingStop() {
+    _typingDebounce?.cancel();
+    _typingDebounce = Timer(const Duration(seconds: 2), () {
+      unawaited(_setConversationTyping(false, force: true));
+    });
+  }
+
+  Future<void> _setConversationTyping(
+    bool typing, {
+    bool force = false,
+    AppConversationPreview? conversationOverride,
+  }) async {
+    final conversation = conversationOverride ?? widget.conversation;
+    final token = _authToken ?? _realtimeToken;
+
+    if (!typing) {
+      _typingDebounce?.cancel();
+      _typingActive = false;
+    }
+
+    if (conversation == null || token == null || token.trim().isEmpty) {
+      return;
+    }
+
+    if (!force &&
+        conversationOverride == null &&
+        _typingActive == typing) {
+      return;
+    }
+
+    if (conversationOverride == null) {
+      _typingActive = typing;
+    }
+
+    final api = AppAuthApi();
+    try {
+      await api.setConversationTyping(
+        token,
+        conversationId: conversation.id,
+        typing: typing,
+      );
+    } catch (_) {
+      if (conversationOverride == null && !typing) {
+        _typingActive = false;
+      }
+    } finally {
+      api.close();
     }
   }
 
@@ -1676,6 +1813,27 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
       return;
     }
 
+    final currentUserId = _currentUserId;
+
+    if (event.type == ChatRealtimeEventType.conversationTyping) {
+      final actorId = _payloadInt(event.payload['user_id']);
+      if (actorId == null || actorId == currentUserId) {
+        return;
+      }
+
+      final typing = _payloadBool(event.payload['typing']);
+      final statusText = event.payload['status_text']?.toString();
+      setState(() {
+        _peerTyping = typing;
+        _peerStatusOverride = typing
+            ? ((statusText == null || statusText.trim().isEmpty)
+                  ? 'Yaziyor...'
+                  : statusText)
+            : null;
+      });
+      return;
+    }
+
     if (event.type == ChatRealtimeEventType.aiStatus) {
       final nextStatusText = event.payload['status_text']?.toString();
       setState(() {
@@ -1684,6 +1842,14 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
             ? null
             : nextStatusText;
       });
+    } else if (event.type == ChatRealtimeEventType.messageSent) {
+      final senderId = _payloadInt(event.payload['gonderen_user_id']);
+      if (senderId != null && senderId != currentUserId) {
+        setState(() {
+          _peerTyping = false;
+          _peerStatusOverride = null;
+        });
+      }
     }
 
     ref.invalidate(conversationMessagesProvider(event.conversationId));
@@ -1709,6 +1875,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
 
     final api = AppAuthApi();
     try {
+      unawaited(_setConversationTyping(false, force: true));
       final sentMessage = await api.sendConversationMessage(
         authState.token,
         conversationId: conversation.id,
@@ -1768,6 +1935,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   @override
   Widget build(BuildContext context) {
     final hasConversation = widget.conversation != null;
+    final authState = ref.watch(appAuthProvider).asData?.value;
+    _authToken = authState?.token;
+    _currentUserId = authState?.user?.id;
     final peerProfile = hasConversation
         ? ref
               .watch(chatPeerProfileProvider(widget.conversation!.peerId))
@@ -1948,6 +2118,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                       : _ChatMessagesBody(
                           peer: _peer,
                           conversation: widget.conversation,
+                          peerTyping: _peerTyping,
                           theme: theme,
                         ),
                 ),
@@ -1960,6 +2131,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                 controller: widget.conversation == null
                     ? null
                     : _messageController,
+                focusNode: widget.conversation == null ? null : _messageFocusNode,
                 onSend: _sendMessage,
                 onLeadingTap: openAttachmentMenu,
                 onMicTap: openRecorder,
@@ -1978,6 +2150,24 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
       ),
     );
   }
+}
+
+int? _payloadInt(Object? value) {
+  return switch (value) {
+    final int intValue => intValue,
+    final num numValue => numValue.toInt(),
+    final String stringValue => int.tryParse(stringValue),
+    _ => null,
+  };
+}
+
+bool _payloadBool(Object? value) {
+  return switch (value) {
+    final bool boolValue => boolValue,
+    final num numValue => numValue != 0,
+    final String stringValue => stringValue.trim().toLowerCase() == 'true' || stringValue.trim() == '1',
+    _ => false,
+  };
 }
 
 class _ChatEmptyBody extends StatelessWidget {
@@ -2030,11 +2220,13 @@ class _ChatEmptyBody extends StatelessWidget {
 class _ChatMessagesBody extends StatelessWidget {
   final ChatPeer peer;
   final AppConversationPreview? conversation;
+  final bool peerTyping;
   final _ChatThemePalette theme;
 
   const _ChatMessagesBody({
     required this.peer,
     required this.theme,
+    this.peerTyping = false,
     this.conversation,
   });
 
@@ -2047,6 +2239,7 @@ class _ChatMessagesBody extends StatelessWidget {
     return _LiveChatMessagesBody(
       conversation: conversation!,
       peer: peer,
+      peerTyping: peerTyping,
       theme: theme,
     );
   }
@@ -2055,11 +2248,13 @@ class _ChatMessagesBody extends StatelessWidget {
 class _LiveChatMessagesBody extends ConsumerStatefulWidget {
   final AppConversationPreview conversation;
   final ChatPeer peer;
+  final bool peerTyping;
   final _ChatThemePalette theme;
 
   const _LiveChatMessagesBody({
     required this.conversation,
     required this.peer,
+    required this.peerTyping,
     required this.theme,
   });
 
@@ -2071,6 +2266,8 @@ class _LiveChatMessagesBody extends ConsumerStatefulWidget {
 class _LiveChatMessagesBodyState extends ConsumerState<_LiveChatMessagesBody> {
   late final ScrollController _scrollController;
   List<AppConversationMessage> _messages = const <AppConversationMessage>[];
+  final Map<int, AppConversationMessage> _sessionTranslatedMessages =
+      <int, AppConversationMessage>{};
   bool _initialLoading = true;
   bool _loadingOlder = false;
   bool _refreshingLatest = false;
@@ -2098,6 +2295,7 @@ class _LiveChatMessagesBodyState extends ConsumerState<_LiveChatMessagesBody> {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.conversation.id != widget.conversation.id) {
       _messages = const <AppConversationMessage>[];
+      _sessionTranslatedMessages.clear();
       _initialLoading = true;
       _loadingOlder = false;
       _refreshingLatest = false;
@@ -2392,15 +2590,12 @@ class _LiveChatMessagesBodyState extends ConsumerState<_LiveChatMessagesBody> {
         token,
         message: message,
       );
-      await ChatLocalStore.instance.upsertConversationMessage(translated);
       if (!mounted || widget.conversation.id != message.conversationId) {
         return;
       }
 
       setState(() {
-        _messages = _messages
-            .map((item) => item.id == translated.id ? translated : item)
-            .toList(growable: false);
+        _sessionTranslatedMessages[translated.id] = translated;
       });
     } catch (error) {
       if (!mounted) {
@@ -2439,6 +2634,8 @@ class _LiveChatMessagesBodyState extends ConsumerState<_LiveChatMessagesBody> {
   @override
   Widget build(BuildContext context) {
     final currentUserId = ref.watch(appAuthProvider).asData?.value?.user?.id;
+    final viewerLanguageCode =
+        ref.watch(appAuthProvider).asData?.value?.user?.languageCode;
     if (currentUserId == null) {
       return const Center(child: CupertinoActivityIndicator(radius: 14));
     }
@@ -2475,8 +2672,11 @@ class _LiveChatMessagesBodyState extends ConsumerState<_LiveChatMessagesBody> {
       );
     }
 
+    final showTypingIndicator =
+        widget.peerTyping || _aiStatus == 'typing' || _aiStatus == 'queued';
+
     if (_messages.isEmpty) {
-      if (_aiStatus == 'typing' || _aiStatus == 'queued') {
+      if (showTypingIndicator) {
         return ListView(
           controller: _scrollController,
           physics: const BouncingScrollPhysics(),
@@ -2494,11 +2694,17 @@ class _LiveChatMessagesBodyState extends ConsumerState<_LiveChatMessagesBody> {
       return const _ChatEmptyBody();
     }
 
-    final uiMessages = _messages
+    final displayMessages = _messages
+        .map(
+          (message) => _sessionTranslatedMessages[message.id] ?? message,
+        )
+        .toList(growable: false);
+
+    final uiMessages = displayMessages
         .map((message) => _chatMessageFromApi(message, currentUserId))
         .toList(growable: true);
 
-    if (_aiStatus == 'typing' || _aiStatus == 'queued') {
+    if (showTypingIndicator) {
       uiMessages.add(const ChatMessage.typing());
     }
     final extraTopItemCount = _loadingOlder ? 1 : 0;
@@ -2518,7 +2724,7 @@ class _LiveChatMessagesBodyState extends ConsumerState<_LiveChatMessagesBody> {
 
         final messageIndex = index - extraTopItemCount;
         final uiMessage = uiMessages[messageIndex];
-        if (messageIndex >= _messages.length) {
+        if (messageIndex >= displayMessages.length) {
           return _MessageBubble(
             message: uiMessage,
             peer: widget.peer,
@@ -2527,25 +2733,29 @@ class _LiveChatMessagesBodyState extends ConsumerState<_LiveChatMessagesBody> {
         }
 
         final apiMessage = _messages[messageIndex];
+        final displayMessage = displayMessages[messageIndex];
         final canReportMessage =
             !apiMessage.isFromUser(currentUserId) && uiMessage.id != null;
-        final canTranslateMessage =
-            canReportMessage &&
-            apiMessage.type == 'metin' &&
-            (apiMessage.text?.trim().isNotEmpty ?? false);
+        final canTranslateMessage = shouldShowInlineTranslateAction(
+          message: apiMessage,
+          currentUserId: currentUserId,
+          viewerLanguageCode: viewerLanguageCode,
+          peerLanguageCode: widget.peer.languageCode,
+        );
 
         return _MessageBubble(
           message: uiMessage,
           peer: widget.peer,
           theme: widget.theme,
+          showTranslateAction: canTranslateMessage,
+          onTranslate: canTranslateMessage
+              ? () => _translateMessage(apiMessage)
+              : null,
           onReport: canReportMessage
               ? () => _showMessageActions(
                   context,
-                  message: apiMessage,
+                  message: displayMessage,
                   peer: widget.peer,
-                  onTranslate: canTranslateMessage
-                      ? () => _translateMessage(apiMessage)
-                      : null,
                 )
               : null,
         );

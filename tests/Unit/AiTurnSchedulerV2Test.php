@@ -54,7 +54,7 @@ it('pushes the reply out of the configured sleep window', function () {
     $plannedLocal = $scheduled['planned_at']->copy()->setTimezone('Europe/Istanbul');
 
     expect($plannedLocal->format('H:i'))->toBe('07:00')
-        ->and($scheduled['status_text'])->toBe('Dusunuyor...');
+        ->and($scheduled['status_text'])->toBe('Yaziyor...');
 
     Carbon::setTestNow();
 });

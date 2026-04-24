@@ -32,11 +32,22 @@ class AiStudioController extends Controller
         $this->personaService ??= app(AiPersonaService::class);
     }
 
-    public function index(): View
+    public function index(Request $request): View
     {
         $config = $this->engineConfigService->activeConfig();
+        $search = trim((string) $request->string('q'));
+
         $personalar = User::query()
             ->where('hesap_tipi', 'ai')
+            ->when($search !== '', function ($query) use ($search) {
+                $query->where(function ($inner) use ($search) {
+                    $inner
+                        ->where('ad', 'like', '%' . $search . '%')
+                        ->orWhere('soyad', 'like', '%' . $search . '%')
+                        ->orWhere('kullanici_adi', 'like', '%' . $search . '%')
+                        ->orWhere('biyografi', 'like', '%' . $search . '%');
+                });
+            })
             ->with(['aiPersonaProfile.engineConfig'])
             ->orderBy('ad')
             ->get()
@@ -66,6 +77,7 @@ class AiStudioController extends Controller
             'blockedTopicsText' => $this->rulesToText($config, 'blocked_topic'),
             'requiredRulesText' => $this->rulesToText($config, 'required_rule'),
             'sonTraceler' => $sonTraceler,
+            'search' => $search,
         ]));
     }
 
@@ -300,8 +312,8 @@ class AiStudioController extends Controller
             'persona_ulke' => ['nullable', Rule::in($countryOptions)],
             'persona_bolge' => 'nullable|string|max:120',
             'persona_sehir' => 'nullable|string|max:120',
-            'persona_mahalle' => 'nullable|string|max:120',
-            'kulturel_koken' => 'nullable|string|max:160',
+            'persona_mahalle' => ['nullable', Rule::in($dropdowns['living_environments'])],
+            'kulturel_koken' => ['nullable', Rule::in($dropdowns['cultural_origins'])],
             'uyruk' => ['nullable', Rule::in($countryOptions)],
             'yasam_tarzi' => ['nullable', Rule::in($dropdowns['lifestyles'])],
             'meslek' => ['nullable', Rule::in($dropdowns['professions'])],

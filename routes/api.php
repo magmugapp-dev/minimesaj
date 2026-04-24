@@ -69,6 +69,7 @@ Route::middleware(['auth:sanctum', 'throttle:api'])->group(function () {
         Route::get('sohbetler/{sohbet}/mesajlar', [\App\Http\Controllers\Dating\MesajController::class, 'listele']);
         Route::post('sohbetler/{sohbet}/mesajlar', [\App\Http\Controllers\Dating\MesajController::class, 'gonder']);
         Route::post('sohbetler/{sohbet}/mesajlar/{mesaj}/ceviri', [\App\Http\Controllers\Dating\MesajController::class, 'cevir']);
+        Route::patch('sohbetler/{sohbet}/typing', [\App\Http\Controllers\Dating\MesajController::class, 'typing']);
         Route::patch('sohbetler/{sohbet}/oku', [\App\Http\Controllers\Dating\MesajController::class, 'okuduIsaretle']);
         Route::post('medya-yukle', [\App\Http\Controllers\Dating\MedyaController::class, 'yukle']);
         Route::post('sessize-al/{kullanici}', [\App\Http\Controllers\Dating\SessizeAlmaController::class, 'sessizeAl']);

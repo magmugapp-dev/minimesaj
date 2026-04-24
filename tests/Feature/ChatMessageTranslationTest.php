@@ -66,6 +66,10 @@ it('translates only incoming text messages and caches the result', function () {
         ->assertJsonPath('ceviri.metin', 'Merhaba, nasılsın?');
 
     expect($fake->calls)->toBe(1);
+
+    $this->getJson("/api/dating/sohbetler/{$conversation->id}/mesajlar")
+        ->assertOk()
+        ->assertJsonPath('data.0.ceviri', null);
 });
 
 it('does not translate outgoing messages', function () {

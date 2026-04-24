@@ -32,8 +32,8 @@ class HomeScreen extends ConsumerWidget {
         bottom: false,
         child: LayoutBuilder(
           builder: (context, constraints) {
-            final compact = constraints.maxHeight < 700;
-            final bannerHeight = compact ? 64.0 : 72.0;
+            final bannerInset =
+                MediaQuery.paddingOf(context).bottom + 8;
 
             return Stack(
               children: [
@@ -43,14 +43,11 @@ class HomeScreen extends ConsumerWidget {
                     Expanded(
                       child: Padding(
                         padding: const EdgeInsets.fromLTRB(16, 4, 16, 0),
-                        child: _HomeContent(mode: mode),
+                        child: _HomeContent(
+                          mode: mode,
+                          bottomInset: bannerInset,
+                        ),
                       ),
-                    ),
-                    SizedBox(
-                      height:
-                          MediaQuery.paddingOf(context).bottom +
-                          bannerHeight +
-                          16,
                     ),
                   ],
                 ),
@@ -79,8 +76,12 @@ class HomeScreen extends ConsumerWidget {
 
 class _HomeContent extends ConsumerWidget {
   final HomeMode mode;
+  final double bottomInset;
 
-  const _HomeContent({required this.mode});
+  const _HomeContent({
+    required this.mode,
+    this.bottomInset = 0,
+  });
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -108,15 +109,18 @@ class _HomeContent extends ConsumerWidget {
           const SizedBox(height: 12),
           Expanded(
             child: !showList
-                ? const HomeEmptyChatState()
+                ? HomeEmptyChatState(bottomInset: bottomInset)
                 : chatsAsync.when(
                     data: (chats) => chats.isEmpty
-                        ? const HomeEmptyChatState()
-                        : HomeChatList(chats: chats),
+                        ? HomeEmptyChatState(bottomInset: bottomInset)
+                        : HomeChatList(
+                            chats: chats,
+                            bottomInset: bottomInset,
+                          ),
                     loading: () => const Center(
                       child: CupertinoActivityIndicator(radius: 14),
                     ),
-                    error: (_, _) => const HomeEmptyChatState(),
+                    error: (_, _) => HomeEmptyChatState(bottomInset: bottomInset),
                   ),
           ),
         ],

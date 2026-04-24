@@ -815,6 +815,30 @@ class AppAuthApi {
     }
   }
 
+  Future<void> setConversationTyping(
+    String token, {
+    required int conversationId,
+    required bool typing,
+  }) async {
+    final response = await _client.patch(
+      AppApi.uri(AppApi.datingChatTypingPath(conversationId)),
+      headers: {
+        'Accept': 'application/json',
+        'Authorization': 'Bearer $token',
+        'Content-Type': 'application/json',
+      },
+      body: jsonEncode({'typing': typing}),
+    );
+
+    if (response.statusCode == 401 || response.statusCode == 403) {
+      throw const UnauthorizedApiException('Oturum suresi doldu.');
+    }
+    if (response.statusCode >= 400) {
+      final payload = _decodeJsonMap(response);
+      throw ApiException(_extractErrorMessage(payload));
+    }
+  }
+
   Future<List<AppBlockedUser>> fetchBlockedUsers(String token) async {
     final response = await _client.get(
       AppApi.uri(AppApi.blockedUsersPath),
@@ -1454,7 +1478,6 @@ class AppAuthApi {
   ) {
     final sender = _asMap(json['gonderen']);
     final durationInSeconds = (json['dosya_suresi'] as num?)?.toInt();
-    final translation = _asMap(json['ceviri']);
     return AppConversationMessage(
       id: (json['id'] as num?)?.toInt() ?? 0,
       conversationId: (json['sohbet_id'] as num?)?.toInt() ?? 0,
@@ -1462,7 +1485,7 @@ class AppAuthApi {
       senderName: sender?['ad']?.toString() ?? 'Kullanici',
       senderProfileImageUrl: sender?['profil_resmi']?.toString(),
       type: json['mesaj_tipi']?.toString() ?? 'metin',
-      text: _nullableString(json['mesaj_metni']?.toString()),
+      text: _sanitizeChatText(json['mesaj_metni']?.toString()),
       fileUrl: _nullableString(json['dosya_yolu']?.toString()),
       fileDuration: durationInSeconds == null
           ? null
@@ -1471,13 +1494,9 @@ class AppAuthApi {
       isAiGenerated: json['ai_tarafindan_uretildi_mi'] == true,
       languageCode: _nullableString(json['dil_kodu']?.toString()),
       languageName: _nullableString(json['dil_adi']?.toString()),
-      translatedText: _nullableString(translation?['metin']?.toString()),
-      translationTargetLanguageCode: _nullableString(
-        translation?['hedef_dil_kodu']?.toString(),
-      ),
-      translationTargetLanguageName: _nullableString(
-        translation?['hedef_dil_adi']?.toString(),
-      ),
+      translatedText: null,
+      translationTargetLanguageCode: null,
+      translationTargetLanguageName: null,
       createdAt: DateTime.tryParse(json['created_at']?.toString() ?? ''),
     );
   }
@@ -1541,7 +1560,7 @@ class AppAuthApi {
     }
 
     final type = message['mesaj_tipi']?.toString();
-    final text = message['mesaj_metni']?.toString();
+    final text = _sanitizeChatText(message['mesaj_metni']?.toString());
     if (text != null && text.trim().isNotEmpty) {
       return text.trim();
     }
@@ -1561,6 +1580,98 @@ class AppAuthApi {
       return null;
     }
     return normalized;
+  }
+
+  static String? _sanitizeChatText(String? value) {
+    final normalized = _nullableString(value);
+    if (normalized == null) {
+      return null;
+    }
+
+    final fenceMatch = RegExp(
+      r'^```(?:json)?\s*(.*?)\s*```$',
+      caseSensitive: false,
+      dotAll: true,
+    ).firstMatch(normalized);
+    final candidate = _nullableString(fenceMatch?.group(1)) ?? normalized;
+    final extracted = _extractEnvelopeText(candidate);
+
+    return _nullableString(extracted ?? candidate);
+  }
+
+  static String? _extractEnvelopeText(String text) {
+    final normalized = _nullableString(text);
+    if (normalized == null) {
+      return null;
+    }
+    if (!normalized.startsWith('{') && !normalized.startsWith('[')) {
+      return normalized;
+    }
+
+    try {
+      final decoded = jsonDecode(normalized);
+      final extracted = _extractEnvelopeValue(decoded);
+      if (extracted == null) {
+        return normalized;
+      }
+
+      return _sanitizeChatText(extracted);
+    } catch (_) {
+      return normalized;
+    }
+  }
+
+  static String? _extractEnvelopeValue(Object? value) {
+    if (value is String) {
+      return value;
+    }
+
+    if (value is Map) {
+      for (final key in const [
+        'reply',
+        'cevap',
+        'text',
+        'message',
+        'content',
+        'mesaj',
+      ]) {
+        final candidate = _extractEnvelopeValue(value[key]);
+        if (candidate != null && candidate.trim().isNotEmpty) {
+          return candidate;
+        }
+      }
+
+      final parts = value['parts'];
+      if (parts is List) {
+        for (final part in parts) {
+          final candidate = _extractEnvelopeValue(part);
+          if (candidate != null && candidate.trim().isNotEmpty) {
+            return candidate;
+          }
+        }
+      }
+
+      final candidates = value['candidates'];
+      if (candidates is List) {
+        for (final item in candidates) {
+          final candidate = _extractEnvelopeValue(item);
+          if (candidate != null && candidate.trim().isNotEmpty) {
+            return candidate;
+          }
+        }
+      }
+    }
+
+    if (value is List) {
+      for (final item in value) {
+        final candidate = _extractEnvelopeValue(item);
+        if (candidate != null && candidate.trim().isNotEmpty) {
+          return candidate;
+        }
+      }
+    }
+
+    return null;
   }
 }
 

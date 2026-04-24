@@ -44,6 +44,9 @@ class AppApi {
   static String datingChatReadPath(int conversationId) =>
       '/api/dating/sohbetler/$conversationId/oku';
 
+  static String datingChatTypingPath(int conversationId) =>
+      '/api/dating/sohbetler/$conversationId/typing';
+
   static String blockUserPath(int userId) => '/api/dating/engelle/$userId';
 
   static String datingPeerProfilePath(int userId) =>

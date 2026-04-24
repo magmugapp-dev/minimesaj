@@ -171,7 +171,7 @@ class AiMemoryService
         $key = $this->normalizer->key($candidate['key'] ?? null);
         $content = trim((string) ($candidate['content'] ?? ''));
         $value = $this->normalizer->displayValue($candidate['value'] ?? null);
-        $normalizedValue = $this->normalizer->value($candidate['normalized_value'] ?? $value);
+        $normalizedValue = $this->normalizer->valueForKey($key, $candidate['normalized_value'] ?? $value);
 
         if (!$key || ($content === '' && !$value)) {
             return null;

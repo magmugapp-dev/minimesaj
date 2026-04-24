@@ -5,6 +5,7 @@ namespace App\Services\YapayZeka\V2;
 use App\Models\Mesaj;
 use App\Models\User;
 use App\Services\YapayZeka\GeminiSaglayici;
+use App\Support\AiMessageTextSanitizer;
 use App\Support\Language;
 
 class AiTranslationService
@@ -29,7 +30,9 @@ class AiTranslationService
             return $translations[$targetCode];
         }
 
-        $sourceText = trim((string) $message->mesaj_metni);
+        $sourceText = trim((string) ($message->ai_tarafindan_uretildi_mi
+            ? AiMessageTextSanitizer::sanitize($message->mesaj_metni)
+            : $message->mesaj_metni));
         $sourceCode = Language::normalizeCode($message->dil_kodu);
         $sourceName = $message->dil_adi ?: Language::name($sourceCode);
 

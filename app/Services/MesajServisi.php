@@ -18,6 +18,7 @@ use App\Notifications\YeniMesaj;
 use App\Services\YapayZeka\AiKullaniciHazirlamaServisi;
 use App\Services\YapayZeka\AiMesajZamanlamaServisi;
 use App\Services\YapayZeka\V2\AiPersonaService;
+use App\Support\AiMessageTextSanitizer;
 use App\Support\Language;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
@@ -151,12 +152,14 @@ class MesajServisi
     {
         return DB::transaction(function () use ($sohbet, $aiUser, $veri) {
             $language = $this->messageLanguageFor($aiUser);
+            $messageText = $veri['mesaj_metni'] ?? null;
+            $messageText = AiMessageTextSanitizer::sanitize($messageText);
 
             $mesaj = Mesaj::create([
                 'sohbet_id' => $sohbet->id,
                 'gonderen_user_id' => $aiUser->id,
                 'mesaj_tipi' => $veri['mesaj_tipi'] ?? 'metin',
-                'mesaj_metni' => $veri['mesaj_metni'] ?? null,
+                'mesaj_metni' => $messageText,
                 'dil_kodu' => $veri['dil_kodu'] ?? $language['code'],
                 'dil_adi' => $veri['dil_adi'] ?? $language['name'],
                 'dosya_yolu' => $veri['dosya_yolu'] ?? null,

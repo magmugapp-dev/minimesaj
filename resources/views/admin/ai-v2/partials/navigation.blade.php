@@ -3,12 +3,12 @@
         [
             'route' => 'admin.ai.index',
             'matches' => ['admin.ai.index', 'admin.ai.ekle', 'admin.ai.kaydet', 'admin.ai.goster', 'admin.ai.duzenle', 'admin.ai.guncelle'],
-            'title' => 'Studio',
+            'title' => 'Ana Sayfa',
         ],
         [
             'route' => 'admin.ai.states',
             'matches' => ['admin.ai.states'],
-            'title' => 'Sohbet Durumlari',
+            'title' => 'Canli Durumlar',
         ],
         [
             'route' => 'admin.ai.memories',
@@ -18,23 +18,17 @@
         [
             'route' => 'admin.ai.traces',
             'matches' => ['admin.ai.traces'],
-            'title' => 'AI Trace',
+            'title' => 'Kayitlar',
         ],
     ];
 @endphp
 
-<div class="ai-studio-nav">
+<div class="flex flex-wrap gap-2">
     @foreach ($links as $link)
         @php $active = request()->routeIs(...$link['matches']); @endphp
         <a href="{{ route($link['route']) }}"
-            class="ai-studio-link {{ $active ? 'ai-studio-link--active' : '' }}">
-            <div class="flex items-center justify-between gap-4">
-                <div class="ai-studio-link__title">{{ $link['title'] }}</div>
-                <svg class="h-5 w-5 shrink-0 {{ $active ? 'text-teal-700' : 'text-slate-400' }}" fill="none"
-                    viewBox="0 0 24 24" stroke-width="1.8" stroke="currentColor">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" />
-                </svg>
-            </div>
+            class="inline-flex items-center rounded-lg border px-3 py-2 text-sm font-medium transition-colors {{ $active ? 'border-indigo-200 bg-indigo-50 text-indigo-700' : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50' }}">
+            {{ $link['title'] }}
         </a>
     @endforeach
 </div>

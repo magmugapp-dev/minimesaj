@@ -15,7 +15,12 @@ class HomeAdBanner extends StatelessWidget {
 }
 
 class HomeEmptyChatState extends StatelessWidget {
-  const HomeEmptyChatState({super.key});
+  final double bottomInset;
+
+  const HomeEmptyChatState({
+    super.key,
+    this.bottomInset = 0,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -26,7 +31,7 @@ class HomeEmptyChatState extends StatelessWidget {
 
         return Center(
           child: SingleChildScrollView(
-            padding: const EdgeInsets.symmetric(vertical: 16),
+            padding: EdgeInsets.fromLTRB(0, 16, 0, 16 + bottomInset),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
@@ -71,14 +76,19 @@ class HomeEmptyChatState extends StatelessWidget {
 
 class HomeChatList extends StatelessWidget {
   final List<ChatPreview> chats;
+  final double bottomInset;
 
-  const HomeChatList({super.key, required this.chats});
+  const HomeChatList({
+    super.key,
+    required this.chats,
+    this.bottomInset = 0,
+  });
 
   @override
   Widget build(BuildContext context) {
     return ListView.separated(
       physics: const BouncingScrollPhysics(),
-      padding: const EdgeInsets.symmetric(vertical: 6),
+      padding: EdgeInsets.fromLTRB(0, 6, 0, 6 + bottomInset),
       itemCount: chats.length,
       separatorBuilder: (context, index) => Container(
         margin: const EdgeInsets.only(left: 68),

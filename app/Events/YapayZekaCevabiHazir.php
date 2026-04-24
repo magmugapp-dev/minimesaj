@@ -3,6 +3,7 @@
 namespace App\Events;
 
 use App\Models\Mesaj;
+use App\Support\AiMessageTextSanitizer;
 use Illuminate\Broadcasting\InteractsWithSockets;
 use Illuminate\Broadcasting\PrivateChannel;
 use Illuminate\Contracts\Broadcasting\ShouldBroadcastNow;
@@ -29,7 +30,7 @@ class YapayZekaCevabiHazir implements ShouldBroadcastNow
             'sohbet_id' => $this->mesaj->sohbet_id,
             'gonderen_user_id' => $this->mesaj->gonderen_user_id,
             'mesaj_tipi' => $this->mesaj->mesaj_tipi,
-            'mesaj_metni' => $this->mesaj->mesaj_metni,
+            'mesaj_metni' => AiMessageTextSanitizer::sanitize($this->mesaj->mesaj_metni),
             'dil_kodu' => $this->mesaj->dil_kodu,
             'dil_adi' => $this->mesaj->dil_adi,
             'created_at' => $this->mesaj->created_at->toISOString(),

@@ -9,6 +9,7 @@ use App\Http\Resources\MesajResource;
 use App\Models\Mesaj;
 use App\Models\Sohbet;
 use App\Services\MesajServisi;
+use App\Services\SohbetTypingService;
 use App\Services\YapayZeka\V2\AiTranslationService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -19,6 +20,7 @@ class MesajController extends Controller
     public function __construct(
         private MesajServisi $mesajServisi,
         private AiTranslationService $translationService,
+        private SohbetTypingService $typingService,
     ) {}
 
     public function listele(Request $request, Sohbet $sohbet)
@@ -33,7 +35,7 @@ class MesajController extends Controller
         return MesajResource::collection($mesajlar)->additional([
             'ai' => [
                 'status' => $sohbet->ai_durumu,
-                'status_text' => $sohbet->ai_durum_metni,
+                'status_text' => $this->normalizeAiStatusText($sohbet->ai_durum_metni, $sohbet->ai_durumu),
                 'planned_at' => $sohbet->ai_planlanan_cevap_at?->toISOString(),
             ],
         ]);
@@ -54,6 +56,8 @@ class MesajController extends Controller
                 'message' => $exception->getMessage(),
             ], 422);
         }
+
+        $this->typingService->setTyping($sohbet, $request->user(), false);
 
         return (new MesajResource($mesaj->load('gonderen:id,ad,kullanici_adi,profil_resmi,dil')))
             ->response()
@@ -86,6 +90,23 @@ class MesajController extends Controller
         ]);
     }
 
+    public function typing(Request $request, Sohbet $sohbet): JsonResponse
+    {
+        $this->yetkilendir($request, $sohbet);
+
+        $validated = $request->validate([
+            'typing' => ['required', 'boolean'],
+        ]);
+
+        $typing = (bool) $validated['typing'];
+        $this->typingService->setTyping($sohbet, $request->user(), $typing);
+
+        return response()->json([
+            'ok' => true,
+            'typing' => $typing,
+        ]);
+    }
+
     public function okuduIsaretle(Request $request, Sohbet $sohbet): JsonResponse
     {
         $this->yetkilendir($request, $sohbet);
@@ -98,5 +119,20 @@ class MesajController extends Controller
     private function yetkilendir(Request $request, Sohbet $sohbet): void
     {
         Gate::authorize('erisebilir', $sohbet);
+    }
+
+    private function normalizeAiStatusText(?string $statusText, ?string $status): ?string
+    {
+        $normalized = trim((string) $statusText);
+
+        if ($normalized === 'Dusunuyor...') {
+            return 'Yaziyor...';
+        }
+
+        if ($normalized !== '') {
+            return $normalized;
+        }
+
+        return in_array($status, ['queued', 'typing'], true) ? 'Yaziyor...' : null;
     }
 }

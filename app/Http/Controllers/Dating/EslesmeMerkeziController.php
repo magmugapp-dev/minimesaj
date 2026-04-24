@@ -101,7 +101,12 @@ class EslesmeMerkeziController extends Controller
             'mesaj' => 'Sohbet hazir.',
             'eslesme_id' => $sonuc['eslesme_id'],
             'sohbet_id' => $sonuc['sohbet_id'],
-            'sohbet' => SohbetResource::make($sonuc['sohbet'])->resolve($request),
+            'sohbet' => SohbetResource::make(
+                $sonuc['sohbet']->loadMissing([
+                    'eslesme.user.aiPersonaProfile:ai_user_id,ana_dil_kodu,ana_dil_adi',
+                    'eslesme.eslesenUser.aiPersonaProfile:ai_user_id,ana_dil_kodu,ana_dil_adi',
+                ])
+            )->resolve($request),
         ]);
     }
 }
