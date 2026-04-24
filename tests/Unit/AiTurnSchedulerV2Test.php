@@ -54,7 +54,22 @@ it('pushes the reply out of the configured sleep window', function () {
     $plannedLocal = $scheduled['planned_at']->copy()->setTimezone('Europe/Istanbul');
 
     expect($plannedLocal->format('H:i'))->toBe('07:00')
-        ->and($scheduled['status_text'])->toBe('Yaziyor...');
+        ->and($scheduled['status_text'])->toBeNull();
 
     Carbon::setTestNow();
+});
+
+it('scales simulated typing delay with reply length', function () {
+    $scheduler = app(AiTurnScheduler::class);
+
+    $shortDelay = $scheduler->typingDelaySeconds('Selam!');
+    $longDelay = $scheduler->typingDelaySeconds(
+        'Selam, nasilsin? Bugun biraz yogundum ama senin mesajini gorunce '
+        . 'cevap vermek istedim. Aksam bir kahve icmek guzel olabilir.',
+    );
+
+    expect($shortDelay)->toBeGreaterThanOrEqual(2)
+        ->toBeLessThanOrEqual(12)
+        ->and($longDelay)->toBeGreaterThanOrEqual($shortDelay)
+        ->toBeLessThanOrEqual(12);
 });

@@ -43,6 +43,7 @@ class AiTurnOrchestrator
         AiTurnContext $context,
         ?AiConversationState $state = null,
         ?CarbonInterface $plannedAt = null,
+        bool $persistReply = true,
     ): array {
         $config = $this->engineConfigService->activeConfig();
         $persona = $this->personaService->ensureForUser($context->aiUser);
@@ -162,13 +163,7 @@ class AiTurnOrchestrator
                 $evaluation = ['accepted' => true, 'reasons' => ['fallback_reply']];
             }
 
-            $persisted = $adapter->persistReply($context, $context->aiUser, $generation->replyText);
-            $adapter->markIncomingHandled($context);
-
-            $this->stateEngine->markReplyPersisted($context, $state, $plan, $generation->replyText);
-
-            $turnLog->update([
-                'durum' => 'completed',
+            $turnLogPayload = [
                 'kullanilan_hafiza_idleri' => $memories->pluck('id')->values()->all(),
                 'degerlendirme' => $evaluation,
                 'prompt_ozeti' => $generation->promptSummary,
@@ -178,6 +173,35 @@ class AiTurnOrchestrator
                 'model_adi' => $generation->model,
                 'giris_token_sayisi' => $generation->inputTokens,
                 'cikis_token_sayisi' => $generation->outputTokens,
+            ];
+
+            if (!$persistReply) {
+                $turnLog->update([
+                    ...$turnLogPayload,
+                    'durum' => 'generated',
+                    'tamamlandi_at' => null,
+                ]);
+
+                return [
+                    'result' => $generation,
+                    'evaluation' => $evaluation,
+                    'turn_log' => $turnLog,
+                ];
+            }
+
+            $persisted = $adapter->persistReply($context, $context->aiUser, $generation->replyText);
+            $adapter->markIncomingHandled($context);
+
+            $this->stateEngine->markReplyPersisted(
+                $context,
+                $state,
+                $plan->aim,
+                $generation->replyText,
+            );
+
+            $turnLog->update([
+                ...$turnLogPayload,
+                'durum' => 'completed',
                 'tamamlandi_at' => now(),
             ]);
 

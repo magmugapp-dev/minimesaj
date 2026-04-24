@@ -30,7 +30,7 @@ it('returns ai runtime payload with conversation messages', function () {
         'eslesme_id' => $eslesme->id,
         'durum' => 'aktif',
         'ai_durumu' => 'queued',
-        'ai_durum_metni' => 'Yaziyor...',
+        'ai_durum_metni' => null,
         'ai_planlanan_cevap_at' => $plannedAt,
         'ai_durum_guncellendi_at' => now(),
     ]);
@@ -40,7 +40,7 @@ it('returns ai runtime payload with conversation messages', function () {
     $this->getJson("/api/dating/sohbetler/{$sohbet->id}/mesajlar")
         ->assertOk()
         ->assertJsonPath('ai.status', 'queued')
-        ->assertJsonPath('ai.status_text', 'Yaziyor...')
+        ->assertJsonPath('ai.status_text', null)
         ->assertJsonPath('ai.planned_at', $plannedAt->toISOString());
 });
 

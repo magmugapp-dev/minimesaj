@@ -58,13 +58,27 @@ class AiTurnScheduler
             $plannedAt = Carbon::instance($now);
         }
 
-        $diff = max(0, $now->diffInSeconds($plannedAt, false));
-
         return [
             'planned_at' => $plannedAt,
             'delay_seconds' => $delay,
-            'status_text' => 'Yaziyor...',
+            'status_text' => null,
         ];
+    }
+
+    public function typingDelaySeconds(string $replyText): int
+    {
+        $normalized = trim(preg_replace('/\s+/u', ' ', $replyText) ?? '');
+        if ($normalized === '') {
+            return 2;
+        }
+
+        $characterCount = mb_strlen($normalized);
+        $wordCount = count(array_filter(preg_split('/\s+/u', $normalized) ?: []));
+        $seconds = 2
+            + (int) floor($characterCount / 42)
+            + (int) floor($wordCount / 14);
+
+        return max(2, min(12, $seconds));
     }
 
     private function referenceTime(AiTurnContext $context): Carbon

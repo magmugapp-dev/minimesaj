@@ -106,7 +106,10 @@ bool _sameConversationList(
         a.lastMessageType != b.lastMessageType ||
         !_sameMoment(a.lastMessageAt, b.lastMessageAt) ||
         a.unreadCount != b.unreadCount ||
-        a.myMessageRead != b.myMessageRead) {
+        a.myMessageRead != b.myMessageRead ||
+        a.aiStatus != b.aiStatus ||
+        a.aiStatusText != b.aiStatusText ||
+        !_sameMoment(a.aiPlannedAt, b.aiPlannedAt)) {
       return false;
     }
   }

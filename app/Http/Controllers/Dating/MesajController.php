@@ -126,13 +126,13 @@ class MesajController extends Controller
         $normalized = trim((string) $statusText);
 
         if ($normalized === 'Dusunuyor...') {
-            return 'Yaziyor...';
+            return $status === 'typing' ? 'Yaziyor...' : null;
         }
 
         if ($normalized !== '') {
             return $normalized;
         }
 
-        return in_array($status, ['queued', 'typing'], true) ? 'Yaziyor...' : null;
+        return $status === 'typing' ? 'Yaziyor...' : null;
     }
 }

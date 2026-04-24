@@ -69,13 +69,13 @@ class SohbetResource extends JsonResource
         $normalized = trim((string) $this->ai_durum_metni);
 
         if ($normalized === 'Dusunuyor...') {
-            return 'Yaziyor...';
+            return $this->ai_durumu === 'typing' ? 'Yaziyor...' : null;
         }
 
         if ($normalized !== '') {
             return $normalized;
         }
 
-        return in_array($this->ai_durumu, ['queued', 'typing'], true) ? 'Yaziyor...' : null;
+        return $this->ai_durumu === 'typing' ? 'Yaziyor...' : null;
     }
 }

@@ -1080,10 +1080,7 @@ class _TextBubble extends StatelessWidget {
           ),
           if (!isMe && translation != null && translation.isNotEmpty) ...[
             const SizedBox(height: 10),
-            Container(
-              height: 1,
-              color: textColor.withValues(alpha: 0.14),
-            ),
+            Container(height: 1, color: textColor.withValues(alpha: 0.14)),
             const SizedBox(height: 8),
             Text(
               translationLanguageName == null
@@ -1563,6 +1560,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   int? _themeIndex;
   String? _inputError;
   String? _peerStatusOverride;
+  String? _aiStatusOverride;
   Timer? _typingDebounce;
   bool _typingActive = false;
   bool _peerTyping = false;
@@ -1603,6 +1601,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
       _peerTyping = false;
       _themeIndex = null;
       _peerStatusOverride = null;
+      _aiStatusOverride = null;
       unawaited(_bindRealtimeSubscription(force: true));
       unawaited(_loadThemeSelection());
     }
@@ -1688,9 +1687,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
       return;
     }
 
-    if (!force &&
-        conversationOverride == null &&
-        _typingActive == typing) {
+    if (!force && conversationOverride == null && _typingActive == typing) {
       return;
     }
 
@@ -1718,7 +1715,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     final conversation = widget.conversation;
     if (conversation != null) {
       final basePeer = ChatPeer.fromConversation(conversation);
-      if (_peerStatusOverride != null && _peerStatusOverride!.trim().isNotEmpty) {
+      if (_peerStatusOverride != null &&
+          _peerStatusOverride!.trim().isNotEmpty) {
         return ChatPeer(
           name: basePeer.name,
           handle: basePeer.handle,
@@ -1835,10 +1833,15 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     }
 
     if (event.type == ChatRealtimeEventType.aiStatus) {
+      final nextStatus = event.payload['status']?.toString();
       final nextStatusText = event.payload['status_text']?.toString();
       setState(() {
-        _peerStatusOverride =
-            nextStatusText == null || nextStatusText.trim().isEmpty
+        _aiStatusOverride = nextStatus;
+        _peerStatusOverride = nextStatus == 'typing'
+            ? ((nextStatusText == null || nextStatusText.trim().isEmpty)
+                  ? 'Yaziyor...'
+                  : nextStatusText)
+            : (nextStatusText == null || nextStatusText.trim().isEmpty)
             ? null
             : nextStatusText;
       });
@@ -1848,6 +1851,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
         setState(() {
           _peerTyping = false;
           _peerStatusOverride = null;
+          _aiStatusOverride = null;
         });
       }
     }
@@ -2119,6 +2123,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                           peer: _peer,
                           conversation: widget.conversation,
                           peerTyping: _peerTyping,
+                          aiStatus:
+                              _aiStatusOverride ??
+                              widget.conversation?.aiStatus,
                           theme: theme,
                         ),
                 ),
@@ -2131,7 +2138,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                 controller: widget.conversation == null
                     ? null
                     : _messageController,
-                focusNode: widget.conversation == null ? null : _messageFocusNode,
+                focusNode: widget.conversation == null
+                    ? null
+                    : _messageFocusNode,
                 onSend: _sendMessage,
                 onLeadingTap: openAttachmentMenu,
                 onMicTap: openRecorder,
@@ -2165,7 +2174,8 @@ bool _payloadBool(Object? value) {
   return switch (value) {
     final bool boolValue => boolValue,
     final num numValue => numValue != 0,
-    final String stringValue => stringValue.trim().toLowerCase() == 'true' || stringValue.trim() == '1',
+    final String stringValue =>
+      stringValue.trim().toLowerCase() == 'true' || stringValue.trim() == '1',
     _ => false,
   };
 }
@@ -2221,12 +2231,14 @@ class _ChatMessagesBody extends StatelessWidget {
   final ChatPeer peer;
   final AppConversationPreview? conversation;
   final bool peerTyping;
+  final String? aiStatus;
   final _ChatThemePalette theme;
 
   const _ChatMessagesBody({
     required this.peer,
     required this.theme,
     this.peerTyping = false,
+    this.aiStatus,
     this.conversation,
   });
 
@@ -2240,6 +2252,7 @@ class _ChatMessagesBody extends StatelessWidget {
       conversation: conversation!,
       peer: peer,
       peerTyping: peerTyping,
+      aiStatus: aiStatus,
       theme: theme,
     );
   }
@@ -2249,12 +2262,14 @@ class _LiveChatMessagesBody extends ConsumerStatefulWidget {
   final AppConversationPreview conversation;
   final ChatPeer peer;
   final bool peerTyping;
+  final String? aiStatus;
   final _ChatThemePalette theme;
 
   const _LiveChatMessagesBody({
     required this.conversation,
     required this.peer,
     required this.peerTyping,
+    this.aiStatus,
     required this.theme,
   });
 
@@ -2281,6 +2296,7 @@ class _LiveChatMessagesBodyState extends ConsumerState<_LiveChatMessagesBody> {
   void initState() {
     super.initState();
     _scrollController = ScrollController()..addListener(_handleScroll);
+    _aiStatus = widget.aiStatus;
     _lastHandledRefreshTick = ref.read(conversationFeedRefreshProvider);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) {
@@ -2309,6 +2325,11 @@ class _LiveChatMessagesBodyState extends ConsumerState<_LiveChatMessagesBody> {
         }
         unawaited(_loadInitialMessages());
       });
+      return;
+    }
+
+    if (oldWidget.aiStatus != widget.aiStatus) {
+      _aiStatus = widget.aiStatus;
     }
   }
 
@@ -2634,8 +2655,12 @@ class _LiveChatMessagesBodyState extends ConsumerState<_LiveChatMessagesBody> {
   @override
   Widget build(BuildContext context) {
     final currentUserId = ref.watch(appAuthProvider).asData?.value?.user?.id;
-    final viewerLanguageCode =
-        ref.watch(appAuthProvider).asData?.value?.user?.languageCode;
+    final viewerLanguageCode = ref
+        .watch(appAuthProvider)
+        .asData
+        ?.value
+        ?.user
+        ?.languageCode;
     if (currentUserId == null) {
       return const Center(child: CupertinoActivityIndicator(radius: 14));
     }
@@ -2672,8 +2697,7 @@ class _LiveChatMessagesBodyState extends ConsumerState<_LiveChatMessagesBody> {
       );
     }
 
-    final showTypingIndicator =
-        widget.peerTyping || _aiStatus == 'typing' || _aiStatus == 'queued';
+    final showTypingIndicator = widget.peerTyping || _aiStatus == 'typing';
 
     if (_messages.isEmpty) {
       if (showTypingIndicator) {
@@ -2695,9 +2719,7 @@ class _LiveChatMessagesBodyState extends ConsumerState<_LiveChatMessagesBody> {
     }
 
     final displayMessages = _messages
-        .map(
-          (message) => _sessionTranslatedMessages[message.id] ?? message,
-        )
+        .map((message) => _sessionTranslatedMessages[message.id] ?? message)
         .toList(growable: false);
 
     final uiMessages = displayMessages

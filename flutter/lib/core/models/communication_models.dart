@@ -44,7 +44,7 @@ class AppConversationPreview {
     if (aiStatusText != null && aiStatusText!.trim().isNotEmpty) {
       return aiStatusText;
     }
-    if (lastMessageType == 'typing') {
+    if (aiStatus == 'typing') {
       return 'Yaziyor...';
     }
     return null;

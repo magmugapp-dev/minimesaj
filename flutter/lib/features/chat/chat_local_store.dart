@@ -21,7 +21,7 @@ class ChatLocalStore {
     final databasesPath = await getDatabasesPath();
     final db = await openDatabase(
       path.join(databasesPath, 'magmug_chat_cache.db'),
-      version: 5,
+      version: 6,
       onCreate: (db, version) async {
         await _createSchema(db);
       },
@@ -89,6 +89,17 @@ class ChatLocalStore {
                 translation_target_language_name = NULL
           ''');
         }
+        if (oldVersion < 6) {
+          await db.execute(
+            'ALTER TABLE conversation_previews ADD COLUMN ai_status TEXT',
+          );
+          await db.execute(
+            'ALTER TABLE conversation_previews ADD COLUMN ai_status_text TEXT',
+          );
+          await db.execute(
+            'ALTER TABLE conversation_previews ADD COLUMN ai_planned_at_ms INTEGER',
+          );
+        }
       },
     );
     _database = db;
@@ -138,7 +149,10 @@ class ChatLocalStore {
         last_message_type TEXT,
         last_message_at_ms INTEGER,
         unread_count INTEGER NOT NULL,
-        my_message_read INTEGER NOT NULL
+        my_message_read INTEGER NOT NULL,
+        ai_status TEXT,
+        ai_status_text TEXT,
+        ai_planned_at_ms INTEGER
       )
     ''');
     await db.execute(
@@ -188,6 +202,9 @@ class ChatLocalStore {
             conversation.lastMessageAt?.millisecondsSinceEpoch,
         'unread_count': conversation.unreadCount,
         'my_message_read': conversation.myMessageRead ? 1 : 0,
+        'ai_status': conversation.aiStatus,
+        'ai_status_text': conversation.aiStatusText,
+        'ai_planned_at_ms': conversation.aiPlannedAt?.millisecondsSinceEpoch,
       }, conflictAlgorithm: ConflictAlgorithm.replace);
     }
     await batch.commit(noResult: true);
@@ -246,6 +263,83 @@ class ChatLocalStore {
       conflictAlgorithm: ConflictAlgorithm.replace,
     );
     await cleanupStaleCache();
+  }
+
+  Future<void> updateConversationPreviewRuntimeStatus(
+    int conversationId, {
+    required String? aiStatus,
+    required String? aiStatusText,
+    required DateTime? aiPlannedAt,
+  }) async {
+    final db = await _db;
+    await db.update(
+      'conversation_previews',
+      <String, Object?>{
+        'ai_status': aiStatus,
+        'ai_status_text': aiStatusText,
+        'ai_planned_at_ms': aiPlannedAt?.millisecondsSinceEpoch,
+      },
+      where: 'id = ?',
+      whereArgs: [conversationId],
+    );
+  }
+
+  Future<void> applyConversationMessageEvent({
+    required int conversationId,
+    required int senderId,
+    required int currentUserId,
+    required String? messageType,
+    required String? messageText,
+    DateTime? createdAt,
+  }) async {
+    final db = await _db;
+    final rows = await db.query(
+      'conversation_previews',
+      where: 'id = ?',
+      whereArgs: [conversationId],
+      limit: 1,
+    );
+    if (rows.isEmpty) {
+      return;
+    }
+
+    final row = rows.first;
+    final currentUnreadCount = (row['unread_count'] as num?)?.toInt() ?? 0;
+    final isMine = senderId == currentUserId;
+    await db.update(
+      'conversation_previews',
+      <String, Object?>{
+        'last_message': _messagePreviewText(messageType, messageText),
+        'last_message_type': messageType,
+        'last_message_at_ms': createdAt?.millisecondsSinceEpoch,
+        'unread_count': isMine ? currentUnreadCount : currentUnreadCount + 1,
+        'my_message_read': isMine
+            ? 0
+            : ((row['my_message_read'] as num?)?.toInt() ?? 0),
+        'ai_status': null,
+        'ai_status_text': null,
+        'ai_planned_at_ms': null,
+      },
+      where: 'id = ?',
+      whereArgs: [conversationId],
+    );
+  }
+
+  Future<void> applyConversationReadEvent(
+    int conversationId, {
+    required int readerUserId,
+    required int currentUserId,
+  }) async {
+    final db = await _db;
+    await db.update(
+      'conversation_previews',
+      <String, Object?>{
+        if (readerUserId == currentUserId) 'unread_count': 0,
+        if (readerUserId != currentUserId) 'my_message_read': 1,
+      },
+      where: 'id = ?',
+      whereArgs: [conversationId],
+    );
   }
 
   Future<Map<String, Object?>> _rowFromMessage(
@@ -355,6 +449,13 @@ class ChatLocalStore {
           : DateTime.fromMillisecondsSinceEpoch(lastMessageAtMs),
       unreadCount: (row['unread_count'] as num?)?.toInt() ?? 0,
       myMessageRead: (row['my_message_read'] as num?)?.toInt() == 1,
+      aiStatus: row['ai_status']?.toString(),
+      aiStatusText: row['ai_status_text']?.toString(),
+      aiPlannedAt: (row['ai_planned_at_ms'] as num?) == null
+          ? null
+          : DateTime.fromMillisecondsSinceEpoch(
+              (row['ai_planned_at_ms'] as num).toInt(),
+            ),
     );
   }
 
@@ -376,6 +477,21 @@ class ChatLocalStore {
       category: category,
       fileName: '${message.conversationId}_${message.id}',
     );
+  }
+
+  String? _messagePreviewText(String? messageType, String? messageText) {
+    final normalizedText = messageText?.trim();
+    if (normalizedText != null && normalizedText.isNotEmpty) {
+      return normalizedText;
+    }
+
+    return switch (messageType?.trim().toLowerCase()) {
+      'foto' => 'Fotograf gonderildi',
+      'gorsel' => 'Fotograf gonderildi',
+      'ses' => 'Sesli mesaj gonderildi',
+      'video' => 'Video gonderildi',
+      _ => null,
+    };
   }
 
   Future<String?> _cacheRemoteFileIfNeeded(
