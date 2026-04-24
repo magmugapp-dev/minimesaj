@@ -9,6 +9,7 @@ use App\Services\YapayZeka\V2\Channels\DatingChannelAdapter;
 use App\Services\YapayZeka\V2\Channels\InstagramChannelAdapter;
 use App\Services\YapayZeka\V2\Data\AiGenerationResult;
 use App\Services\YapayZeka\V2\Data\AiTurnContext;
+use App\Support\AiMessageTextSanitizer;
 use Carbon\CarbonInterface;
 
 class AiTurnOrchestrator
@@ -122,12 +123,57 @@ class AiTurnOrchestrator
                     $adapter,
                     $config,
                     $persona,
-                $stateSnapshot,
-                $plan,
-                $memories,
-                $contradictions,
-                $surfacedContradiction,
+                    $stateSnapshot,
+                    $plan,
+                    $memories,
+                    $contradictions,
+                    $surfacedContradiction,
+                );
+
+            $generation = $generation->withReply(
+                AiMessageTextSanitizer::sanitize($generation->replyText) ?? '',
             );
+
+            $turnLogPayload = [
+                'kullanilan_hafiza_idleri' => $memories->pluck('id')->values()->all(),
+                'prompt_ozeti' => $generation->promptSummary,
+                'cevap_metni' => $generation->replyText,
+                'ham_cevap' => $generation->rawResponse,
+                'saglayici_tipi' => $config->saglayici_tipi,
+                'model_adi' => $generation->model,
+                'giris_token_sayisi' => $generation->inputTokens,
+                'cikis_token_sayisi' => $generation->outputTokens,
+            ];
+
+            if ($generation->replyText === '') {
+                $emptyReplyEvaluation = [
+                    'accepted' => false,
+                    'reasons' => ['bos_parse_edilen_cevap'],
+                ];
+
+                $turnLog->update([
+                    ...$turnLogPayload,
+                    'durum' => $persistReply ? 'failed' : 'generated',
+                    'degerlendirme' => $emptyReplyEvaluation,
+                    'tamamlandi_at' => $persistReply ? now() : null,
+                    'metadata' => $this->mergedTurnLogMetadata(
+                        $turnLog,
+                        [
+                            'generation_failure_reason' => 'AI yaniti temiz metne parse edilemedi.',
+                        ],
+                    ),
+                ]);
+
+                if (!$persistReply) {
+                    return [
+                        'result' => $generation,
+                        'evaluation' => $emptyReplyEvaluation,
+                        'turn_log' => $turnLog->fresh(),
+                    ];
+                }
+
+                throw new \RuntimeException('AI yaniti temiz metne parse edilemedi.');
+            }
 
             $evaluation = $this->responseEvaluator->evaluate(
                 $generation->replyText,
@@ -149,6 +195,50 @@ class AiTurnOrchestrator
                     $surfacedContradiction,
                     $evaluation['reasons'],
                 );
+
+                $generation = $generation->withReply(
+                    AiMessageTextSanitizer::sanitize($generation->replyText) ?? '',
+                );
+
+                if ($generation->replyText === '') {
+                    $retryTurnLogPayload = [
+                        'kullanilan_hafiza_idleri' => $memories->pluck('id')->values()->all(),
+                        'prompt_ozeti' => $generation->promptSummary,
+                        'cevap_metni' => $generation->replyText,
+                        'ham_cevap' => $generation->rawResponse,
+                        'saglayici_tipi' => $config->saglayici_tipi,
+                        'model_adi' => $generation->model,
+                        'giris_token_sayisi' => $generation->inputTokens,
+                        'cikis_token_sayisi' => $generation->outputTokens,
+                    ];
+                    $emptyReplyEvaluation = [
+                        'accepted' => false,
+                        'reasons' => ['bos_parse_edilen_cevap'],
+                    ];
+
+                    $turnLog->update([
+                        ...$retryTurnLogPayload,
+                        'durum' => $persistReply ? 'failed' : 'generated',
+                        'degerlendirme' => $emptyReplyEvaluation,
+                        'tamamlandi_at' => $persistReply ? now() : null,
+                        'metadata' => $this->mergedTurnLogMetadata(
+                            $turnLog,
+                            [
+                                'generation_failure_reason' => 'AI yaniti temiz metne parse edilemedi.',
+                            ],
+                        ),
+                    ]);
+
+                    if (!$persistReply) {
+                        return [
+                            'result' => $generation,
+                            'evaluation' => $emptyReplyEvaluation,
+                            'turn_log' => $turnLog->fresh(),
+                        ];
+                    }
+
+                    throw new \RuntimeException('AI yaniti temiz metne parse edilemedi.');
+                }
 
                 $evaluation = $this->responseEvaluator->evaluate(
                     $generation->replyText,
@@ -224,6 +314,13 @@ class AiTurnOrchestrator
 
             throw $exception;
         }
+    }
+
+    private function mergedTurnLogMetadata(AiTurnLog $turnLog, array $metadata): array
+    {
+        $current = is_array($turnLog->metadata) ? $turnLog->metadata : [];
+
+        return array_replace_recursive($current, $metadata);
     }
 
     private function adapterFor(string $kanal): AiChannelAdapterInterface

@@ -119,16 +119,27 @@ class ProcessAiTurnJob implements ShouldQueue
         try {
             if ($context->kanal === 'dating') {
                 $processed = $turnOrchestrator->process($context, $state, $schedule['planned_at'], false);
-                $latencyMs = $startedAt->diffInMilliseconds(now());
+                $finishedAt = now();
+                $latencyMs = $startedAt->diffInMilliseconds($finishedAt);
                 $turnLog = $processed['turn_log'] ?? null;
                 if (!$turnLog) {
                     throw new \RuntimeException('Deferred AI reply icin turn log bulunamadi.');
                 }
 
+                $turnLog->forceFill([
+                    'yanit_suresi_ms' => $latencyMs,
+                    'metadata' => $this->mergedTurnLogMetadata(
+                        $turnLog,
+                        [
+                            'generation_started_at' => $startedAt->toISOString(),
+                            'generation_finished_at' => $finishedAt->toISOString(),
+                        ],
+                    ),
+                ])->save();
+
                 if ($context->turnType === 'reply' && $adapter->hasNewerIncoming($context)) {
                     $turnLog->forceFill([
                         'durum' => 'skipped',
-                        'yanit_suresi_ms' => $latencyMs,
                         'tamamlandi_at' => now(),
                         'metadata' => $this->mergedTurnLogMetadata(
                             $turnLog,
@@ -146,18 +157,39 @@ class ProcessAiTurnJob implements ShouldQueue
                 }
 
                 $replyText = AiMessageTextSanitizer::sanitize($processed['result']->replyText) ?? '';
+                if ($replyText === '') {
+                    $turnLog->forceFill([
+                        'durum' => 'skipped',
+                        'tamamlandi_at' => now(),
+                        'metadata' => $this->mergedTurnLogMetadata(
+                            $turnLog,
+                            [
+                                'delivery_skipped_at' => now()->toISOString(),
+                                'delivery_skip_reason' => 'AI yaniti temiz metne parse edilemedigi icin teslim edilmedi.',
+                            ],
+                        ),
+                    ])->save();
+
+                    $this->clearRuntimeStatusIfCurrentTurn($context, $stateEngine, $state);
+                    $legacySyncService->syncSkipped($context, 'AI yaniti temiz metne parse edilemedigi icin teslim edilmedi.');
+
+                    return;
+                }
+
                 $typingSeconds = $turnScheduler->typingDelaySeconds($replyText);
                 $typingDueAt = now()->addSeconds($typingSeconds);
+                $typingStartedAt = now();
+                $deliveryEnqueuedAt = now();
 
                 $turnLog->forceFill([
                     'durum' => 'typing',
-                    'yanit_suresi_ms' => $latencyMs,
                     'metadata' => $this->mergedTurnLogMetadata(
                         $turnLog,
                         [
-                            'typing_started_at' => now()->toISOString(),
+                            'typing_started_at' => $typingStartedAt->toISOString(),
                             'typing_due_at' => $typingDueAt->toISOString(),
                             'simulated_typing_seconds' => $typingSeconds,
+                            'delivery_enqueued_at' => $deliveryEnqueuedAt->toISOString(),
                         ],
                     ),
                 ])->save();
@@ -188,11 +220,19 @@ class ProcessAiTurnJob implements ShouldQueue
             $this->broadcastStatus($context, AiConversationState::DURUM_TYPING, 'Yaziyor...', $schedule['planned_at']);
 
             $processed = $turnOrchestrator->process($context, $state, $schedule['planned_at']);
-            $latencyMs = $startedAt->diffInMilliseconds(now());
+            $finishedAt = now();
+            $latencyMs = $startedAt->diffInMilliseconds($finishedAt);
 
             if (isset($processed['turn_log'])) {
                 $processed['turn_log']->forceFill([
                     'yanit_suresi_ms' => $latencyMs,
+                    'metadata' => $this->mergedTurnLogMetadata(
+                        $processed['turn_log'],
+                        [
+                            'generation_started_at' => $startedAt->toISOString(),
+                            'generation_finished_at' => $finishedAt->toISOString(),
+                        ],
+                    ),
                 ])->save();
             }
 

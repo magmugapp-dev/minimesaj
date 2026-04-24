@@ -113,7 +113,10 @@ it('queues generated dating replies into simulated typing before delivery', func
         ->and(data_get($state->metadata, 'runtime.reference_message_id'))->toBe($incomingMessage->id)
         ->and(data_get($state->metadata, 'runtime.pending_turn_log_id'))->toBe($turnLog->id)
         ->and($turnLog->durum)->toBe('typing')
-        ->and(data_get($turnLog->metadata, 'simulated_typing_seconds'))->toBeInt();
+        ->and(data_get($turnLog->metadata, 'simulated_typing_seconds'))->toBeInt()
+        ->and(data_get($turnLog->metadata, 'generation_started_at'))->not->toBeNull()
+        ->and(data_get($turnLog->metadata, 'generation_finished_at'))->not->toBeNull()
+        ->and(data_get($turnLog->metadata, 'delivery_enqueued_at'))->not->toBeNull();
 
     Queue::assertPushed(DeliverAiReplyJob::class, function (DeliverAiReplyJob $job) use ($turnLog) {
         return $job->turnLogId === $turnLog->id;
@@ -125,6 +128,102 @@ it('queues generated dating replies into simulated typing before delivery', func
             && $event->statusText === 'Yaziyor...'
             && $event->plannedAt !== null;
     });
+});
+
+it('skips deferred replies when generation cannot produce plain text', function () {
+    Queue::fake();
+    Event::fake([AiTurnStatusUpdated::class]);
+
+    [$viewer, $aiUser, $conversation, $incomingMessage] = createDeferredAiChatFixture();
+    $persona = AiPersonaProfile::query()->create([
+        'ai_user_id' => $aiUser->id,
+        'aktif_mi' => true,
+        'dating_aktif_mi' => true,
+        'instagram_aktif_mi' => true,
+        'minimum_cevap_suresi_saniye' => 0,
+        'maksimum_cevap_suresi_saniye' => 0,
+    ]);
+
+    $turnLog = AiTurnLog::query()->create([
+        'ai_user_id' => $aiUser->id,
+        'kanal' => 'dating',
+        'turn_type' => 'reply',
+        'hedef_tipi' => 'user',
+        'hedef_id' => $viewer->id,
+        'sohbet_id' => $conversation->id,
+        'gelen_mesaj_id' => $incomingMessage->id,
+        'durum' => 'processing',
+        'baslatildi_at' => now(),
+    ]);
+
+    $this->mock(AiPersonaService::class, function (MockInterface $mock) use ($persona) {
+        $mock->shouldReceive('ensureForUser')->andReturn($persona);
+        $mock->shouldReceive('isChannelActive')->andReturnTrue();
+    });
+
+    $this->mock(AiMessageInterpreter::class, function (MockInterface $mock) {
+        $mock->shouldReceive('interpret')->andReturn(
+            new AiInterpretation(
+                intent: 'question',
+                emotion: 'neutral',
+                energy: 'medium',
+                riskLevel: 'low',
+                expectation: 'keep_flow',
+                topics: ['genel'],
+                summary: 'Kullanici sohbeti surdurmek istiyor.',
+            ),
+        );
+    });
+
+    $this->mock(AiTurnOrchestrator::class, function (MockInterface $mock) use ($turnLog) {
+        $mock->shouldReceive('process')
+            ->once()
+            ->andReturn([
+                'result' => new AiGenerationResult(
+                    '',
+                    [],
+                    '{"reply":"S der',
+                ),
+                'turn_log' => $turnLog,
+            ]);
+    });
+
+    $job = new ProcessAiTurnJob(
+        'dating',
+        'reply',
+        $aiUser->id,
+        $conversation->id,
+        $incomingMessage->id,
+    );
+
+    $job->handle(
+        app(AiPersonaService::class),
+        app(AiMessageInterpreter::class),
+        app(AiTurnScheduler::class),
+        app(AiStateEngine::class),
+        app(AiTurnOrchestrator::class),
+        app(\App\Services\YapayZeka\V2\AiLegacySyncService::class),
+        app(\App\Services\YapayZeka\V2\Channels\DatingChannelAdapter::class),
+        app(\App\Services\YapayZeka\V2\Channels\InstagramChannelAdapter::class),
+    );
+
+    $conversation->refresh();
+    $turnLog->refresh();
+
+    expect(
+        Mesaj::query()
+            ->where('sohbet_id', $conversation->id)
+            ->where('gonderen_user_id', $aiUser->id)
+            ->exists()
+    )->toBeFalse()
+        ->and($turnLog->durum)->toBe('skipped')
+        ->and(data_get($turnLog->metadata, 'generation_started_at'))->not->toBeNull()
+        ->and(data_get($turnLog->metadata, 'generation_finished_at'))->not->toBeNull()
+        ->and(data_get($turnLog->metadata, 'delivery_skip_reason'))->toBe('AI yaniti temiz metne parse edilemedigi icin teslim edilmedi.')
+        ->and(in_array($conversation->ai_durumu, [null, 'idle'], true))->toBeTrue()
+        ->and($conversation->ai_durum_metni)->toBeNull();
+
+    Queue::assertNotPushed(DeliverAiReplyJob::class);
 });
 
 it('delivers deferred ai replies and clears typing state', function () {

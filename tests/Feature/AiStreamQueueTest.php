@@ -1,8 +1,10 @@
 <?php
 
+use App\Jobs\ProcessAiTurnJob;
 use App\Jobs\YapayZekaCevapGorevi;
 use App\Models\AiAyar;
 use App\Models\Eslesme;
+use App\Models\Mesaj;
 use App\Models\Sohbet;
 use App\Models\User;
 use App\Models\YapayZekaGorevi;
@@ -115,4 +117,66 @@ it('provisions gemini settings for ai users before queueing a dating reply', fun
         'saglayici_tipi' => 'gemini',
         'model_adi' => 'gemini-2.5-flash',
     ]);
+});
+
+it('queues dating ai turn jobs in local env instead of executing them inline', function () {
+    Queue::fake();
+
+    $originalEnv = app()->environment();
+    app()['env'] = 'local';
+
+    try {
+        $gonderen = User::factory()->create();
+        $aiUser = User::factory()->aiKullanici()->create();
+
+        AiAyar::create([
+            'user_id' => $aiUser->id,
+            'aktif_mi' => true,
+            'saglayici_tipi' => 'gemini',
+            'model_adi' => 'gemini-2.5-flash',
+            'minimum_cevap_suresi_saniye' => 0,
+            'maksimum_cevap_suresi_saniye' => 10,
+        ]);
+
+        $eslesme = Eslesme::create([
+            'user_id' => $gonderen->id,
+            'eslesen_user_id' => $aiUser->id,
+            'eslesme_turu' => 'otomatik',
+            'eslesme_kaynagi' => 'yapay_zeka',
+            'durum' => 'aktif',
+            'tekrar_eslesebilir_mi' => false,
+            'baslatan_user_id' => $gonderen->id,
+        ]);
+
+        $sohbet = Sohbet::create([
+            'eslesme_id' => $eslesme->id,
+            'durum' => 'aktif',
+            'toplam_mesaj_sayisi' => 0,
+        ]);
+
+        $mesaj = app(MesajServisi::class)->gonder($sohbet, $gonderen, [
+            'mesaj_tipi' => 'metin',
+            'mesaj_metni' => 'Selam, orada misin?',
+        ]);
+
+        Queue::assertPushed(ProcessAiTurnJob::class, function (ProcessAiTurnJob $job) use ($sohbet, $mesaj, $aiUser) {
+            return $job->kanal === 'dating'
+                && $job->turnType === 'reply'
+                && $job->aiUserId === $aiUser->id
+                && $job->sohbetId === $sohbet->id
+                && $job->gelenMesajId === $mesaj->id
+                && $job->forceRun === false;
+        });
+
+        Queue::assertNotPushed(YapayZekaCevapGorevi::class);
+
+        expect(
+            Mesaj::query()
+                ->where('sohbet_id', $sohbet->id)
+                ->where('gonderen_user_id', $aiUser->id)
+                ->exists()
+        )->toBeFalse();
+    } finally {
+        app()['env'] = $originalEnv;
+    }
 });

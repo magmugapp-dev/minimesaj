@@ -13,7 +13,7 @@ class AiMessageTextSanitizer
 
         $unwrapped = self::unwrapEnvelope($normalized);
         if ($unwrapped === null) {
-            return $normalized;
+            return self::isEnvelopeCandidate($normalized) ? null : $normalized;
         }
 
         $unwrapped = self::normalize($unwrapped);
@@ -50,6 +50,11 @@ class AiMessageTextSanitizer
     private static function looksLikeJson(string $text): bool
     {
         return str_starts_with($text, '{') || str_starts_with($text, '[');
+    }
+
+    private static function isEnvelopeCandidate(string $text): bool
+    {
+        return preg_match('/^```(?:json)?\s*(.*?)\s*```$/is', $text) === 1 || self::looksLikeJson($text);
     }
 
     private static function extractEnvelopeText(mixed $value): ?string

@@ -113,18 +113,6 @@ class MesajServisi
                         return;
                     }
 
-                    if (app()->environment('local')) {
-                        ProcessAiTurnJob::dispatchSync(
-                            'dating',
-                            'reply',
-                            $aiUser->id,
-                            $sohbet->id,
-                            $mesaj->id,
-                        );
-
-                        return;
-                    }
-
                     ProcessAiTurnJob::dispatch(
                         'dating',
                         'reply',

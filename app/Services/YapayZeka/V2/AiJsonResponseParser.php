@@ -19,7 +19,7 @@ class AiJsonResponseParser
         }
 
         return [
-            'reply' => trim($this->rescueJsonStringField($raw, 'reply') ?: $raw),
+            'reply' => trim($this->rescueJsonStringField($raw, 'reply') ?: ''),
             'memory' => [],
             'payload' => is_array($decoded) ? $decoded : [],
         ];

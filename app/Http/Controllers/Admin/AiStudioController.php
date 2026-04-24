@@ -284,6 +284,11 @@ class AiStudioController extends Controller
         $dropdowns = $this->dropdowns();
         $countryOptions = array_keys($dropdowns['location_catalog']);
         $languageLabels = array_values($dropdowns['languages']);
+        $input = $this->withBehaviorSliderDefaults(
+            $request->all(),
+            $persona,
+            $dropdowns['behavior_sliders']
+        );
 
         $rules = [
             'ad' => 'required|string|max:255',
@@ -349,9 +354,9 @@ class AiStudioController extends Controller
             $rules[$field] = 'required|integer|min:0|max:10';
         }
 
-        $validator = validator($request->all(), $rules);
-        $validator->after(function (Validator $validator) use ($request, $dropdowns): void {
-            $this->validateLocationSelection($validator, $request->all(), $dropdowns['location_catalog']);
+        $validator = validator($input, $rules);
+        $validator->after(function (Validator $validator) use ($input, $dropdowns): void {
+            $this->validateLocationSelection($validator, $input, $dropdowns['location_catalog']);
         });
 
         $validated = $validator->validate();
@@ -477,6 +482,26 @@ class AiStudioController extends Controller
         ];
     }
 
+    private function withBehaviorSliderDefaults(
+        array $input,
+        ?AiPersonaProfile $persona,
+        array $behaviorSliders,
+    ): array {
+        foreach ($behaviorSliders as $field => $meta) {
+            if (array_key_exists($field, $input) && $input[$field] !== null && $input[$field] !== '') {
+                continue;
+            }
+
+            $input[$field] = $persona?->{$field};
+
+            if ($input[$field] === null || $input[$field] === '') {
+                $input[$field] = (int) ($meta['default'] ?? 5);
+            }
+        }
+
+        return $input;
+    }
+
     private function validateLocationSelection(Validator $validator, array $data, array $catalog): void
     {
         $country = $data['persona_ulke'] ?? null;
@@ -574,7 +599,7 @@ class AiStudioController extends Controller
             'locationCatalog' => $dropdowns['location_catalog'],
             'countryOptions' => array_keys($dropdowns['location_catalog']),
             'behaviorSliders' => $behaviorSliders,
-            'behaviorSliderGroups' => collect($behaviorSliders)->groupBy('group')->all(),
+            'behaviorSliderGroups' => collect($behaviorSliders)->groupBy('group', true)->all(),
         ];
     }
 

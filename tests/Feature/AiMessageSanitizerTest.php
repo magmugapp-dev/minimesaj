@@ -5,6 +5,7 @@ use App\Models\Mesaj;
 use App\Models\Sohbet;
 use App\Models\User;
 use App\Services\MesajServisi;
+use App\Support\AiMessageTextSanitizer;
 use Laravel\Sanctum\Sanctum;
 
 it('sanitizes ai json envelopes before persisting', function () {
@@ -66,4 +67,9 @@ it('sanitizes legacy ai json envelopes while reading conversation messages', fun
     $this->getJson("/api/dating/sohbetler/{$conversation->id}/mesajlar")
         ->assertOk()
         ->assertJsonPath('data.0.mesaj_metni', 'Eski kayit cevabi');
+});
+
+it('drops malformed ai json envelopes instead of leaking raw payloads', function () {
+    expect(AiMessageTextSanitizer::sanitize('{"reply":"S der'))->toBeNull()
+        ->and(AiMessageTextSanitizer::sanitize("```json\n{\"reply\":\"S der\n```"))->toBeNull();
 });

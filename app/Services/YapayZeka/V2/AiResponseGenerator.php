@@ -11,6 +11,7 @@ use App\Services\YapayZeka\V2\Data\AiConversationStateSnapshot;
 use App\Services\YapayZeka\V2\Data\AiGenerationResult;
 use App\Services\YapayZeka\V2\Data\AiResponsePlan;
 use App\Services\YapayZeka\V2\Data\AiTurnContext;
+use App\Support\AiMessageTextSanitizer;
 use App\Support\Language;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Str;
@@ -61,9 +62,10 @@ class AiResponseGenerator
 
         $raw = (string) ($response['cevap'] ?? '');
         $parsed = $this->jsonParser->parseReply($raw);
+        $replyText = AiMessageTextSanitizer::sanitize($parsed['reply'] ?? null) ?? '';
 
         return new AiGenerationResult(
-            trim($parsed['reply'] ?: $raw),
+            $replyText,
             $parsed['memory'] ?? [],
             $raw,
             $response['model'] ?? null,

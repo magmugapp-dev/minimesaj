@@ -2,6 +2,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:magmug/app_core.dart';
+import 'package:magmug/core/chat/chat_text_sanitizer.dart';
 import 'package:path/path.dart' as path;
 import 'package:sqflite/sqflite.dart';
 
@@ -480,7 +481,7 @@ class ChatLocalStore {
   }
 
   String? _messagePreviewText(String? messageType, String? messageText) {
-    final normalizedText = messageText?.trim();
+    final normalizedText = ChatTextSanitizer.sanitize(messageText);
     if (normalizedText != null && normalizedText.isNotEmpty) {
       return normalizedText;
     }

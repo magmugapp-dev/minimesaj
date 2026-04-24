@@ -468,7 +468,8 @@
                                         </div>
                                         <div class="text-sm font-bold text-white" x-text="behavior['{{ $field }}'] + '/10'"></div>
                                     </div>
-                                    <input class="mt-4 h-2 w-full cursor-pointer accent-pink-500" type="range" min="0" max="10" name="{{ $field }}" x-model="behavior['{{ $field }}']">
+                                    <input type="hidden" name="{{ $field }}" value="{{ $behaviorValues[$field] }}" x-bind:value="behavior['{{ $field }}']">
+                                    <input class="mt-4 h-2 w-full cursor-pointer accent-pink-500" type="range" min="0" max="10" value="{{ $behaviorValues[$field] }}" x-model.number="behavior['{{ $field }}']">
                                     <div class="mt-3 flex justify-between text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
                                         <span>{{ $meta['legend'][0] ?? 'Dusuk' }}</span>
                                         <span>{{ $meta['legend'][1] ?? 'Yuksek' }}</span>
