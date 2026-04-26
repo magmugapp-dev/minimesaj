@@ -15,22 +15,22 @@
         };
         $cinsiyet = match ($kullanici->cinsiyet) {
             'erkek' => 'Erkek',
-            'kadin' => 'Kadın',
+            'kadin' => 'Kadin',
             'belirtmek_istemiyorum' => 'Belirtmek istemiyorum',
-            default => '—',
+            default => '-',
         };
-        $konum = collect([$kullanici->ilce, $kullanici->il, $kullanici->ulke])->filter()->implode(', ') ?: '—';
+        $konum = collect([$kullanici->ilce, $kullanici->il, $kullanici->ulke])->filter()->implode(', ') ?: '-';
         $toplamMesaj = collect($instagramIstatistikleri)->sum('mesaj_sayisi');
         $toplamGorev = collect($instagramIstatistikleri)->sum('gorev_sayisi');
         $toplamKisi = collect($instagramIstatistikleri)->sum('kisi_sayisi');
         $seviyeler = $ayar
             ? [
                 ['etiket' => 'Emoji', 'deger' => $ayar->emoji_seviyesi],
-                ['etiket' => 'Flört', 'deger' => $ayar->flort_seviyesi],
-                ['etiket' => 'Girişkenlik', 'deger' => $ayar->giriskenlik_seviyesi],
-                ['etiket' => 'Utangaçlık', 'deger' => $ayar->utangaclik_seviyesi],
-                ['etiket' => 'Duygusallık', 'deger' => $ayar->duygusallik_seviyesi],
-                ['etiket' => 'Kıskançlık', 'deger' => $ayar->kiskanclik_seviyesi],
+                ['etiket' => 'Flort', 'deger' => $ayar->flort_seviyesi],
+                ['etiket' => 'Giriskenlik', 'deger' => $ayar->giriskenlik_seviyesi],
+                ['etiket' => 'Utangaclik', 'deger' => $ayar->utangaclik_seviyesi],
+                ['etiket' => 'Duygusallik', 'deger' => $ayar->duygusallik_seviyesi],
+                ['etiket' => 'Kiskanclik', 'deger' => $ayar->kiskanclik_seviyesi],
                 ['etiket' => 'Mizah', 'deger' => $ayar->mizah_seviyesi],
                 ['etiket' => 'Zeka', 'deger' => $ayar->zeka_seviyesi],
             ]
@@ -51,7 +51,7 @@
             <div class="studio-main">
                 <section class="studio-stat-grid studio-stat-grid--4">
                     <div class="studio-stat">
-                        <p class="studio-stat__label">Eşleşme</p>
+                        <p class="studio-stat__label">Eslesme</p>
                         <p class="studio-stat__value">{{ number_format($kullanici->eslesmeler_count) }}</p>
                     </div>
                     <div class="studio-stat">
@@ -59,31 +59,31 @@
                         <p class="studio-stat__value">{{ number_format($toplamMesaj) }}</p>
                     </div>
                     <div class="studio-stat">
-                        <p class="studio-stat__label">AI görev</p>
+                        <p class="studio-stat__label">AI gorev</p>
                         <p class="studio-stat__value">{{ number_format($toplamGorev) }}</p>
                     </div>
                 </section>
 
                 <section class="studio-card">
                     <div class="studio-card__header">
-                        <div><p class="studio-kicker">Profil</p><h3 class="studio-title">Kullanıcı</h3></div>
+                        <div><p class="studio-kicker">Profil</p><h3 class="studio-title">Kullanici</h3></div>
                     </div>
                     <div class="studio-info-grid studio-info-grid--2">
                         <div class="studio-surface">
                             <p class="studio-surface__title">Kimlik</p>
                             <dl class="studio-data-list">
-                                <div class="studio-data-row"><dt class="studio-data-label">Kullanıcı adı</dt><dd class="studio-data-value">{{ '@' . $kullanici->kullanici_adi }}</dd></div>
+                                <div class="studio-data-row"><dt class="studio-data-label">Kullanici adi</dt><dd class="studio-data-value">{{ '@' . $kullanici->kullanici_adi }}</dd></div>
                                 <div class="studio-data-row"><dt class="studio-data-label">Cinsiyet</dt><dd class="studio-data-value">{{ $cinsiyet }}</dd></div>
-                                <div class="studio-data-row"><dt class="studio-data-label">Doğum yılı</dt><dd class="studio-data-value">{{ $kullanici->dogum_yili ?? '—' }}</dd></div>
+                                <div class="studio-data-row"><dt class="studio-data-label">Dogum yili</dt><dd class="studio-data-value">{{ $kullanici->dogum_yili ?? '-' }}</dd></div>
                                 <div class="studio-data-row"><dt class="studio-data-label">Konum</dt><dd class="studio-data-value">{{ $konum }}</dd></div>
                                 <div class="studio-data-row"><dt class="studio-data-label">Durum</dt><dd class="studio-data-value">{{ ucfirst($kullanici->hesap_durumu) }}</dd></div>
-                                <div class="studio-data-row"><dt class="studio-data-label">Kayıt</dt><dd class="studio-data-value">{{ $kullanici->created_at?->format('d.m.Y H:i') }}</dd></div>
+                                <div class="studio-data-row"><dt class="studio-data-label">Kayit</dt><dd class="studio-data-value">{{ $kullanici->created_at?->format('d.m.Y H:i') }}</dd></div>
                             </dl>
                         </div>
 
                         <div class="studio-surface">
                             <p class="studio-surface__title">Biyografi</p>
-                            <div class="studio-copy-block">{{ $kullanici->biyografi ?: 'Biyografi girilmemiş.' }}</div>
+                            <div class="studio-copy-block">{{ $kullanici->biyografi ?: 'Biyografi girilmemis.' }}</div>
                         </div>
                     </div>
                 </section>
@@ -99,7 +99,7 @@
                                 <p class="studio-surface__title">Model</p>
                                 <dl class="studio-data-list">
                                     <div class="studio-data-row"><dt class="studio-data-label">AI durumu</dt><dd class="studio-data-value">{{ $ayar->aktif_mi ? 'Aktif' : 'Pasif' }}</dd></div>
-                                    <div class="studio-data-row"><dt class="studio-data-label">Sağlayıcı</dt><dd class="studio-data-value">{{ ucfirst($ayar->saglayici_tipi) }}</dd></div>
+                                    <div class="studio-data-row"><dt class="studio-data-label">Saglayici</dt><dd class="studio-data-value">{{ ucfirst($ayar->saglayici_tipi) }}</dd></div>
                                     <div class="studio-data-row"><dt class="studio-data-label">Model</dt><dd class="studio-data-value studio-data-value--code">{{ $ayar->model_adi }}</dd></div>
                                     <div class="studio-data-row"><dt class="studio-data-label">Temperature</dt><dd class="studio-data-value">{{ $ayar->temperature }}</dd></div>
                                     <div class="studio-data-row"><dt class="studio-data-label">Top P</dt><dd class="studio-data-value">{{ $ayar->top_p }}</dd></div>
@@ -110,12 +110,12 @@
                             <div class="studio-surface">
                                 <p class="studio-surface__title">Tarz</p>
                                 <dl class="studio-data-list">
-                                    <div class="studio-data-row"><dt class="studio-data-label">Kişilik tipi</dt><dd class="studio-data-value">{{ $ayar->kisilik_tipi ?: '—' }}</dd></div>
-                                    <div class="studio-data-row"><dt class="studio-data-label">Konuşma tonu</dt><dd class="studio-data-value">{{ $ayar->konusma_tonu ?: '—' }}</dd></div>
-                                    <div class="studio-data-row"><dt class="studio-data-label">Konuşma stili</dt><dd class="studio-data-value">{{ $ayar->konusma_stili ?: '—' }}</dd></div>
-                                    <div class="studio-data-row"><dt class="studio-data-label">İlk mesaj</dt><dd class="studio-data-value">{{ $ayar->ilk_mesaj_atar_mi ? 'Açık' : 'Kapalı' }}</dd></div>
+                                    <div class="studio-data-row"><dt class="studio-data-label">Kisilik tipi</dt><dd class="studio-data-value">{{ $ayar->kisilik_tipi ?: '-' }}</dd></div>
+                                    <div class="studio-data-row"><dt class="studio-data-label">Konusma tonu</dt><dd class="studio-data-value">{{ $ayar->konusma_tonu ?: '-' }}</dd></div>
+                                    <div class="studio-data-row"><dt class="studio-data-label">Konusma stili</dt><dd class="studio-data-value">{{ $ayar->konusma_stili ?: '-' }}</dd></div>
+                                    <div class="studio-data-row"><dt class="studio-data-label">Ilk mesaj</dt><dd class="studio-data-value">{{ $ayar->ilk_mesaj_atar_mi ? 'Acik' : 'Kapali' }}</dd></div>
                                 </dl>
-                                <div class="studio-copy-block">{{ $ayar->kisilik_aciklamasi ?: 'Kişilik açıklaması girilmemiş.' }}</div>
+                                <div class="studio-copy-block">{{ $ayar->kisilik_aciklamasi ?: 'Kisilik aciklamasi girilmemis.' }}</div>
                             </div>
                         </div>
 
@@ -136,7 +136,7 @@
                             </div>
                         </div>
                     @else
-                        <div class="studio-copy-block">AI ayarı bulunmuyor.</div>
+                        <div class="studio-copy-block">AI ayari bulunmuyor.</div>
                     @endif
                 </section>
 
@@ -167,18 +167,18 @@
                                     <div class="studio-info-grid studio-info-grid--2" style="margin-top: 1rem;">
                                         <div>
                                             <dl class="studio-data-list">
-                                                <div class="studio-data-row"><dt class="studio-data-label">Profil ID</dt><dd class="studio-data-value">{{ $hesap->instagram_profil_id ?: '—' }}</dd></div>
-                                                <div class="studio-data-row"><dt class="studio-data-label">Otomatik cevap</dt><dd class="studio-data-value">{{ $hesap->otomatik_cevap_aktif_mi ? 'Açık' : 'Kapalı' }}</dd></div>
-                                                <div class="studio-data-row"><dt class="studio-data-label">Yarı otomatik</dt><dd class="studio-data-value">{{ $hesap->yarim_otomatik_mod_aktif_mi ? 'Açık' : 'Kapalı' }}</dd></div>
-                                                <div class="studio-data-row"><dt class="studio-data-label">Son bağlantı</dt><dd class="studio-data-value">{{ $hesap->son_baglanti_tarihi?->format('d.m.Y H:i') ?: '—' }}</dd></div>
+                                                <div class="studio-data-row"><dt class="studio-data-label">Profil ID</dt><dd class="studio-data-value">{{ $hesap->instagram_profil_id ?: '-' }}</dd></div>
+                                                <div class="studio-data-row"><dt class="studio-data-label">Otomatik cevap</dt><dd class="studio-data-value">{{ $hesap->otomatik_cevap_aktif_mi ? 'Acik' : 'Kapali' }}</dd></div>
+                                                <div class="studio-data-row"><dt class="studio-data-label">Yari otomatik</dt><dd class="studio-data-value">{{ $hesap->yarim_otomatik_mod_aktif_mi ? 'Acik' : 'Kapali' }}</dd></div>
+                                                <div class="studio-data-row"><dt class="studio-data-label">Son baglanti</dt><dd class="studio-data-value">{{ $hesap->son_baglanti_tarihi?->format('d.m.Y H:i') ?: '-' }}</dd></div>
                                             </dl>
                                         </div>
 
                                         <div>
                                             <dl class="studio-data-list">
-                                                <div class="studio-data-row"><dt class="studio-data-label">Kişi</dt><dd class="studio-data-value">{{ number_format($hesapIstatistik['kisi_sayisi']) }}</dd></div>
+                                                <div class="studio-data-row"><dt class="studio-data-label">Kisi</dt><dd class="studio-data-value">{{ number_format($hesapIstatistik['kisi_sayisi']) }}</dd></div>
                                                 <div class="studio-data-row"><dt class="studio-data-label">Mesaj</dt><dd class="studio-data-value">{{ number_format($hesapIstatistik['mesaj_sayisi']) }}</dd></div>
-                                                <div class="studio-data-row"><dt class="studio-data-label">AI görev</dt><dd class="studio-data-value">{{ number_format($hesapIstatistik['gorev_sayisi']) }}</dd></div>
+                                                <div class="studio-data-row"><dt class="studio-data-label">AI gorev</dt><dd class="studio-data-value">{{ number_format($hesapIstatistik['gorev_sayisi']) }}</dd></div>
                                             </dl>
                                         </div>
                                     </div>
@@ -186,7 +186,7 @@
                             @endforeach
                         </div>
                     @else
-                        <div class="studio-copy-block">Instagram hesabı bulunmuyor.</div>
+                        <div class="studio-copy-block">Instagram hesabi bulunmuyor.</div>
                     @endif
                 </section>
             </div>
@@ -204,10 +204,10 @@
                         </div>
                         <div class="studio-meta__item">
                             <p class="studio-meta__eyebrow">Instagram</p>
-                            <p class="studio-meta__value">{{ $igHesap?->instagram_kullanici_adi ?: 'Bağlı değil' }}</p>
+                            <p class="studio-meta__value">{{ $igHesap?->instagram_kullanici_adi ?: 'Bagli degil' }}</p>
                         </div>
                         <div class="studio-meta__item">
-                            <p class="studio-meta__eyebrow">Kişi</p>
+                            <p class="studio-meta__eyebrow">Kisi</p>
                             <p class="studio-meta__value">{{ number_format($toplamKisi) }}</p>
                         </div>
                     </div>
@@ -217,18 +217,28 @@
                     <div class="studio-pill-list mt-4">
                         <span class="studio-pill {{ $durumPill }}">{{ ucfirst($kullanici->hesap_durumu) }}</span>
                         <span class="studio-pill {{ $ayar?->aktif_mi ? 'studio-pill--success' : 'studio-pill--neutral' }}">{{ $ayar?->aktif_mi ? 'AI aktif' : 'AI pasif' }}</span>
-                        <span class="studio-pill {{ $igHesap?->otomatik_cevap_aktif_mi ? 'studio-pill--info' : 'studio-pill--neutral' }}">{{ $igHesap?->otomatik_cevap_aktif_mi ? 'Oto yanıt açık' : 'Oto yanıt kapalı' }}</span>
+                        <span class="studio-pill {{ $igHesap?->otomatik_cevap_aktif_mi ? 'studio-pill--info' : 'studio-pill--neutral' }}">{{ $igHesap?->otomatik_cevap_aktif_mi ? 'Oto yanit acik' : 'Oto yanit kapali' }}</span>
                     </div>
                 </section>
 
                 <section class="studio-card">
                     <div class="studio-stack mt-4">
                         <a href="{{ route('admin.influencer.duzenle', $kullanici) }}" class="studio-linkcard">
-                            <span>Düzenle</span>
+                            <span>Duzenle</span>
                             <svg class="h-4 w-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke-width="1.7" stroke="currentColor">
                                 <path stroke-linecap="round" stroke-linejoin="round" d="m9 18 6-6-6-6" />
                             </svg>
                         </a>
+                        <form method="POST" action="{{ route('admin.influencer.sil', $kullanici) }}" onsubmit="return confirm('Bu influencer hesabini ve bagli verilerini silmek istediginize emin misiniz?');">
+                            @csrf
+                            @method('DELETE')
+                            <button type="submit" class="studio-linkcard w-full text-left text-rose-600">
+                                <span>Sil</span>
+                                <svg class="h-4 w-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke-width="1.7" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673A2.25 2.25 0 0 1 15.916 21H8.084a2.25 2.25 0 0 1-2.244-1.327L4.772 5.79m14.456 0A48.108 48.108 0 0 0 15.75 5.5m-6.748 0a48.11 48.11 0 0 1 3.478-.29m0 0V4.5A2.25 2.25 0 0 1 14.25 2.25h-4.5A2.25 2.25 0 0 1 7.5 4.5v.71m3 0h3" />
+                                </svg>
+                            </button>
+                        </form>
                         <a href="{{ route('admin.influencer.index') }}" class="studio-linkcard">
                             <span>Influencer listesi</span>
                             <svg class="h-4 w-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke-width="1.7" stroke="currentColor">

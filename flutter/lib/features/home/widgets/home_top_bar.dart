@@ -1,5 +1,3 @@
-import 'dart:io';
-
 import 'package:magmug/app_core.dart';
 import 'package:magmug/features/notifications/notifications_flow.dart';
 import 'package:magmug/features/profile/profile_flow.dart';
@@ -14,7 +12,9 @@ class HomeTopBar extends ConsumerWidget {
     final data = ref.watch(onboardProvider);
     final displayName = user?.firstName.isNotEmpty == true
         ? user!.firstName
-        : (data.name.isEmpty ? 'Sen' : data.name);
+        : (data.name.isEmpty
+              ? AppRuntimeText.instance.t('commonYou', 'Sen')
+              : data.name);
     final profileImageUrl = user?.profileImageUrl;
     final gemAmount = user?.gemBalance ?? 0;
 
@@ -59,7 +59,12 @@ class HomeTopBar extends ConsumerWidget {
                 onTap: openPremium,
                 scale: 0.96,
                 child: _TopChip(
-                  label: compact ? 'Pro' : 'Premium',
+                  label: compact
+                      ? AppRuntimeText.instance.t('home.premium.compact', 'Pro')
+                      : AppRuntimeText.instance.t(
+                          'home.premium.label',
+                          'Premium',
+                        ),
                   showPlus: false,
                 ),
               ),
@@ -94,21 +99,23 @@ class _ProfileAvatar extends StatelessWidget {
   Widget build(BuildContext context) {
     if (photoPath != null) {
       return ClipOval(
-        child: Image.file(
-          File(photoPath!),
+        child: CachedAppImage(
+          imageUrl: photoPath,
           width: 40,
           height: 40,
-          fit: BoxFit.cover,
+          cacheWidth: 80,
+          cacheHeight: 80,
         ),
       );
     }
     if (imageUrl != null && imageUrl!.isNotEmpty) {
       return ClipOval(
-        child: Image.network(
-          imageUrl!,
+        child: CachedAppImage(
+          imageUrl: imageUrl,
           width: 40,
           height: 40,
-          fit: BoxFit.cover,
+          cacheWidth: 80,
+          cacheHeight: 80,
         ),
       );
     }

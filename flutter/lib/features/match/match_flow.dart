@@ -2,8 +2,10 @@ import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:magmug/app_core.dart';
+import 'package:magmug/features/ads/admob_ads.dart';
 import 'package:magmug/features/chat/chat_flow.dart';
 import 'package:magmug/features/home/home_flow.dart';
+import 'package:magmug/features/profile/profile_flow.dart';
 import 'package:magmug/l10n/app_localizations.dart';
 import 'package:magmug/features/payment/payment_result_flow.dart';
 import 'package:magmug/features/payment/store_purchase_service.dart';
@@ -207,7 +209,12 @@ class MatchNotifier extends Notifier<MatchState> {
     final session = ref.read(appAuthProvider).asData?.value;
     final token = session?.token;
     if (token == null || token.trim().isEmpty) {
-      state = state.copyWith(notice: 'Aktif oturum bulunamadi.');
+      state = state.copyWith(
+        notice: AppRuntimeText.instance.t(
+          'auth.error.session_required',
+          'Aktif oturum bulunamadi.',
+        ),
+      );
       return null;
     }
 
@@ -402,10 +409,11 @@ class _MatchAvatar extends StatelessWidget {
       clipBehavior: Clip.antiAlias,
       child: SizedBox.expand(
         child: normalizedImage != null && normalizedImage.isNotEmpty
-            ? Image.network(
-                normalizedImage,
-                fit: BoxFit.cover,
-                errorBuilder: (context, error, stackTrace) => _buildFallback(),
+            ? CachedAppImage(
+                imageUrl: normalizedImage,
+                cacheWidth: (size * 2).round(),
+                cacheHeight: (size * 2).round(),
+                errorBuilder: (_) => _buildFallback(),
               )
             : _buildFallback(),
       ),
@@ -458,7 +466,7 @@ class _MatchTopBar extends ConsumerWidget {
           const SizedBox(width: 6),
           Expanded(
             child: Text(
-              'Eslesme modu',
+              AppRuntimeText.instance.t('match.mode.title', 'Eslesme modu'),
               style: TextStyle(
                 fontFamily: AppFont.family,
                 fontWeight: FontWeight.w800,
@@ -498,10 +506,10 @@ class _MatchModeTopBar extends ConsumerWidget {
             ),
           ),
           const SizedBox(width: 8),
-          const Expanded(
+          Expanded(
             child: Text(
-              'Eslesme modu',
-              style: TextStyle(
+              AppRuntimeText.instance.t('match.mode.title', 'Eslesme modu'),
+              style: const TextStyle(
                 fontFamily: AppFont.family,
                 fontWeight: FontWeight.w800,
                 fontSize: 17,
@@ -669,7 +677,9 @@ class _RadarAvatarState extends ConsumerState<_RadarAvatar>
           ),
           _MatchAvatar(
             size: portraitSize,
-            label: authUser?.displayName ?? 'Sen',
+            label:
+                authUser?.displayName ??
+                AppRuntimeText.instance.t('match.avatar.self', 'Sen'),
             imageUrl: authUser?.profileImageUrl,
           ),
         ],
@@ -718,14 +728,16 @@ class _RadarPainter extends CustomPainter {
 class _StartMatchButton extends StatefulWidget {
   final String label;
   final int? gemCost;
-  final VoidCallback onTap;
+  final VoidCallback? onTap;
   final bool whiteBorder;
+  final bool loading;
 
   const _StartMatchButton({
     required this.label,
     required this.onTap,
     this.gemCost,
     this.whiteBorder = false,
+    this.loading = false,
   });
 
   @override
@@ -755,98 +767,113 @@ class _StartMatchButtonState extends State<_StartMatchButton>
   Widget build(BuildContext context) {
     return PressableScale(
       onTap: widget.onTap,
-      child: AnimatedBuilder(
-        animation: _controller,
-        builder: (context, child) {
-          final t = Curves.easeInOut.transform(_controller.value);
-          return Container(
-            height: 58,
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment(-1.0 + t * 0.4, -0.2 + t * 0.4),
-                end: Alignment(1.0 + t * 0.4, 0.2 + t * 0.4),
-                colors: [
-                  Color.lerp(
-                    const Color(0xFFB879FF),
-                    const Color(0xFFFF8EC5),
-                    t,
-                  )!,
-                  Color.lerp(
-                    const Color(0xFFFF8EC5),
-                    const Color(0xFFB879FF),
-                    t,
-                  )!,
-                ],
-              ),
-              borderRadius: BorderRadius.circular(999),
-              border: widget.whiteBorder
-                  ? Border.all(
-                      color: AppColors.white.withValues(alpha: 0.9),
-                      width: 1.4,
-                    )
-                  : null,
-              boxShadow: [
-                BoxShadow(
-                  color: Color.lerp(
-                    const Color(0x22CF86FF),
-                    const Color(0x22FFB0D8),
-                    t,
-                  )!,
-                  blurRadius: 22,
-                  offset: const Offset(0, 10),
-                ),
-              ],
-            ),
-            child: child,
-          );
-        },
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Text(
-              widget.label,
-              style: const TextStyle(
-                fontFamily: AppFont.family,
-                fontWeight: FontWeight.w800,
-                fontSize: 16,
-                color: AppColors.white,
-              ),
-            ),
-            if (widget.gemCost != null) ...[
-              const SizedBox(width: 12),
-              Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 10,
-                  vertical: 6,
-                ),
-                decoration: BoxDecoration(
-                  color: AppColors.white.withValues(alpha: 0.94),
-                  borderRadius: BorderRadius.circular(999),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Image.asset(
-                      'assets/images/icon_diamond.png',
-                      width: 14,
-                      height: 14,
-                    ),
-                    const SizedBox(width: 6),
-                    Text(
-                      '${widget.gemCost} tas',
-                      style: const TextStyle(
-                        fontFamily: AppFont.family,
-                        fontWeight: FontWeight.w600,
-                        fontSize: 13,
-                        color: AppColors.zinc900,
-                      ),
-                    ),
+      child: AnimatedOpacity(
+        duration: const Duration(milliseconds: 180),
+        opacity: widget.onTap == null ? 0.55 : 1,
+        child: AnimatedBuilder(
+          animation: _controller,
+          builder: (context, child) {
+            final t = Curves.easeInOut.transform(_controller.value);
+            return Container(
+              height: 58,
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment(-1.0 + t * 0.4, -0.2 + t * 0.4),
+                  end: Alignment(1.0 + t * 0.4, 0.2 + t * 0.4),
+                  colors: [
+                    Color.lerp(
+                      const Color(0xFFB879FF),
+                      const Color(0xFFFF8EC5),
+                      t,
+                    )!,
+                    Color.lerp(
+                      const Color(0xFFFF8EC5),
+                      const Color(0xFFB879FF),
+                      t,
+                    )!,
                   ],
                 ),
+                borderRadius: BorderRadius.circular(999),
+                border: widget.whiteBorder
+                    ? Border.all(
+                        color: AppColors.white.withValues(alpha: 0.9),
+                        width: 1.4,
+                      )
+                    : null,
+                boxShadow: [
+                  BoxShadow(
+                    color: Color.lerp(
+                      const Color(0x22CF86FF),
+                      const Color(0x22FFB0D8),
+                      t,
+                    )!,
+                    blurRadius: 22,
+                    offset: const Offset(0, 10),
+                  ),
+                ],
               ),
+              child: child,
+            );
+          },
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              if (widget.loading) ...[
+                const CupertinoActivityIndicator(
+                  radius: 9,
+                  color: AppColors.white,
+                ),
+                const SizedBox(width: 10),
+              ],
+              Text(
+                widget.label,
+                style: const TextStyle(
+                  fontFamily: AppFont.family,
+                  fontWeight: FontWeight.w800,
+                  fontSize: 16,
+                  color: AppColors.white,
+                ),
+              ),
+              if (widget.gemCost != null) ...[
+                const SizedBox(width: 12),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 6,
+                  ),
+                  decoration: BoxDecoration(
+                    color: AppColors.white.withValues(alpha: 0.94),
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Image.asset(
+                        'assets/images/icon_diamond.png',
+                        width: 14,
+                        height: 14,
+                      ),
+                      const SizedBox(width: 6),
+                      Text(
+                        AppRuntimeText.instance.t(
+                          'match.cost.gems',
+                          '{count} tas',
+                          args: {'count': widget.gemCost},
+                        ),
+                        style: const TextStyle(
+                          fontFamily: AppFont.family,
+                          fontWeight: FontWeight.w600,
+                          fontSize: 13,
+                          color: AppColors.zinc900,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
             ],
-          ],
+          ),
         ),
       ),
     );
@@ -976,12 +1003,12 @@ class _MatchModeScreenState extends ConsumerState<MatchModeScreen> {
       await showCupertinoDialog<void>(
         context: context,
         builder: (dialogContext) => CupertinoAlertDialog(
-          title: const Text('Bilgi'),
+          title: Text(AppRuntimeText.instance.t('commonInfo', 'Bilgi')),
           content: Text(message),
           actions: [
             CupertinoDialogAction(
               onPressed: () => Navigator.of(dialogContext).pop(),
-              child: const Text('Tamam'),
+              child: Text(AppRuntimeText.instance.t('commonOk', 'Tamam')),
             ),
           ],
         ),
@@ -1024,7 +1051,12 @@ class _MatchModeScreenState extends ConsumerState<MatchModeScreen> {
         case AppMatchStartStatus.candidateFound:
           final candidate = result.candidate;
           if (candidate == null) {
-            await showInfo('Uygun aday bilgisi okunamadi.');
+            await showInfo(
+              AppRuntimeText.instance.t(
+                'match.error.candidate_unreadable',
+                'Uygun aday bilgisi okunamadi.',
+              ),
+            );
             return;
           }
           await navigator.push(
@@ -1039,7 +1071,11 @@ class _MatchModeScreenState extends ConsumerState<MatchModeScreen> {
           break;
         case AppMatchStartStatus.noCandidate:
           await showInfo(
-            result.message ?? 'Su anda filtrelerine uygun eslesme bulunamadi.',
+            result.message ??
+                AppRuntimeText.instance.t(
+                  'match.error.no_candidate',
+                  'Su anda filtrelerine uygun eslesme bulunamadi.',
+                ),
           );
           break;
       }
@@ -1088,14 +1124,20 @@ class _MatchModeScreenState extends ConsumerState<MatchModeScreen> {
                                 width: pairedWidth,
                                 child: _StatCard(
                                   value: '${matchState.waitingLikes}',
-                                  label: 'Seni bekleyen kisi',
+                                  label: AppRuntimeText.instance.t(
+                                    'match.stats.waiting_likes',
+                                    'Seni bekleyen kisi',
+                                  ),
                                 ),
                               ),
                               SizedBox(
                                 width: pairedWidth,
                                 child: _StatCard(
                                   value: '${matchState.onlineCount}',
-                                  label: 'Kisi simdi cevrimici',
+                                  label: AppRuntimeText.instance.t(
+                                    'match.stats.online_now',
+                                    'Kisi simdi cevrimici',
+                                  ),
                                 ),
                               ),
                             ],
@@ -1126,8 +1168,14 @@ class _MatchModeScreenState extends ConsumerState<MatchModeScreen> {
                           ],
                           _StartMatchButton(
                             label: matchState.isStarting
-                                ? 'E\u015fle\u015fme aran\u0131yor...'
-                                : 'E\u015fle\u015fmeyi Ba\u015flat!',
+                                ? AppRuntimeText.instance.t(
+                                    'match.start.searching',
+                                    'Eslesme araniyor...',
+                                  )
+                                : AppRuntimeText.instance.t(
+                                    'match.start.button',
+                                    'Eslesmeyi Baslat!',
+                                  ),
                             gemCost: isFree ? null : matchState.startCost,
                             onTap: matchState.isLoading || matchState.isStarting
                                 ? () {}
@@ -1142,7 +1190,10 @@ class _MatchModeScreenState extends ConsumerState<MatchModeScreen> {
                                 width: pairedWidth,
                                 child: _FilterPill(
                                   leading: const _GenderSymbolLeading(),
-                                  label: 'Cinsiyet',
+                                  label: AppRuntimeText.instance.t(
+                                    'match.filter.gender',
+                                    'Cinsiyet',
+                                  ),
                                   onTap: openGenderSheet,
                                 ),
                               ),
@@ -1153,7 +1204,10 @@ class _MatchModeScreenState extends ConsumerState<MatchModeScreen> {
                                     '\u{1F370}',
                                     style: TextStyle(fontSize: 18),
                                   ),
-                                  label: 'Ya\u015f',
+                                  label: AppRuntimeText.instance.t(
+                                    'match.filter.age',
+                                    'Yas',
+                                  ),
                                   onTap: openAgeSheet,
                                 ),
                               ),
@@ -1226,6 +1280,14 @@ class _PurchaseSheetState extends ConsumerState<PurchaseSheet> {
   final StorePurchaseService _purchaseService = StorePurchaseService();
   bool _isPurchasing = false;
 
+  String _t(
+    String key,
+    String fallback, {
+    Map<String, Object?> args = const <String, Object?>{},
+  }) {
+    return AppRuntimeText.instance.t(key, fallback, args: args);
+  }
+
   void _openPurchaseResult({
     required PaymentResultTone tone,
     required String badge,
@@ -1243,11 +1305,18 @@ class _PurchaseSheetState extends ConsumerState<PurchaseSheet> {
         badge: badge,
         title: title,
         subtitle: subtitle,
-        productLabel: '${selectedPackage.credits} Kredi',
+        productLabel: _t(
+          'match.purchase.result.product_label',
+          '{credits} Kredi',
+          args: {'credits': selectedPackage.credits},
+        ),
         amountLabel: selectedPackage.displayPrice,
         statusLabel: tone == PaymentResultTone.success
-            ? 'Kredi hesaba tanimlandi'
-            : 'Secilen paket hazir',
+            ? _t(
+                'match.purchase.result.status_applied',
+                'Kredi hesaba tanimlandi',
+              )
+            : _t('match.purchase.result.status_ready', 'Secilen paket hazir'),
         primaryLabel: l10n.commonDone,
       ),
     );
@@ -1260,9 +1329,15 @@ class _PurchaseSheetState extends ConsumerState<PurchaseSheet> {
     if (token == null || token.trim().isEmpty) {
       _openPurchaseResult(
         tone: PaymentResultTone.failure,
-        badge: 'OTURUM GEREKLI',
-        title: 'Jeton satin alimi baslatilamadi',
-        subtitle: 'Devam etmek icin once oturum acman gerekiyor.',
+        badge: _t('match.purchase.auth_required.badge', 'OTURUM GEREKLI'),
+        title: _t(
+          'match.purchase.auth_required.title',
+          'Jeton satin alimi baslatilamadi',
+        ),
+        subtitle: _t(
+          'match.purchase.auth_required.subtitle',
+          'Devam etmek icin once oturum acman gerekiyor.',
+        ),
         selectedPackage: selectedPackage,
       );
       return;
@@ -1290,9 +1365,12 @@ class _PurchaseSheetState extends ConsumerState<PurchaseSheet> {
       Navigator.of(context, rootNavigator: true).pop();
       _openPurchaseResult(
         tone: PaymentResultTone.success,
-        badge: 'ODEME BASARILI',
-        title: 'Kredi paketin hazir',
-        subtitle: 'Krediler hesabina eklendi. Eslesmeye devam edebilirsin.',
+        badge: _t('match.purchase.success.badge', 'ODEME BASARILI'),
+        title: _t('match.purchase.success.title', 'Kredi paketin hazir'),
+        subtitle: _t(
+          'match.purchase.success.subtitle',
+          'Krediler hesabina eklendi. Eslesmeye devam edebilirsin.',
+        ),
         selectedPackage: selectedPackage,
       );
       return;
@@ -1304,8 +1382,11 @@ class _PurchaseSheetState extends ConsumerState<PurchaseSheet> {
 
     _openPurchaseResult(
       tone: PaymentResultTone.failure,
-      badge: 'ODEME BASARISIZ',
-      title: 'Jeton satin alimi tamamlanamadi',
+      badge: _t('match.purchase.failure.badge', 'ODEME BASARISIZ'),
+      title: _t(
+        'match.purchase.failure.title',
+        'Jeton satin alimi tamamlanamadi',
+      ),
       subtitle: result.message,
       selectedPackage: selectedPackage,
     );
@@ -1340,9 +1421,9 @@ class _PurchaseSheetState extends ConsumerState<PurchaseSheet> {
             ),
           ),
           const SizedBox(height: 20),
-          const Text(
-            'Iste size ozel oneri!',
-            style: TextStyle(
+          Text(
+            _t('match.purchase.sheet.title', 'Iste size ozel oneri!'),
+            style: const TextStyle(
               fontFamily: AppFont.family,
               fontWeight: FontWeight.w800,
               fontSize: 22,
@@ -1351,7 +1432,11 @@ class _PurchaseSheetState extends ConsumerState<PurchaseSheet> {
           ),
           const SizedBox(height: 6),
           Text(
-            'Devam etmek icin ${widget.requiredCredits} tas gerekli.',
+            _t(
+              'match.purchase.sheet.required_credits',
+              'Devam etmek icin {credits} tas gerekli.',
+              args: {'credits': widget.requiredCredits},
+            ),
             style: const TextStyle(
               fontFamily: AppFont.family,
               fontSize: 14,
@@ -1365,12 +1450,18 @@ class _PurchaseSheetState extends ConsumerState<PurchaseSheet> {
               child: CupertinoActivityIndicator(),
             )
           else if (packagesAsync.hasError && packages.isEmpty)
-            const _MatchInfoCard(
-              message: 'Kredi paketleri su anda yuklenemiyor.',
+            _MatchInfoCard(
+              message: _t(
+                'match.purchase.packages.error',
+                'Kredi paketleri su anda yuklenemiyor.',
+              ),
             )
           else if (packages.isEmpty)
-            const _MatchInfoCard(
-              message: 'Su anda satin alinabilir kredi paketi bulunmuyor.',
+            _MatchInfoCard(
+              message: _t(
+                'match.purchase.packages.empty',
+                'Su anda satin alinabilir kredi paketi bulunmuyor.',
+              ),
             )
           else
             ...List.generate(packages.length, (index) {
@@ -1380,7 +1471,11 @@ class _PurchaseSheetState extends ConsumerState<PurchaseSheet> {
                   bottom: index == packages.length - 1 ? 0 : 10,
                 ),
                 child: _CreditOption(
-                  title: '${package.credits} Kredi',
+                  title: _t(
+                    'match.purchase.package.title',
+                    '{credits} Kredi',
+                    args: {'credits': package.credits},
+                  ),
                   subtitle: package.badgeLabel,
                   price: package.displayPrice,
                   selected: selectedIndex == index,
@@ -1391,17 +1486,25 @@ class _PurchaseSheetState extends ConsumerState<PurchaseSheet> {
             }),
           const SizedBox(height: 20),
           GradientButton(
-            label: _isPurchasing ? 'Satin alma isleniyor...' : 'Satin Al',
+            label: _isPurchasing
+                ? _t(
+                    'match.purchase.button.processing',
+                    'Satin alma isleniyor...',
+                  )
+                : _t('match.purchase.button.buy', 'Satin Al'),
             onTap: _isPurchasing || selectedPackage == null
                 ? null
                 : () => _purchaseCredits(selectedPackage),
           ),
           const SizedBox(height: 10),
-          const Center(
+          Center(
             child: Text(
-              'Odeme magazada tamamlandiginda paket otomatik olarak hesabina tanimlanir.',
+              _t(
+                'match.purchase.sheet.store_notice',
+                'Odeme magazada tamamlandiginda paket otomatik olarak hesabina tanimlanir.',
+              ),
               textAlign: TextAlign.center,
-              style: TextStyle(
+              style: const TextStyle(
                 fontFamily: AppFont.family,
                 fontSize: 12,
                 color: AppColors.neutral600,
@@ -1433,6 +1536,11 @@ class _CreditOption extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final popularLabel = AppRuntimeText.instance.t(
+      'match.purchase.package.popular_badge',
+      'EN POPULER',
+    );
+
     return PressableScale(
       onTap: onTap,
       scale: 0.99,
@@ -1524,9 +1632,9 @@ class _CreditOption extends StatelessWidget {
                   color: const Color(0xFF2B7FFF),
                   borderRadius: BorderRadius.circular(12),
                 ),
-                child: const Text(
-                  'EN POPULER',
-                  style: TextStyle(
+                child: Text(
+                  popularLabel,
+                  style: const TextStyle(
                     fontFamily: AppFont.family,
                     fontWeight: FontWeight.w800,
                     fontSize: 10,
@@ -1597,9 +1705,12 @@ class GenderFilterSheet extends ConsumerWidget {
             ),
           ),
           const SizedBox(height: 24),
-          const Text(
-            'Cinsiyet Filtresi',
-            style: TextStyle(
+          Text(
+            AppRuntimeText.instance.t(
+              'match.gender_filter.title',
+              'Cinsiyet Filtresi',
+            ),
+            style: const TextStyle(
               fontFamily: AppFont.family,
               fontWeight: FontWeight.w800,
               fontSize: 22,
@@ -1607,11 +1718,14 @@ class GenderFilterSheet extends ConsumerWidget {
             ),
           ),
           const SizedBox(height: 14),
-          const Padding(
-            padding: EdgeInsets.symmetric(horizontal: 4),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 4),
             child: Text(
-              'Cinsiyet tercihiniz',
-              style: TextStyle(
+              AppRuntimeText.instance.t(
+                'match.gender_filter.subtitle',
+                'Cinsiyet tercihiniz',
+              ),
+              style: const TextStyle(
                 fontFamily: AppFont.family,
                 fontSize: 12,
                 color: AppColors.neutral600,
@@ -1630,7 +1744,10 @@ class GenderFilterSheet extends ConsumerWidget {
                   SizedBox(
                     width: cardWidth,
                     child: _GenderCard(
-                      label: 'T\u00fcm\u00fc',
+                      label: AppRuntimeText.instance.t(
+                        'match.gender_filter.all',
+                        'Tumu',
+                      ),
                       asset: 'assets/images/icon_filter_female.png',
                       secondaryAsset: 'assets/images/icon_filter_male.png',
                       selected: gender == MatchGender.mixed,
@@ -1640,7 +1757,10 @@ class GenderFilterSheet extends ConsumerWidget {
                   SizedBox(
                     width: cardWidth,
                     child: _GenderCard(
-                      label: 'Kadinlar',
+                      label: AppRuntimeText.instance.t(
+                        'match.gender_filter.women',
+                        'Kadinlar',
+                      ),
                       asset: 'assets/images/icon_filter_female.png',
                       selected: gender == MatchGender.female,
                       onTap: () => notifier.setGender(MatchGender.female),
@@ -1649,7 +1769,10 @@ class GenderFilterSheet extends ConsumerWidget {
                   SizedBox(
                     width: cardWidth,
                     child: _GenderCard(
-                      label: 'Erkekler',
+                      label: AppRuntimeText.instance.t(
+                        'match.gender_filter.men',
+                        'Erkekler',
+                      ),
                       asset: 'assets/images/icon_filter_male.png',
                       selected: gender == MatchGender.male,
                       onTap: () => notifier.setGender(MatchGender.male),
@@ -1661,7 +1784,10 @@ class GenderFilterSheet extends ConsumerWidget {
           ),
           const SizedBox(height: 24),
           GradientButton(
-            label: 'Tercihleri Uygula',
+            label: AppRuntimeText.instance.t(
+              'match.filters.apply',
+              'Tercihleri Uygula',
+            ),
             onTap: () => Navigator.of(context).maybePop(),
           ),
         ],
@@ -1694,17 +1820,37 @@ class _AgeFilterSheetState extends ConsumerState<AgeFilterSheet> {
   Widget build(BuildContext context) {
     final notifier = ref.read(matchProvider.notifier);
     final selectedCode = _ageCodeFromRange(_minAge, _maxAge);
-    final ageOptions = <({String code, String label, int minAge, int maxAge})>[
-      (
-        code: 'tum',
-        label: 'Dengeli ya\u015f e\u015fle\u015fmesi',
-        minAge: 18,
-        maxAge: 60,
-      ),
-      (code: '18_25', label: '18 - 25', minAge: 18, maxAge: 25),
-      (code: '26_35', label: '26 - 35', minAge: 26, maxAge: 35),
-      (code: '36_ustu', label: '36 ve \u00fcst\u00fc', minAge: 36, maxAge: 60),
-    ];
+    final ageOptions =
+        <({String code, String key, String fallback, int minAge, int maxAge})>[
+          (
+            code: 'tum',
+            key: 'match.age_filter.balanced',
+            fallback: 'Dengeli yas eslesmesi',
+            minAge: 18,
+            maxAge: 60,
+          ),
+          (
+            code: '18_25',
+            key: 'match.age_filter.range_18_25',
+            fallback: '18 - 25',
+            minAge: 18,
+            maxAge: 25,
+          ),
+          (
+            code: '26_35',
+            key: 'match.age_filter.range_26_35',
+            fallback: '26 - 35',
+            minAge: 26,
+            maxAge: 35,
+          ),
+          (
+            code: '36_ustu',
+            key: 'match.age_filter.range_36_plus',
+            fallback: '36 ve ustu',
+            minAge: 36,
+            maxAge: 60,
+          ),
+        ];
 
     return _AdaptiveMatchSheet(
       child: Column(
@@ -1722,9 +1868,9 @@ class _AgeFilterSheetState extends ConsumerState<AgeFilterSheet> {
             ),
           ),
           const SizedBox(height: 24),
-          const Text(
-            'Ya\u015f Filtresi',
-            style: TextStyle(
+          Text(
+            AppRuntimeText.instance.t('match.age_filter.title', 'Yas Filtresi'),
+            style: const TextStyle(
               fontFamily: AppFont.family,
               fontWeight: FontWeight.w800,
               fontSize: 22,
@@ -1732,11 +1878,14 @@ class _AgeFilterSheetState extends ConsumerState<AgeFilterSheet> {
             ),
           ),
           const SizedBox(height: 14),
-          const Padding(
-            padding: EdgeInsets.symmetric(horizontal: 4),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 4),
             child: Text(
-              'Ya\u015f tercihiniz',
-              style: TextStyle(
+              AppRuntimeText.instance.t(
+                'match.age_filter.subtitle',
+                'Yas tercihiniz',
+              ),
+              style: const TextStyle(
                 fontFamily: AppFont.family,
                 fontSize: 12,
                 color: AppColors.neutral600,
@@ -1753,7 +1902,10 @@ class _AgeFilterSheetState extends ConsumerState<AgeFilterSheet> {
               children: [
                 for (var index = 0; index < ageOptions.length; index++) ...[
                   _AgeOptionRow(
-                    label: ageOptions[index].label,
+                    label: AppRuntimeText.instance.t(
+                      ageOptions[index].key,
+                      ageOptions[index].fallback,
+                    ),
                     selected: selectedCode == ageOptions[index].code,
                     onTap: () {
                       setState(() {
@@ -1776,7 +1928,15 @@ class _AgeFilterSheetState extends ConsumerState<AgeFilterSheet> {
           ),
           const SizedBox(height: 24),
           GradientButton(
-            label: _isApplying ? 'Guncelleniyor...' : 'Ya\u015f\u0131 Uygula',
+            label: _isApplying
+                ? AppRuntimeText.instance.t(
+                    'match.age_filter.applying',
+                    'Guncelleniyor...',
+                  )
+                : AppRuntimeText.instance.t(
+                    'match.age_filter.apply',
+                    'Yasi Uygula',
+                  ),
             onTap: _isApplying
                 ? null
                 : () async {
@@ -1939,16 +2099,35 @@ class _GenderCard extends StatelessWidget {
 
 // ------ Screen: Matching (loading) --------------------------------------------
 
+typedef MatchingNativeAdCardBuilder =
+    Widget Function(
+      BuildContext context, {
+      required String adUnitId,
+      required Widget fallback,
+      required VoidCallback onLoaded,
+      required VoidCallback onFailed,
+    });
+
 class MatchingScreen extends ConsumerStatefulWidget {
+  static const Duration defaultResultDelay = Duration(milliseconds: 2200);
+  static const Duration legacyAdResultDelay = Duration(seconds: 3);
+  static const Duration nativeAdMinimumVisibleDuration = Duration(seconds: 8);
+
   final bool withAd;
   final MatchFoundTheme theme;
   final AppMatchCandidate candidate;
+  final String? nativeAdUnitIdOverride;
+  final bool? premiumActiveOverride;
+  final MatchingNativeAdCardBuilder? nativeAdCardBuilder;
 
   const MatchingScreen({
     super.key,
     this.withAd = false,
     this.theme = MatchFoundTheme.normal,
     required this.candidate,
+    this.nativeAdUnitIdOverride,
+    this.premiumActiveOverride,
+    this.nativeAdCardBuilder,
   });
 
   @override
@@ -1956,19 +2135,32 @@ class MatchingScreen extends ConsumerStatefulWidget {
 }
 
 class _MatchingScreenState extends ConsumerState<MatchingScreen> {
-  bool _adVisible = true;
   Timer? _resultTimer;
   Timer? _countdownTimer;
+  String? _reservedNativeAdUnitId;
+  bool _nativeAdEligibilityEvaluated = false;
+  bool _nativeAdLoaded = false;
+  bool _nativeAdFailed = false;
+  bool _resultOpened = false;
   late int _secondsRemaining;
+  late Duration _currentResultDelay;
+  int _countdownGeneration = 0;
 
   @override
   void initState() {
     super.initState();
-    _secondsRemaining = ((_resultDelay.inMilliseconds + 999) ~/ 1000).clamp(
-      1,
-      99,
-    );
-    _resultTimer = Timer(_resultDelay, _openResult);
+    _startResultCountdown(_initialResultDelay, notify: false);
+  }
+
+  void _startResultCountdown(Duration delay, {bool notify = true}) {
+    _resultTimer?.cancel();
+    _countdownTimer?.cancel();
+
+    _currentResultDelay = delay;
+    _secondsRemaining = ((delay.inMilliseconds + 999) ~/ 1000).clamp(1, 99);
+    _countdownGeneration++;
+
+    _resultTimer = Timer(delay, _openResult);
     _countdownTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
       if (!mounted || _secondsRemaining <= 1) {
         timer.cancel();
@@ -1976,6 +2168,10 @@ class _MatchingScreenState extends ConsumerState<MatchingScreen> {
       }
       setState(() => _secondsRemaining--);
     });
+
+    if (notify && mounted) {
+      setState(() {});
+    }
   }
 
   @override
@@ -1985,14 +2181,18 @@ class _MatchingScreenState extends ConsumerState<MatchingScreen> {
     super.dispose();
   }
 
-  Duration get _resultDelay => widget.withAd
-      ? const Duration(seconds: 3)
-      : const Duration(milliseconds: 2200);
+  Duration get _initialResultDelay => widget.withAd
+      ? MatchingScreen.legacyAdResultDelay
+      : MatchingScreen.defaultResultDelay;
 
   void _openResult() {
-    if (!mounted) {
+    if (!mounted || _resultOpened) {
       return;
     }
+
+    _resultOpened = true;
+    _resultTimer?.cancel();
+    _countdownTimer?.cancel();
 
     Navigator.of(context).pushReplacement(
       cupertinoRoute(
@@ -2001,59 +2201,53 @@ class _MatchingScreenState extends ConsumerState<MatchingScreen> {
     );
   }
 
-  Future<void> _showInfo(String message) async {
-    await showCupertinoDialog<void>(
-      context: context,
-      builder: (dialogContext) => CupertinoAlertDialog(
-        title: const Text('Bilgi'),
-        content: Text(message),
-        actions: [
-          CupertinoDialogAction(
-            onPressed: () => Navigator.of(dialogContext).pop(),
-            child: const Text('Tamam'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Future<void> _repeatMatch() async {
-    _resultTimer?.cancel();
-    _countdownTimer?.cancel();
-
-    final result = await ref.read(matchProvider.notifier).startMatch();
-    if (!mounted || result == null) {
+  void _handleNativeAdLoaded() {
+    if (!mounted || _nativeAdLoaded || _resultOpened) {
       return;
     }
 
-    switch (result.status) {
-      case AppMatchStartStatus.candidateFound:
-        final candidate = result.candidate;
-        if (candidate == null) {
-          await _showInfo('Uygun aday bilgisi okunamadi.');
-          return;
-        }
-        Navigator.of(context).pushReplacement(
-          cupertinoRoute(
-            MatchingScreen(
-              theme: _themeForMatchState(ref.read(matchProvider)),
-              candidate: candidate,
-            ),
-          ),
-        );
-        break;
-      case AppMatchStartStatus.insufficientCredits:
-        await showCupertinoModalPopup<void>(
-          context: context,
-          builder: (_) => PurchaseSheet(requiredCredits: result.startCost),
-        );
-        break;
-      case AppMatchStartStatus.noCandidate:
-        await _showInfo(
-          result.message ?? 'Su anda filtrelerine uygun eslesme bulunamadi.',
-        );
-        break;
+    _nativeAdLoaded = true;
+    _nativeAdFailed = false;
+    _startResultCountdown(MatchingScreen.nativeAdMinimumVisibleDuration);
+  }
+
+  void _handleNativeAdFailed() {
+    if (!mounted || _nativeAdFailed || _resultOpened) {
+      return;
     }
+
+    setState(() => _nativeAdFailed = true);
+  }
+
+  String? _reserveNativeAdUnit({
+    required bool premiumActive,
+    required String? nativeAdUnitId,
+  }) {
+    if (premiumActive) {
+      return null;
+    }
+
+    final current = _reservedNativeAdUnitId;
+    if (current != null && current.isNotEmpty) {
+      return current;
+    }
+
+    final normalized = nativeAdUnitId?.trim();
+    if (normalized == null || normalized.isEmpty) {
+      return null;
+    }
+
+    if (_nativeAdEligibilityEvaluated) {
+      return null;
+    }
+
+    _nativeAdEligibilityEvaluated = true;
+    if (!AdMobNativeAdFrequencyGate.shouldRequestMatchNativeAd()) {
+      return null;
+    }
+
+    _reservedNativeAdUnitId = normalized;
+    return normalized;
   }
 
   void _stopMatching() {
@@ -2065,14 +2259,35 @@ class _MatchingScreenState extends ConsumerState<MatchingScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final premiumActive =
+        widget.premiumActiveOverride ??
+        ref.watch(appAuthProvider).asData?.value?.user?.premiumActive == true;
+    final nativeAdUnitId =
+        widget.nativeAdUnitIdOverride ??
+        ref
+            .watch(appPublicSettingsProvider)
+            .asData
+            ?.value
+            .ads
+            .matchNativeUnitIdFor(currentMobileStorePlatform());
+    final reservedNativeAdUnitId = _reserveNativeAdUnit(
+      premiumActive: premiumActive,
+      nativeAdUnitId: nativeAdUnitId,
+    );
+    final showAdLayout =
+        !premiumActive &&
+        (widget.withAd ||
+            (reservedNativeAdUnitId != null &&
+                reservedNativeAdUnitId.isNotEmpty));
+
     return CupertinoPageScaffold(
       backgroundColor: AppColors.neutral100,
       child: Stack(
         children: [
-          if (!widget.withAd) const Positioned.fill(child: _AmbientFullBg()),
+          if (!showAdLayout) const Positioned.fill(child: _AmbientFullBg()),
           SafeArea(
-            child: widget.withAd
-                ? _buildAdBody(context)
+            child: showAdLayout
+                ? _buildAdBody(context, nativeAdUnitId: reservedNativeAdUnitId)
                 : _buildEmojiBody(context),
           ),
         ],
@@ -2107,7 +2322,10 @@ class _MatchingScreenState extends ConsumerState<MatchingScreen> {
                         ),
                         SizedBox(height: compact ? 18 : 24),
                         Text(
-                          'Senin icin en uygunu\nbuluyoruz...',
+                          AppRuntimeText.instance.t(
+                            'match.search.finding_best',
+                            'Senin icin en uygunu\nbuluyoruz...',
+                          ),
                           textAlign: TextAlign.center,
                           style: TextStyle(
                             fontFamily: AppFont.family,
@@ -2119,9 +2337,12 @@ class _MatchingScreenState extends ConsumerState<MatchingScreen> {
                           ),
                         ),
                         const SizedBox(height: 8),
-                        const Text(
-                          'Merhaba de ve nazik ol',
-                          style: TextStyle(
+                        Text(
+                          AppRuntimeText.instance.t(
+                            'match.search.kindness_hint',
+                            'Merhaba de ve nazik ol',
+                          ),
+                          style: const TextStyle(
                             fontFamily: AppFont.family,
                             fontSize: 14,
                             color: AppColors.neutral600,
@@ -2130,39 +2351,17 @@ class _MatchingScreenState extends ConsumerState<MatchingScreen> {
                       ],
                     ),
                   ),
-                  TweenAnimationBuilder<double>(
-                    tween: Tween(begin: 0.2, end: 1),
-                    duration: _resultDelay,
-                    builder: (context, value, _) {
-                      return Column(
-                        children: [
-                          Container(
-                            height: 8,
-                            decoration: BoxDecoration(
-                              color: AppColors.white.withValues(alpha: 0.45),
-                              borderRadius: BorderRadius.circular(999),
-                            ),
-                            child: Align(
-                              alignment: Alignment.centerLeft,
-                              child: FractionallySizedBox(
-                                widthFactor: value,
-                                child: Container(
-                                  decoration: BoxDecoration(
-                                    color: const Color(0xFFF5A524),
-                                    borderRadius: BorderRadius.circular(999),
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ),
-                        ],
-                      );
-                    },
+                  _MatchingProgressBar(
+                    generation: _countdownGeneration,
+                    duration: _currentResultDelay,
                   ),
                   Padding(
                     padding: const EdgeInsets.only(bottom: 16),
                     child: _SecondaryActionButton(
-                      label: 'Durdur',
+                      label: AppRuntimeText.instance.t(
+                        'match.search.stop',
+                        'Durdur',
+                      ),
                       onTap: _stopMatching,
                     ),
                   ),
@@ -2175,90 +2374,113 @@ class _MatchingScreenState extends ConsumerState<MatchingScreen> {
     );
   }
 
-  Widget _buildAdBody(BuildContext context) {
+  Widget _buildAdBody(BuildContext context, {required String? nativeAdUnitId}) {
+    final fallbackCard = const _AdCard();
+    final normalizedAdUnitId = nativeAdUnitId?.trim();
+    final adCard = normalizedAdUnitId == null || normalizedAdUnitId.isEmpty
+        ? fallbackCard
+        : (widget.nativeAdCardBuilder?.call(
+                context,
+                adUnitId: normalizedAdUnitId,
+                fallback: fallbackCard,
+                onLoaded: _handleNativeAdLoaded,
+                onFailed: _handleNativeAdFailed,
+              ) ??
+              AdMobNativeAdCard(
+                adUnitId: normalizedAdUnitId,
+                fallback: fallbackCard,
+                onLoaded: _handleNativeAdLoaded,
+                onFailed: _handleNativeAdFailed,
+              ));
+
     return Column(
       children: [
         Expanded(
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: AnimatedOpacity(
-              duration: const Duration(milliseconds: 220),
-              opacity: _adVisible ? 1.0 : 0.0,
-              child: _AdCard(onClose: () => setState(() => _adVisible = false)),
-            ),
+          child: Padding(padding: const EdgeInsets.all(16), child: adCard),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+          child: _MatchingProgressBar(
+            generation: _countdownGeneration,
+            duration: _currentResultDelay,
           ),
         ),
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16),
-          child: Container(
-            width: double.infinity,
-            padding: const EdgeInsets.fromLTRB(16, 12, 12, 12),
-            decoration: BoxDecoration(
-              color: const Color(0xFFE5E5E5),
-              borderRadius: BorderRadius.circular(20),
-            ),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Text.rich(
-                    TextSpan(
+          child: PressableScale(
+            onTap: () {
+              Navigator.of(context).push(cupertinoRoute(const PaywallScreen()));
+            },
+            scale: 0.99,
+            child: Container(
+              width: double.infinity,
+              padding: const EdgeInsets.fromLTRB(16, 12, 12, 12),
+              decoration: BoxDecoration(
+                color: const Color(0xFFE5E5E5),
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      AppRuntimeText.instance.t(
+                        'match.ad.premium_notice',
+                        'Magmug Premium ile tum reklamlardan kurtulursun.',
+                      ),
                       style: const TextStyle(
                         fontFamily: AppFont.family,
                         fontSize: 12,
                         color: AppColors.neutral950,
                         height: 1.35,
                       ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 8,
+                    ),
+                    decoration: BoxDecoration(
+                      color: AppColors.white,
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
                       children: [
-                        const TextSpan(
-                          text: 'Magmug Premium',
-                          style: TextStyle(fontWeight: FontWeight.w700),
+                        Image.asset(
+                          'assets/images/icon_diamond.png',
+                          width: 14,
+                          height: 14,
                         ),
-                        const TextSpan(
-                          text: "'da tum reklamlardan kurtulursun.",
+                        const SizedBox(width: 6),
+                        Text(
+                          AppRuntimeText.instance.t(
+                            'match.ad.premium_button',
+                            'Premium',
+                          ),
+                          style: const TextStyle(
+                            fontFamily: AppFont.family,
+                            fontWeight: FontWeight.w700,
+                            fontSize: 13,
+                            color: AppColors.zinc900,
+                          ),
                         ),
                       ],
                     ),
                   ),
-                ),
-                const SizedBox(width: 8),
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 8,
-                  ),
-                  decoration: BoxDecoration(
-                    color: AppColors.white,
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Image.asset(
-                        'assets/images/icon_diamond.png',
-                        width: 14,
-                        height: 14,
-                      ),
-                      const SizedBox(width: 6),
-                      const Text(
-                        'Premium',
-                        style: TextStyle(
-                          fontFamily: AppFont.family,
-                          fontWeight: FontWeight.w700,
-                          fontSize: 13,
-                          color: AppColors.zinc900,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
         ),
         const SizedBox(height: 12),
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-          child: _SecondaryActionButton(label: 'Tekrar', onTap: _repeatMatch),
+          child: _SecondaryActionButton(
+            label: AppRuntimeText.instance.t('match.search.stop', 'Durdur'),
+            onTap: _stopMatching,
+          ),
         ),
       ],
     );
@@ -2315,9 +2537,7 @@ class _AmbientFullBg extends StatelessWidget {
 }
 
 class _AdCard extends StatelessWidget {
-  final VoidCallback onClose;
-
-  const _AdCard({required this.onClose});
+  const _AdCard();
 
   @override
   Widget build(BuildContext context) {
@@ -2339,63 +2559,31 @@ class _AdCard extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   mainAxisAlignment: MainAxisAlignment.end,
-                  children: const [
+                  children: [
                     Text(
-                      'Reklamli devam',
-                      style: TextStyle(
+                      AppRuntimeText.instance.t(
+                        'match.search.short_break.title',
+                        'Kisa bir ara',
+                      ),
+                      style: const TextStyle(
                         fontFamily: AppFont.family,
                         fontWeight: FontWeight.w800,
                         fontSize: 24,
                         color: AppColors.zinc900,
                       ),
                     ),
-                    SizedBox(height: 8),
+                    const SizedBox(height: 8),
                     Text(
-                      'Kesfete ara vermeden devam etmek icin bu alanda gosterilen reklami tamamlayabilirsin.',
-                      style: TextStyle(
+                      AppRuntimeText.instance.t(
+                        'match.search.short_break.subtitle',
+                        'Eslesme sonucunu hazirliyoruz. Birazdan devam edeceksin.',
+                      ),
+                      style: const TextStyle(
                         fontFamily: AppFont.family,
                         fontSize: 14,
                         height: 1.4,
                         color: AppColors.neutral600,
                       ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-          Positioned(
-            top: 12,
-            right: 12,
-            child: PressableScale(
-              onTap: onClose,
-              scale: 0.94,
-              child: Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 8,
-                ),
-                decoration: BoxDecoration(
-                  color: AppColors.white,
-                  borderRadius: BorderRadius.circular(20),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: const [
-                    Text(
-                      'Reklami Kapat',
-                      style: TextStyle(
-                        fontFamily: AppFont.family,
-                        fontWeight: FontWeight.w600,
-                        fontSize: 13,
-                        color: AppColors.zinc900,
-                      ),
-                    ),
-                    SizedBox(width: 6),
-                    Icon(
-                      CupertinoIcons.xmark,
-                      size: 14,
-                      color: AppColors.zinc900,
                     ),
                   ],
                 ),
@@ -2408,9 +2596,50 @@ class _AdCard extends StatelessWidget {
   }
 }
 
+class _MatchingProgressBar extends StatelessWidget {
+  final int generation;
+  final Duration duration;
+
+  const _MatchingProgressBar({
+    required this.generation,
+    required this.duration,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return TweenAnimationBuilder<double>(
+      key: ValueKey(generation),
+      tween: Tween(begin: 0.2, end: 1),
+      duration: duration,
+      builder: (context, value, _) {
+        return Container(
+          key: const ValueKey('matching-progress-bar'),
+          height: 8,
+          decoration: BoxDecoration(
+            color: AppColors.white.withValues(alpha: 0.45),
+            borderRadius: BorderRadius.circular(999),
+          ),
+          child: Align(
+            alignment: Alignment.centerLeft,
+            child: FractionallySizedBox(
+              widthFactor: value,
+              child: Container(
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF5A524),
+                  borderRadius: BorderRadius.circular(999),
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
 class _SecondaryActionButton extends StatelessWidget {
   final String label;
-  final VoidCallback onTap;
+  final VoidCallback? onTap;
 
   const _SecondaryActionButton({required this.label, required this.onTap});
 
@@ -2418,33 +2647,39 @@ class _SecondaryActionButton extends StatelessWidget {
   Widget build(BuildContext context) {
     return PressableScale(
       onTap: onTap,
-      child: Container(
-        height: 56,
-        decoration: BoxDecoration(
-          color: AppColors.white,
-          borderRadius: BorderRadius.circular(40),
-          boxShadow: const [
-            BoxShadow(
-              color: Color(0x14000000),
-              blurRadius: 12,
-              offset: Offset(0, 4),
+      child: AnimatedOpacity(
+        duration: const Duration(milliseconds: 180),
+        opacity: onTap == null ? 0.5 : 1,
+        child: Container(
+          height: 56,
+          decoration: BoxDecoration(
+            color: AppColors.white,
+            borderRadius: BorderRadius.circular(40),
+            boxShadow: const [
+              BoxShadow(
+                color: Color(0x14000000),
+                blurRadius: 12,
+                offset: Offset(0, 4),
+              ),
+            ],
+          ),
+          alignment: Alignment.center,
+          child: Text(
+            label,
+            style: TextStyle(
+              fontFamily: AppFont.family,
+              fontWeight: FontWeight.w600,
+              fontSize: 16,
+              color: AppColors.neutral600,
             ),
-          ],
-        ),
-        alignment: Alignment.center,
-        child: Text(
-          label,
-          style: TextStyle(
-            fontFamily: AppFont.family,
-            fontWeight: FontWeight.w600,
-            fontSize: 16,
-            color: AppColors.neutral600,
           ),
         ),
       ),
     );
   }
 }
+
+enum _MatchFoundSubmittingAction { skip, message }
 
 // ------ Screen: Match Found ---------------------------------------------------
 
@@ -2466,7 +2701,9 @@ class _MatchFoundScreenState extends ConsumerState<MatchFoundScreen> {
   Timer? _repeatTimer;
   Timer? _countdownTimer;
   int _secondsRemaining = 6;
-  bool _isSubmitting = false;
+  _MatchFoundSubmittingAction? _submittingAction;
+
+  bool get _isSubmitting => _submittingAction != null;
 
   @override
   void initState() {
@@ -2509,41 +2746,37 @@ class _MatchFoundScreenState extends ConsumerState<MatchFoundScreen> {
     required int peerId,
     int? matchId,
   }) async {
-    final api = AppAuthApi();
-    try {
-      final conversations = await api.fetchConversations(
-        token,
-        currentUserId: currentUserId,
-      );
-
-      for (final item in conversations) {
-        if (matchId != null && item.matchId == matchId) {
-          return item;
-        }
-      }
-
-      for (final item in conversations) {
-        if (item.peerId == peerId) {
-          return item;
-        }
-      }
-
+    final bootstrap = await AppBootstrapCoordinator.instance.bootstrap(token);
+    if (bootstrap.user.id != currentUserId) {
       return null;
-    } finally {
-      api.close();
     }
+    final conversations = bootstrap.conversations;
+
+    for (final item in conversations) {
+      if (matchId != null && item.matchId == matchId) {
+        return item;
+      }
+    }
+
+    for (final item in conversations) {
+      if (item.peerId == peerId) {
+        return item;
+      }
+    }
+
+    return null;
   }
 
   Future<void> _showInfo(String message) async {
     await showCupertinoDialog<void>(
       context: context,
       builder: (dialogContext) => CupertinoAlertDialog(
-        title: const Text('Bilgi'),
+        title: Text(AppRuntimeText.instance.t('commonInfo', 'Bilgi')),
         content: Text(message),
         actions: [
           CupertinoDialogAction(
             onPressed: () => Navigator.of(dialogContext).pop(),
-            child: const Text('Tamam'),
+            child: Text(AppRuntimeText.instance.t('commonOk', 'Tamam')),
           ),
         ],
       ),
@@ -2556,7 +2789,7 @@ class _MatchFoundScreenState extends ConsumerState<MatchFoundScreen> {
     }
 
     _stopRepeatCountdown();
-    setState(() => _isSubmitting = true);
+    setState(() => _submittingAction = _MatchFoundSubmittingAction.skip);
 
     final notifier = ref.read(matchProvider.notifier);
     if (!autoTriggered) {
@@ -2566,7 +2799,7 @@ class _MatchFoundScreenState extends ConsumerState<MatchFoundScreen> {
         if (!mounted) {
           return;
         }
-        setState(() => _isSubmitting = false);
+        setState(() => _submittingAction = null);
         _startRepeatCountdown();
         return;
       }
@@ -2577,7 +2810,7 @@ class _MatchFoundScreenState extends ConsumerState<MatchFoundScreen> {
       return;
     }
 
-    setState(() => _isSubmitting = false);
+    setState(() => _submittingAction = null);
 
     if (result == null) {
       _startRepeatCountdown();
@@ -2588,7 +2821,12 @@ class _MatchFoundScreenState extends ConsumerState<MatchFoundScreen> {
       case AppMatchStartStatus.candidateFound:
         final candidate = result.candidate;
         if (candidate == null) {
-          await _showInfo('Uygun aday bilgisi okunamadi.');
+          await _showInfo(
+            AppRuntimeText.instance.t(
+              'match.error.candidate_unreadable',
+              'Uygun aday bilgisi okunamadi.',
+            ),
+          );
           _startRepeatCountdown();
           return;
         }
@@ -2612,7 +2850,11 @@ class _MatchFoundScreenState extends ConsumerState<MatchFoundScreen> {
         break;
       case AppMatchStartStatus.noCandidate:
         await _showInfo(
-          result.message ?? 'Su anda filtrelerine uygun eslesme bulunamadi.',
+          result.message ??
+              AppRuntimeText.instance.t(
+                'match.error.no_candidate',
+                'Su anda filtrelerine uygun eslesme bulunamadi.',
+              ),
         );
         if (mounted && !autoTriggered) {
           _startRepeatCountdown();
@@ -2636,12 +2878,17 @@ class _MatchFoundScreenState extends ConsumerState<MatchFoundScreen> {
         token.trim().isEmpty ||
         currentUserId == null ||
         candidate == null) {
-      await _showInfo('Sohbet acilamadi. Lutfen tekrar dene.');
+      await _showInfo(
+        AppRuntimeText.instance.t(
+          'match.error.chat_open_failed',
+          'Sohbet acilamadi. Lutfen tekrar dene.',
+        ),
+      );
       return;
     }
 
     _stopRepeatCountdown();
-    setState(() => _isSubmitting = true);
+    setState(() => _submittingAction = _MatchFoundSubmittingAction.message);
 
     AppConversationPreview? conversationToOpen;
     String? messageToShow;
@@ -2667,7 +2914,10 @@ class _MatchFoundScreenState extends ConsumerState<MatchFoundScreen> {
       if (conversationToOpen == null) {
         messageToShow =
             result.message ??
-            'Sohbet hazir ama listeye duserken kisa bir gecikme oldu. Mesajlar ekranina yonlendiriliyorsun.';
+            AppRuntimeText.instance.t(
+              'match.error.chat_list_delay',
+              'Sohbet hazir ama listeye duserken kisa bir gecikme oldu. Mesajlar ekranina yonlendiriliyorsun.',
+            );
         openHomeAfterMessage = true;
       }
     } catch (error) {
@@ -2675,7 +2925,7 @@ class _MatchFoundScreenState extends ConsumerState<MatchFoundScreen> {
       restartCountdown = true;
     } finally {
       if (mounted) {
-        setState(() => _isSubmitting = false);
+        setState(() => _submittingAction = null);
       }
     }
 
@@ -2685,7 +2935,7 @@ class _MatchFoundScreenState extends ConsumerState<MatchFoundScreen> {
 
     if (conversationToOpen != null) {
       Navigator.of(context).pushAndRemoveUntil(
-        cupertinoRoute(
+        chatRoute(
           ChatScreen(
             mode: ChatScreenMode.messages,
             conversation: conversationToOpen,
@@ -2722,6 +2972,7 @@ class _MatchFoundScreenState extends ConsumerState<MatchFoundScreen> {
     final authUser = ref.watch(appAuthProvider).asData?.value?.user;
     final AppMatchCandidate? candidate = widget.candidate;
     final isSuper = widget.theme == MatchFoundTheme.superMatch;
+    final submittingAction = _submittingAction;
     final gradient = isSuper
         ? const LinearGradient(
             begin: Alignment.topRight,
@@ -2772,7 +3023,10 @@ class _MatchFoundScreenState extends ConsumerState<MatchFoundScreen> {
                                 Text(
                                   candidate?.displayName ??
                                       authUser?.displayName ??
-                                      'Yeni eslesme',
+                                      AppRuntimeText.instance.t(
+                                        'match.found.title',
+                                        'Yeni eslesme',
+                                      ),
                                   textAlign: TextAlign.center,
                                   style: const TextStyle(
                                     fontFamily: AppFont.family,
@@ -2782,24 +3036,14 @@ class _MatchFoundScreenState extends ConsumerState<MatchFoundScreen> {
                                     letterSpacing: -0.5,
                                   ),
                                 ),
-                                SizedBox(height: compact ? 20 : 32),
+                                SizedBox(height: compact ? 18 : 24),
                                 Text(
-                                  isSuper ? 'Super\nEslesme' : 'Eslesme',
-                                  textAlign: TextAlign.center,
-                                  style: TextStyle(
-                                    fontFamily: AppFont.family,
-                                    fontWeight: FontWeight.w800,
-                                    fontSize: compact ? 36 : 44,
-                                    height: 1.05,
-                                    color: AppColors.white,
-                                    letterSpacing: -1.5,
+                                  AppRuntimeText.instance.t(
+                                    'match.found.subtitle',
+                                    'Bu aday senin icin hazir. Mesaj atabilir ya da gec diyerek yeni bir aday arayabilirsin.',
                                   ),
-                                ),
-                                const SizedBox(height: 16),
-                                const Text(
-                                  'Bu aday senin icin hazir. Mesaj atabilir ya da gec diyerek yeni bir aday arayabilirsin.',
                                   textAlign: TextAlign.center,
-                                  style: TextStyle(
+                                  style: const TextStyle(
                                     fontFamily: AppFont.family,
                                     fontSize: 16,
                                     color: AppColors.white,
@@ -2817,18 +3061,27 @@ class _MatchFoundScreenState extends ConsumerState<MatchFoundScreen> {
                             child: Column(
                               children: [
                                 _StartMatchButton(
-                                  label: _isSubmitting
-                                      ? 'Isleniyor...'
-                                      : 'Mesaj At',
-                                  onTap: _isSubmitting
-                                      ? () {}
-                                      : _messageCandidate,
+                                  label: AppRuntimeText.instance.t(
+                                    'match.found.message',
+                                    'Mesaj At',
+                                  ),
+                                  onTap: submittingAction == null
+                                      ? _messageCandidate
+                                      : null,
                                   whiteBorder: true,
+                                  loading:
+                                      submittingAction ==
+                                      _MatchFoundSubmittingAction.message,
                                 ),
                                 const SizedBox(height: 12),
                                 _SecondaryActionButton(
-                                  label: _isSubmitting ? 'Isleniyor...' : 'Gec',
-                                  onTap: _isSubmitting ? () {} : _repeatMatch,
+                                  label: AppRuntimeText.instance.t(
+                                    'match.found.skip',
+                                    'Gec',
+                                  ),
+                                  onTap: submittingAction == null
+                                      ? _repeatMatch
+                                      : null,
                                 ),
                               ],
                             ),
@@ -2908,7 +3161,9 @@ class _MatchPairAvatars extends ConsumerWidget {
             left: 0,
             child: _MatchAvatar(
               size: avatarSize,
-              label: authUser?.displayName ?? 'Sen',
+              label:
+                  authUser?.displayName ??
+                  AppRuntimeText.instance.t('match.avatar.self', 'Sen'),
               imageUrl: authUser?.profileImageUrl,
             ),
           ),
@@ -2916,7 +3171,12 @@ class _MatchPairAvatars extends ConsumerWidget {
             left: overlap,
             child: _MatchAvatar(
               size: avatarSize,
-              label: candidate?.displayName ?? 'Eslesme',
+              label:
+                  candidate?.displayName ??
+                  AppRuntimeText.instance.t(
+                    'match.found.default_name',
+                    'Eslesme',
+                  ),
               imageUrl: candidate?.primaryImageUrl,
             ),
           ),

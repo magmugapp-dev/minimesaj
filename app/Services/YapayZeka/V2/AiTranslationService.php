@@ -4,6 +4,7 @@ namespace App\Services\YapayZeka\V2;
 
 use App\Models\Mesaj;
 use App\Models\User;
+use App\Services\YapayZeka\GeminiModelPolicy;
 use App\Services\YapayZeka\GeminiSaglayici;
 use App\Support\AiMessageTextSanitizer;
 use App\Support\Language;
@@ -12,11 +13,9 @@ class AiTranslationService
 {
     public function __construct(
         private ?GeminiSaglayici $geminiSaglayici = null,
-        private ?AiEngineConfigService $engineConfigService = null,
         private ?AiJsonResponseParser $jsonParser = null,
     ) {
         $this->geminiSaglayici ??= app(GeminiSaglayici::class);
-        $this->engineConfigService ??= app(AiEngineConfigService::class);
         $this->jsonParser ??= app(AiJsonResponseParser::class);
     }
 
@@ -36,7 +35,6 @@ class AiTranslationService
         $sourceCode = Language::normalizeCode($message->dil_kodu);
         $sourceName = $message->dil_adi ?: Language::name($sourceCode);
 
-        $config = $this->engineConfigService->activeConfig();
         $response = $this->geminiSaglayici->tamamlaStream([
             [
                 'role' => 'system',
@@ -50,11 +48,7 @@ class AiTranslationService
                     'message' => $sourceText,
                 ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
             ],
-        ], array_merge($this->engineConfigService->modelParameters($config), [
-            'temperature' => 0.1,
-            'top_p' => 0.6,
-            'max_output_tokens' => 800,
-        ]));
+        ], $this->fastTranslationParameters($sourceText));
 
         $raw = (string) ($response['cevap'] ?? '');
         $parsed = $this->jsonParser->parseReply($raw);
@@ -67,7 +61,7 @@ class AiTranslationService
             'hedef_dil_kodu' => $targetCode,
             'hedef_dil_adi' => $targetName,
             'saglayici' => 'gemini',
-            'model_adi' => $response['model'] ?? $config->model_adi,
+            'model_adi' => $response['model'] ?? GeminiModelPolicy::TERTIARY_MODEL,
             'translated_at' => now()->toISOString(),
         ];
 
@@ -75,5 +69,27 @@ class AiTranslationService
         $message->forceFill(['ceviriler' => $translations])->save();
 
         return $payload;
+    }
+
+    private function fastTranslationParameters(string $sourceText): array
+    {
+        return [
+            'model_adi' => GeminiModelPolicy::TERTIARY_MODEL,
+            'model_chain' => [
+                GeminiModelPolicy::TERTIARY_MODEL,
+                GeminiModelPolicy::SECONDARY_MODEL,
+            ],
+            'per_model_attempt_budgets' => [1, 1],
+            'temperature' => 0.0,
+            'top_p' => 0.3,
+            'max_output_tokens' => $this->translationTokenLimit($sourceText),
+            'stream_timeout_seconds' => 10,
+            'connect_timeout_seconds' => 3,
+        ];
+    }
+
+    private function translationTokenLimit(string $sourceText): int
+    {
+        return mb_strlen($sourceText) <= 280 ? 256 : 512;
     }
 }

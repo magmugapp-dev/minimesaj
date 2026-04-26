@@ -9,6 +9,7 @@ use App\Services\YapayZeka\V2\Data\AiInterpretation;
 use App\Services\YapayZeka\V2\Data\AiTurnContext;
 use App\Support\Language;
 use Illuminate\Support\Arr;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 
 class AiMemoryExtractor
@@ -36,12 +37,42 @@ class AiMemoryExtractor
             return ['candidates' => [], 'provider' => 'none', 'raw' => null];
         }
 
+        $fallbackCandidates = $this->deterministicCandidates($userText, $interpretation, $state);
+
+        if (!$this->providerExtractionEnabled($userText, $fallbackCandidates)) {
+            Log::channel('ai')->debug('AI memory provider atlandi, deterministic hafiza kullanildi.', [
+                'kanal' => $context->kanal,
+                'turn_type' => $context->turnType,
+                'ai_user_id' => $context->aiUser->id,
+                'hedef_tipi' => $context->hedefTipi(),
+                'hedef_id' => $context->hedefId(),
+                'message_length' => mb_strlen($userText),
+                'candidate_count' => count($fallbackCandidates),
+            ]);
+
+            return [
+                'candidates' => $fallbackCandidates,
+                'provider' => 'deterministic',
+                'raw' => null,
+                'provider_skipped' => true,
+            ];
+        }
+
         $providerCandidates = [];
         $raw = null;
         $provider = 'fallback';
 
         try {
             $config = $this->engineConfigService->activeConfig();
+            Log::channel('ai')->debug('AI memory provider istegi basladi.', [
+                'kanal' => $context->kanal,
+                'turn_type' => $context->turnType,
+                'ai_user_id' => $context->aiUser->id,
+                'hedef_tipi' => $context->hedefTipi(),
+                'hedef_id' => $context->hedefId(),
+                'message_length' => mb_strlen($userText),
+            ]);
+
             $response = $this->geminiSaglayici->tamamlaStream(
                 $this->buildMessages($context, $userText, $interpretation, $state),
                 array_merge($this->engineConfigService->modelParameters($config), [
@@ -58,11 +89,19 @@ class AiMemoryExtractor
                 $providerCandidates = $this->candidatesFromProviderPayload($decoded);
                 $provider = 'gemini';
             }
-        } catch (\Throwable) {
+        } catch (\Throwable $exception) {
+            Log::channel('ai')->info('AI memory provider hatasi sonrasi deterministic hafizaya dusuldu.', [
+                'kanal' => $context->kanal,
+                'turn_type' => $context->turnType,
+                'ai_user_id' => $context->aiUser->id,
+                'hedef_tipi' => $context->hedefTipi(),
+                'hedef_id' => $context->hedefId(),
+                'hata' => Str::limit($exception->getMessage(), 240),
+            ]);
+
             $providerCandidates = [];
         }
 
-        $fallbackCandidates = $this->deterministicCandidates($userText, $interpretation, $state);
         $candidates = $this->deduplicate(array_merge($providerCandidates, $fallbackCandidates));
 
         return [
@@ -70,6 +109,57 @@ class AiMemoryExtractor
             'provider' => $provider,
             'raw' => $raw,
         ];
+    }
+
+    private function providerExtractionEnabled(string $userText, array $fallbackCandidates): bool
+    {
+        if (!filter_var(config('services.ai.memory_provider_enabled', false), FILTER_VALIDATE_BOOLEAN)) {
+            return false;
+        }
+
+        $length = mb_strlen($userText);
+        if ($length < 80 && $fallbackCandidates === []) {
+            return false;
+        }
+
+        if ($length < 180 && $fallbackCandidates !== []) {
+            return false;
+        }
+
+        return $length >= 120 || $this->hasMemorySignal($userText);
+    }
+
+    private function hasMemorySignal(string $userText): bool
+    {
+        $normalized = Str::lower($userText);
+
+        return Str::contains($normalized, [
+            'ben ',
+            'benim ',
+            'bana ',
+            'beni ',
+            'adim',
+            'adım',
+            'yasiyorum',
+            'yaşıyorum',
+            'calisiyorum',
+            'çalışıyorum',
+            'okuyorum',
+            'seviyorum',
+            'sevmem',
+            'istemiyorum',
+            'rahatsiz',
+            'rahatsız',
+            'hobim',
+            'hedefim',
+            'annem',
+            'babam',
+            'kardes',
+            'kardeş',
+            'kedim',
+            'kopegim',
+            'köpeğim',
+        ]);
     }
 
     private function buildMessages(

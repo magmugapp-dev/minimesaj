@@ -5,7 +5,12 @@ import 'package:flutter/foundation.dart';
 import 'package:magmug/app_core.dart';
 import 'package:pusher_reverb_flutter/pusher_reverb_flutter.dart' as reverb;
 
-enum ChatRealtimeEventType { messageSent, messagesRead, aiStatus, conversationTyping }
+enum ChatRealtimeEventType {
+  messageSent,
+  messagesRead,
+  aiStatus,
+  conversationTyping,
+}
 
 @immutable
 class ChatRealtimeEvent {
@@ -20,12 +25,120 @@ class ChatRealtimeEvent {
   });
 }
 
+@immutable
+class ChatRealtimeEventSignal {
+  final int sequence;
+  final ChatRealtimeEvent event;
+
+  const ChatRealtimeEventSignal({required this.sequence, required this.event});
+}
+
+final chatRealtimeEventBusProvider = StateProvider<ChatRealtimeEventSignal?>(
+  (ref) => null,
+);
+
 class ChatRealtimeSubscription {
   final Future<void> Function() _dispose;
 
   ChatRealtimeSubscription._(this._dispose);
 
   Future<void> dispose() => _dispose();
+}
+
+class ChatRealtimeEventRefreshDeduper {
+  ChatRealtimeEventRefreshDeduper._();
+
+  static final ChatRealtimeEventRefreshDeduper instance =
+      ChatRealtimeEventRefreshDeduper._();
+  static const Duration _ttl = Duration(seconds: 2);
+
+  final Map<String, DateTime> _seenAtByKey = <String, DateTime>{};
+
+  bool shouldRefresh(ChatRealtimeEvent event) {
+    final now = DateTime.now();
+    _seenAtByKey.removeWhere((_, seenAt) => now.difference(seenAt) > _ttl);
+
+    final key = _keyFor(event);
+    final seenAt = _seenAtByKey[key];
+    if (seenAt != null && now.difference(seenAt) <= _ttl) {
+      return false;
+    }
+
+    _seenAtByKey[key] = now;
+    return true;
+  }
+
+  String _keyFor(ChatRealtimeEvent event) {
+    final payload = event.payload;
+    final stableId =
+        payload['id'] ??
+        payload['mesaj_id'] ??
+        payload['client_message_id'] ??
+        payload['okuyan_user_id'] ??
+        payload['user_id'] ??
+        payload['status'] ??
+        payload['created_at'] ??
+        payload['planned_at'] ??
+        '';
+    return '${event.type.name}:${event.conversationId}:$stableId';
+  }
+}
+
+@visibleForTesting
+class ChatRealtimeAuthGate {
+  ChatRealtimeAuthGate({this.cooldown = const Duration(seconds: 30)});
+
+  final Duration cooldown;
+  final Map<String, Future<void>> _inFlightByChannel = <String, Future<void>>{};
+  final Map<String, DateTime> _cooldownUntilByChannel = <String, DateTime>{};
+
+  @visibleForTesting
+  bool isCoolingDown(String channelName) {
+    final cooldownUntil = _cooldownUntilByChannel[channelName];
+    return cooldownUntil != null && DateTime.now().isBefore(cooldownUntil);
+  }
+
+  Future<void> run(
+    String channelName,
+    FutureOr<void> Function() subscribe,
+  ) async {
+    final cooldownUntil = _cooldownUntilByChannel[channelName];
+    if (cooldownUntil != null && DateTime.now().isBefore(cooldownUntil)) {
+      throw ApiException(
+        'Realtime kanal yetkilendirmesi kisa sureligine beklemede: $channelName',
+      );
+    }
+
+    final inFlight = _inFlightByChannel[channelName];
+    if (inFlight != null) {
+      await inFlight;
+      return;
+    }
+
+    final future = Future<void>.sync(subscribe);
+    _inFlightByChannel[channelName] = future;
+    try {
+      await future;
+      _cooldownUntilByChannel.remove(channelName);
+    } catch (error) {
+      if (_isAuthRateLimitError(error)) {
+        _cooldownUntilByChannel[channelName] = DateTime.now().add(cooldown);
+      }
+      rethrow;
+    } finally {
+      if (identical(_inFlightByChannel[channelName], future)) {
+        _inFlightByChannel.remove(channelName);
+      }
+    }
+  }
+
+  bool _isAuthRateLimitError(Object error) {
+    final text = error.toString().toLowerCase();
+    return text.contains('429') ||
+        text.contains('too many requests') ||
+        text.contains('authenticationexception') ||
+        text.contains('authentication failed');
+  }
 }
 
 class ChatRealtimeService {
@@ -36,10 +149,11 @@ class ChatRealtimeService {
   reverb.ReverbClient? _client;
   Future<void>? _connectInFlight;
   String? _authToken;
+  final ChatRealtimeAuthGate _authGate = ChatRealtimeAuthGate();
 
-  Future<ChatRealtimeSubscription?> subscribeToConversation({
+  Future<ChatRealtimeSubscription?> subscribeToUser({
     required String token,
-    required int conversationId,
+    required int userId,
     required void Function(ChatRealtimeEvent event) onEvent,
   }) async {
     if (kIsWeb) {
@@ -51,9 +165,9 @@ class ChatRealtimeService {
     final client = _ensureClient();
     await _ensureConnected(client);
 
-    final channelName = 'private-sohbet.$conversationId';
+    final channelName = 'private-kullanici.$userId';
     final channel = client.subscribeToPrivateChannel(channelName);
-    await channel.subscribe();
+    await _authGate.run(channelName, () => channel.subscribe());
 
     final eventSubscription = channel.stream.listen(
       (event) {
@@ -63,9 +177,8 @@ class ChatRealtimeService {
         }
 
         final payload = _normalizePayload(event.data);
-        final payloadConversationId =
-            _asInt(payload['sohbet_id']) ?? conversationId;
-        if (payloadConversationId != conversationId) {
+        final payloadConversationId = _asInt(payload['sohbet_id']);
+        if (payloadConversationId == null) {
           return;
         }
 
@@ -78,7 +191,7 @@ class ChatRealtimeService {
         );
       },
       onError: (Object error, StackTrace stackTrace) {
-        debugPrint('Chat realtime event error: $error');
+        debugPrint('User realtime event error: $error');
       },
     );
 
@@ -152,7 +265,12 @@ class ChatRealtimeService {
 
       if (!completer.isCompleted && state == reverb.ConnectionState.error) {
         completer.completeError(
-          const ApiException('Gercek zamanli baglanti kurulamadi.'),
+          ApiException(
+            AppRuntimeText.instance.t(
+              'realtimeConnectionFailed',
+              'Gercek zamanli baglanti kurulamadi.',
+            ),
+          ),
         );
       }
     });
@@ -198,8 +316,7 @@ class ChatRealtimeService {
       '.yapay_zeka.cevap_hazir' => ChatRealtimeEventType.messageSent,
       'mesajlar.okundu' ||
       '.mesajlar.okundu' => ChatRealtimeEventType.messagesRead,
-      'ai.turn.status' ||
-      '.ai.turn.status' => ChatRealtimeEventType.aiStatus,
+      'ai.turn.status' || '.ai.turn.status' => ChatRealtimeEventType.aiStatus,
       'sohbet.typing' ||
       '.sohbet.typing' => ChatRealtimeEventType.conversationTyping,
       _ => null,

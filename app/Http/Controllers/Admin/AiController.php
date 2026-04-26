@@ -6,6 +6,8 @@ use App\Http\Controllers\Controller;
 use App\Models\AiAyar;
 use App\Models\AiPersonaProfile;
 use App\Models\User;
+use App\Services\Users\UserAvailabilityScheduleService;
+use App\Services\Users\UserOnlineStatusService;
 use App\Services\YapayZeka\GeminiSaglayici;
 use App\Services\YapayZeka\V2\AiEngineConfigService;
 use App\Support\Language;
@@ -325,6 +327,20 @@ class AiController extends Controller
                 'hafta_sonu_uyku_baslangic' => '02:00',
                 'hafta_sonu_uyku_bitis' => '10:00',
                 'rastgele_gecikme_dakika' => 0,
+                'availability_schedules' => [
+                    [
+                        'date' => now()->addDay()->toDateString(),
+                        'start_time' => '10:00',
+                        'end_time' => '13:00',
+                        'status' => 'active',
+                    ],
+                    [
+                        'date' => now()->addDay()->toDateString(),
+                        'start_time' => '22:00',
+                        'end_time' => '23:30',
+                        'status' => 'passive',
+                    ],
+                ],
                 // Sistem
                 'sistem_komutu' => 'Sen bir arkadaş canlısı genç kadınsın.',
                 'yasakli_konular' => ['politika', 'din'],
@@ -398,10 +414,14 @@ class AiController extends Controller
             'temperature' => 'nullable|numeric|min:0|max:2',
             'top_p' => 'nullable|numeric|min:0|max:1',
             'max_output_tokens' => 'nullable|integer|min:64|max:8192',
+            'availability_schedules' => 'nullable|array',
+            'availability_schedules.*' => 'nullable|array',
         ];
 
         $hatalar = [];
         $olusturulanlar = [];
+        $availabilityScheduleService = app(UserAvailabilityScheduleService::class);
+        $userOnlineStatusService = app(UserOnlineStatusService::class);
 
         DB::beginTransaction();
 
@@ -414,7 +434,17 @@ class AiController extends Controller
                     continue;
                 }
 
+                $kayit['availability_schedules'] = $availabilityScheduleService->normalizeInput(
+                    $kayit['availability_schedules'] ?? []
+                );
                 $dogrulayici = Validator::make($kayit, $kurallar);
+                $dogrulayici->after(function ($validator) use ($kayit, $availabilityScheduleService): void {
+                    $availabilityScheduleService->validateRows(
+                        $validator,
+                        $kayit['availability_schedules'] ?? [],
+                        (string) ($kayit['saat_dilimi'] ?? config('app.timezone')),
+                    );
+                });
 
                 if ($dogrulayici->fails()) {
                     $mesajlar = implode(', ', $dogrulayici->errors()->all());
@@ -501,6 +531,11 @@ class AiController extends Controller
                     ['ai_user_id' => $kullanici->id],
                     $personaPayload
                 );
+                $availabilityScheduleService->replaceForUser(
+                    $kullanici,
+                    $availabilityScheduleService->sanitizedRows($kayit['availability_schedules'] ?? []),
+                );
+                $userOnlineStatusService->sync($kullanici->fresh(['aiAyar', 'availabilitySchedules']));
 
                 $olusturulanlar[] = $kayit['kullanici_adi'];
             }

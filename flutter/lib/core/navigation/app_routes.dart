@@ -28,3 +28,20 @@ Route<T> cupertinoRouteFromLeft<T>(Widget page, {String? name}) {
     },
   );
 }
+
+Route<T> chatRoute<T>(Widget page, {String? name}) {
+  return PageRouteBuilder<T>(
+    settings: RouteSettings(name: name),
+    transitionDuration: const Duration(milliseconds: 300),
+    reverseTransitionDuration: const Duration(milliseconds: 300),
+    pageBuilder: (_, animation, secondaryAnimation) => page,
+    transitionsBuilder: (_, animation, secondaryAnimation, child) {
+      return CupertinoPageTransition(
+        primaryRouteAnimation: animation,
+        secondaryRouteAnimation: kAlwaysDismissedAnimation,
+        linearTransition: false,
+        child: child,
+      );
+    },
+  );
+}

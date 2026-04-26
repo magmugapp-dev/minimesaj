@@ -313,11 +313,29 @@ class _PaymentResultContent extends StatelessWidget {
           ),
           child: Column(
             children: [
-              _PaymentSummaryRow(label: 'Urun', value: productLabel),
+              _PaymentSummaryRow(
+                label: AppRuntimeText.instance.t(
+                  'payment.result.summary.product',
+                  'Urun',
+                ),
+                value: productLabel,
+              ),
               const SizedBox(height: 12),
-              _PaymentSummaryRow(label: 'Tutar', value: amountLabel),
+              _PaymentSummaryRow(
+                label: AppRuntimeText.instance.t(
+                  'payment.result.summary.amount',
+                  'Tutar',
+                ),
+                value: amountLabel,
+              ),
               const SizedBox(height: 12),
-              _PaymentSummaryRow(label: 'Durum', value: statusLabel),
+              _PaymentSummaryRow(
+                label: AppRuntimeText.instance.t(
+                  'payment.result.summary.status',
+                  'Durum',
+                ),
+                value: statusLabel,
+              ),
             ],
           ),
         ),
@@ -336,7 +354,11 @@ class _PaymentResultContent extends StatelessWidget {
               const SizedBox(width: 10),
               Expanded(
                 child: Text(
-                  footnote ?? spec.defaultNote,
+                  footnote ??
+                      AppRuntimeText.instance.t(
+                        spec.defaultNoteKey,
+                        spec.defaultNote,
+                      ),
                   style: TextStyle(
                     fontFamily: AppFont.family,
                     fontWeight: FontWeight.w600,
@@ -455,6 +477,7 @@ class _PaymentResultAmbient extends StatelessWidget {
   Color noteBackground,
   Color noteIconColor,
   Color noteTextColor,
+  String defaultNoteKey,
   String defaultNote,
 })
 _toneSpec(PaymentResultTone tone) {
@@ -471,6 +494,7 @@ _toneSpec(PaymentResultTone tone) {
       noteBackground: const Color(0xFFEFFBF5),
       noteIconColor: const Color(0xFF18794E),
       noteTextColor: const Color(0xFF18794E),
+      defaultNoteKey: 'payment.result.note.success',
       defaultNote:
           'Odeme onayi tamamlandi. Uygulama ici haklarin birkac saniye icinde hesabina yansir.',
     ),
@@ -486,6 +510,7 @@ _toneSpec(PaymentResultTone tone) {
       noteBackground: const Color(0xFFFFF8E8),
       noteIconColor: const Color(0xFF946300),
       noteTextColor: const Color(0xFF946300),
+      defaultNoteKey: 'payment.result.note.pending',
       defaultNote:
           'Magaza islemi hala dogruluyor olabilir. Cikis yapsan bile sonuc tamamlandiginda haklarin otomatik eklenir.',
     ),
@@ -501,6 +526,7 @@ _toneSpec(PaymentResultTone tone) {
       noteBackground: const Color(0xFFFFF3F3),
       noteIconColor: const Color(0xFFC52222),
       noteTextColor: const Color(0xFFC52222),
+      defaultNoteKey: 'payment.result.note.failure',
       defaultNote:
           'Kart limiti, baglanti problemi veya magaza iptali nedeniyle islem tamamlanmamis olabilir. Tekrar deneyebilir veya destek ekibine yazabilirsin.',
     ),

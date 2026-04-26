@@ -3,6 +3,7 @@
 namespace App\Events;
 
 use App\Models\Mesaj;
+use App\Http\Resources\MesajResource;
 use Illuminate\Broadcasting\InteractsWithSockets;
 use Illuminate\Broadcasting\PrivateChannel;
 use Illuminate\Contracts\Broadcasting\ShouldBroadcastNow;
@@ -17,28 +18,38 @@ class MesajGonderildi implements ShouldBroadcastNow
 
     public function broadcastOn(): array
     {
+        $eslesme = $this->mesaj->sohbet?->eslesme
+            ?? $this->mesaj->sohbet()->with('eslesme')->first()?->eslesme;
+
         return [
             new PrivateChannel("sohbet.{$this->mesaj->sohbet_id}"),
+            ...$this->userChannels($eslesme?->user_id, $eslesme?->eslesen_user_id),
         ];
     }
 
     public function broadcastWith(): array
     {
-        return [
-            'id' => $this->mesaj->id,
-            'sohbet_id' => $this->mesaj->sohbet_id,
+        $payload = (new MesajResource(
+            $this->mesaj->loadMissing('gonderen:id,ad,kullanici_adi,profil_resmi,dil')
+        ))->resolve(request());
+
+        return array_merge($payload, [
             'gonderen_user_id' => $this->mesaj->gonderen_user_id,
-            'mesaj_tipi' => $this->mesaj->mesaj_tipi,
-            'mesaj_metni' => $this->mesaj->mesaj_metni,
-            'dil_kodu' => $this->mesaj->dil_kodu,
-            'dil_adi' => $this->mesaj->dil_adi,
-            'cevaplanan_mesaj_id' => $this->mesaj->cevaplanan_mesaj_id,
-            'created_at' => $this->mesaj->created_at->toISOString(),
-        ];
+        ]);
     }
 
     public function broadcastAs(): string
     {
         return 'mesaj.gonderildi';
+    }
+
+    private function userChannels(mixed ...$userIds): array
+    {
+        return collect($userIds)
+            ->filter()
+            ->unique()
+            ->map(fn ($userId) => new PrivateChannel("kullanici.{$userId}"))
+            ->values()
+            ->all();
     }
 }

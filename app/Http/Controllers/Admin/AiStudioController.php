@@ -11,6 +11,8 @@ use App\Models\AiMemory;
 use App\Models\AiPersonaProfile;
 use App\Models\AiTurnLog;
 use App\Models\User;
+use App\Services\Users\UserAvailabilityScheduleService;
+use App\Services\Users\UserOnlineStatusService;
 use App\Services\YapayZeka\V2\AiEngineConfigService;
 use App\Services\YapayZeka\V2\AiPersonaService;
 use App\Support\Language;
@@ -27,9 +29,13 @@ class AiStudioController extends Controller
     public function __construct(
         private ?AiEngineConfigService $engineConfigService = null,
         private ?AiPersonaService $personaService = null,
+        private ?UserAvailabilityScheduleService $availabilityScheduleService = null,
+        private ?UserOnlineStatusService $userOnlineStatusService = null,
     ) {
         $this->engineConfigService ??= app(AiEngineConfigService::class);
         $this->personaService ??= app(AiPersonaService::class);
+        $this->availabilityScheduleService ??= app(UserAvailabilityScheduleService::class);
+        $this->userOnlineStatusService ??= app(UserOnlineStatusService::class);
     }
 
     public function index(Request $request): View
@@ -88,6 +94,7 @@ class AiStudioController extends Controller
             'persona' => null,
             'blockedTopicsText' => '',
             'requiredRulesText' => '',
+            'scheduleRows' => [],
         ]));
     }
 
@@ -110,6 +117,9 @@ class AiStudioController extends Controller
                 blockedTopics: $payload['guardrails']['blocked_topics'],
                 requiredRules: $payload['guardrails']['required_rules'],
             );
+
+            $this->availabilityScheduleService->replaceForUser($user, $payload['schedules']);
+            $this->userOnlineStatusService->sync($user->fresh(['aiAyar', 'availabilitySchedules']));
 
             return $user;
         });
@@ -186,6 +196,7 @@ class AiStudioController extends Controller
     {
         abort_unless($kullanici->hesap_tipi === 'ai', 404);
 
+        $kullanici->loadMissing('availabilitySchedules');
         $persona = $this->personaService->ensureForUser($kullanici);
 
         return view('admin.ai-v2.edit', array_merge($this->sharedViewData(), [
@@ -193,6 +204,7 @@ class AiStudioController extends Controller
             'persona' => $persona,
             'blockedTopicsText' => $this->rulesToText($persona, 'blocked_topic'),
             'requiredRulesText' => $this->rulesToText($persona, 'required_rule'),
+            'scheduleRows' => $this->availabilityScheduleService->formRowsForUser($kullanici),
         ]));
     }
 
@@ -214,11 +226,29 @@ class AiStudioController extends Controller
                 blockedTopics: $payload['guardrails']['blocked_topics'],
                 requiredRules: $payload['guardrails']['required_rules'],
             );
+
+            $this->availabilityScheduleService->replaceForUser($kullanici, $payload['schedules']);
+            $this->userOnlineStatusService->sync($kullanici->fresh(['aiAyar', 'availabilitySchedules']));
         });
 
         return redirect()
             ->route('admin.ai.goster', $kullanici)
             ->with('basari', 'Persona override ayarlari guncellendi.');
+    }
+
+    public function destroy(User $kullanici): RedirectResponse
+    {
+        abort_unless($kullanici->hesap_tipi === 'ai', 404);
+
+        $adSoyad = trim($kullanici->ad . ' ' . $kullanici->soyad);
+
+        DB::transaction(function () use ($kullanici): void {
+            $kullanici->delete();
+        });
+
+        return redirect()
+            ->route('admin.ai.index')
+            ->with('basari', ($adSoyad !== '' ? $adSoyad : '@' . $kullanici->kullanici_adi) . ' silindi.');
     }
 
     public function states(Request $request): View
@@ -289,6 +319,9 @@ class AiStudioController extends Controller
             $persona,
             $dropdowns['behavior_sliders']
         );
+        $input['availability_schedules'] = $this->availabilityScheduleService->normalizeInput(
+            $input['availability_schedules'] ?? []
+        );
 
         $rules = [
             'ad' => 'required|string|max:255',
@@ -348,6 +381,8 @@ class AiStudioController extends Controller
             'hafta_sonu_uyku_bitis' => 'nullable|date_format:H:i',
             'blocked_topics' => 'nullable|string|max:4000',
             'required_rules' => 'nullable|string|max:4000',
+            'availability_schedules' => 'nullable|array',
+            'availability_schedules.*' => 'nullable|array',
         ];
 
         foreach ($dropdowns['behavior_sliders'] as $field => $meta) {
@@ -357,9 +392,15 @@ class AiStudioController extends Controller
         $validator = validator($input, $rules);
         $validator->after(function (Validator $validator) use ($input, $dropdowns): void {
             $this->validateLocationSelection($validator, $input, $dropdowns['location_catalog']);
+            $this->availabilityScheduleService->validateRows(
+                $validator,
+                $input['availability_schedules'] ?? [],
+                (string) ($input['saat_dilimi'] ?? config('app.timezone')),
+            );
         });
 
         $validated = $validator->validate();
+        $schedules = $this->availabilityScheduleService->sanitizedRows($validated['availability_schedules'] ?? []);
 
         $anaDilKodu = Language::normalizeCode($validated['ana_dil_kodu'] ?? null) ?: 'tr';
         $anaDilAdi = $dropdowns['languages'][$anaDilKodu] ?? Language::name($anaDilKodu, 'Turkce');
@@ -479,6 +520,7 @@ class AiStudioController extends Controller
                 'blocked_topics' => $this->textToLines($validated['blocked_topics'] ?? null),
                 'required_rules' => $this->textToLines($validated['required_rules'] ?? null),
             ],
+            'schedules' => $schedules,
         ];
     }
 
@@ -600,6 +642,10 @@ class AiStudioController extends Controller
             'countryOptions' => array_keys($dropdowns['location_catalog']),
             'behaviorSliders' => $behaviorSliders,
             'behaviorSliderGroups' => collect($behaviorSliders)->groupBy('group', true)->all(),
+            'scheduleStatusOptions' => [
+                'active' => 'Aktif',
+                'passive' => 'Pasif',
+            ],
         ];
     }
 

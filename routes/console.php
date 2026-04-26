@@ -12,6 +12,18 @@ use Illuminate\Support\Facades\Schedule;
 // Horizon snapshot — metrik grafikleri besler
 Schedule::command('horizon:snapshot')->everyFiveMinutes();
 
+// Cron-only ortamlarda kuyruktaki AI/islem joblarini bosalt
+Schedule::command('queue:work --queue=default --stop-when-empty --tries=3 --timeout=330 --memory=256')
+    ->everyMinute()
+    ->withoutOverlapping(10)
+    ->name('default-queue-drain');
+
+// Takilan AI queue/gorev durumlarini toparla
+Schedule::command('ai:takilan-gorevleri-kurtar')
+    ->everyMinute()
+    ->withoutOverlapping()
+    ->name('ai-takilan-gorevleri-kurtar');
+
 // Çevrimiçi durumu temizle (30 dk aktif olmayan → çevrimdışı)
 Schedule::call(function () {
     DB::table('users')

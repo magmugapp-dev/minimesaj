@@ -15,7 +15,7 @@ it('uses the current request host for relative public media paths', function () 
     app()->instance('request', Request::create('http://192.168.1.104:8000/api/auth/ben'));
 
     expect(MediaUrl::resolve('fotograflar/32/ornek.jpg'))
-        ->toBe('http://192.168.1.104:8000/storage/fotograflar/32/ornek.jpg');
+        ->toStartWith('http://192.168.1.104:8000/storage/fotograflar/32/ornek.jpg?v=');
 });
 
 it('rewrites stored loopback urls to the configured public host', function () {
@@ -27,7 +27,7 @@ it('rewrites stored loopback urls to the configured public host', function () {
     app()->instance('request', Request::create('http://127.0.0.1:8000/api/auth/ben'));
 
     expect(MediaUrl::resolve('http://127.0.0.1:8000/storage/fotograflar/32/ornek.jpg'))
-        ->toBe('http://192.168.1.104:8000/storage/fotograflar/32/ornek.jpg');
+        ->toStartWith('http://192.168.1.104:8000/storage/fotograflar/32/ornek.jpg?v=');
 });
 
 it('extracts nested absolute urls before rewriting them', function () {
@@ -37,7 +37,7 @@ it('extracts nested absolute urls before rewriting them', function () {
     Storage::disk('public')->put('fotograflar/32/ornek.jpg', 'image');
 
     expect(MediaUrl::resolve('http://192.168.1.104:8000/http://127.0.0.1:8000/storage/fotograflar/32/ornek.jpg'))
-        ->toBe('http://192.168.1.104:8000/storage/fotograflar/32/ornek.jpg');
+        ->toStartWith('http://192.168.1.104:8000/storage/fotograflar/32/ornek.jpg?v=');
 });
 
 it('returns null when a local public media file is missing', function () {

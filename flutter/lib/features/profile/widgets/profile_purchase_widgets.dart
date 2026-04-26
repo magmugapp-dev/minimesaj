@@ -373,6 +373,9 @@ class ProfileJetonPurchaseSheetView extends StatelessWidget {
   final String emptyMessage;
   final String primaryActionLabel;
   final VoidCallback? onPrimaryAction;
+  final String? rewardActionLabel;
+  final String? rewardActionSubtitle;
+  final VoidCallback? onRewardAction;
   final String infoText;
 
   const ProfileJetonPurchaseSheetView({
@@ -387,6 +390,9 @@ class ProfileJetonPurchaseSheetView extends StatelessWidget {
     required this.emptyMessage,
     required this.primaryActionLabel,
     required this.onPrimaryAction,
+    this.rewardActionLabel,
+    this.rewardActionSubtitle,
+    this.onRewardAction,
     required this.infoText,
   });
 
@@ -456,6 +462,14 @@ class ProfileJetonPurchaseSheetView extends StatelessWidget {
                   );
                 }),
               const SizedBox(height: 20),
+              if (rewardActionLabel != null) ...[
+                _RewardAdCreditButton(
+                  label: rewardActionLabel!,
+                  subtitle: rewardActionSubtitle,
+                  onTap: onRewardAction,
+                ),
+                const SizedBox(height: 12),
+              ],
               GradientButton(label: primaryActionLabel, onTap: onPrimaryAction),
               const SizedBox(height: 10),
               Text(
@@ -466,6 +480,94 @@ class ProfileJetonPurchaseSheetView extends StatelessWidget {
                   fontSize: 12,
                   color: AppColors.neutral600,
                 ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _RewardAdCreditButton extends StatelessWidget {
+  final String label;
+  final String? subtitle;
+  final VoidCallback? onTap;
+
+  const _RewardAdCreditButton({required this.label, this.subtitle, this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final enabled = onTap != null;
+
+    return PressableScale(
+      onTap: onTap,
+      child: AnimatedOpacity(
+        duration: const Duration(milliseconds: 180),
+        opacity: enabled ? 1 : 0.56,
+        child: Container(
+          width: double.infinity,
+          padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+          decoration: BoxDecoration(
+            color: const Color(0xFFF8FAFC),
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(color: const Color(0xFFE2E8F0)),
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 42,
+                height: 42,
+                decoration: BoxDecoration(
+                  color: enabled ? const Color(0xFFFFF7ED) : AppColors.white,
+                  shape: BoxShape.circle,
+                ),
+                alignment: Alignment.center,
+                child: Icon(
+                  CupertinoIcons.play_circle_fill,
+                  color: enabled
+                      ? const Color(0xFFF97316)
+                      : AppColors.neutral500,
+                  size: 25,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontFamily: AppFont.family,
+                        fontWeight: FontWeight.w800,
+                        fontSize: 15,
+                        color: AppColors.zinc900,
+                      ),
+                    ),
+                    if (subtitle != null && subtitle!.trim().isNotEmpty) ...[
+                      const SizedBox(height: 3),
+                      Text(
+                        subtitle!,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontFamily: AppFont.family,
+                          fontSize: 12.5,
+                          color: AppColors.neutral600,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              Icon(
+                CupertinoIcons.chevron_right,
+                size: 17,
+                color: enabled ? AppColors.zinc900 : AppColors.neutral500,
               ),
             ],
           ),

@@ -21,8 +21,14 @@ class AiTurnStatusUpdated implements ShouldBroadcastNow
 
     public function broadcastOn(): array
     {
+        $sohbet = \App\Models\Sohbet::query()
+            ->with('eslesme:id,user_id,eslesen_user_id')
+            ->find($this->sohbetId);
+        $eslesme = $sohbet?->eslesme;
+
         return [
             new PrivateChannel("sohbet.{$this->sohbetId}"),
+            ...$this->userChannels($eslesme?->user_id, $eslesme?->eslesen_user_id),
         ];
     }
 
@@ -39,5 +45,15 @@ class AiTurnStatusUpdated implements ShouldBroadcastNow
     public function broadcastAs(): string
     {
         return 'ai.turn.status';
+    }
+
+    private function userChannels(mixed ...$userIds): array
+    {
+        return collect($userIds)
+            ->filter()
+            ->unique()
+            ->map(fn ($userId) => new PrivateChannel("kullanici.{$userId}"))
+            ->values()
+            ->all();
     }
 }

@@ -39,6 +39,10 @@ return [
         'api_key' => env('GEMINI_API_KEY'),
     ],
 
+    'ai' => [
+        'memory_provider_enabled' => env('AI_MEMORY_PROVIDER_ENABLED', false),
+    ],
+
     'openai' => [
         'api_key' => env('OPENAI_API_KEY'),
     ],

@@ -55,9 +55,12 @@ class OnboardingStep1View extends StatelessWidget {
                     child: CircleBackButton(onTap: onBack),
                   ),
                   const SizedBox(height: 20),
-                  const Text(
-                    'Magmug hesabini\nolusturalim',
-                    style: TextStyle(
+                  Text(
+                    AppRuntimeText.instance.t(
+                      'onboardingStep1Title',
+                      'Magmug hesabini\nolusturalim',
+                    ),
+                    style: const TextStyle(
                       fontFamily: AppFont.family,
                       fontWeight: FontWeight.w800,
                       fontSize: 27.3,
@@ -67,9 +70,12 @@ class OnboardingStep1View extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(height: 10),
-                  const Text(
-                    'Gercek adini yaz, boylece insanlar seni taniyabilir',
-                    style: TextStyle(
+                  Text(
+                    AppRuntimeText.instance.t(
+                      'onboardingStep1Subtitle',
+                      'Gercek adini yaz, boylece insanlar seni taniyabilir',
+                    ),
+                    style: const TextStyle(
                       fontFamily: AppFont.family,
                       fontSize: 14,
                       color: AppColors.gray,
@@ -86,16 +92,28 @@ class OnboardingStep1View extends StatelessWidget {
                     ScrollViewKeyboardDismissBehavior.onDrag,
                 children: [
                   LabeledField(
-                    label: 'ISIM',
+                    label: AppRuntimeText.instance.t(
+                      'onboardingFirstNameLabel',
+                      'ISIM',
+                    ),
                     initialValue: data.name,
-                    placeholder: 'Adini gir...',
+                    placeholder: AppRuntimeText.instance.t(
+                      'onboardingFirstNamePlaceholder',
+                      'Adini gir...',
+                    ),
                     onChanged: onNameChanged,
                   ),
                   const SizedBox(height: 16),
                   LabeledField(
-                    label: 'SOYISIM',
+                    label: AppRuntimeText.instance.t(
+                      'onboardingSurnameLabel',
+                      'SOYISIM',
+                    ),
                     initialValue: data.surname,
-                    placeholder: 'Soyisim gir...',
+                    placeholder: AppRuntimeText.instance.t(
+                      'onboardingSurnamePlaceholder',
+                      'Soyisim gir...',
+                    ),
                     onChanged: onSurnameChanged,
                   ),
                   const SizedBox(height: 16),
@@ -110,9 +128,12 @@ class OnboardingStep1View extends StatelessWidget {
                     onChanged: onBirthYearChanged,
                   ),
                   const SizedBox(height: 10),
-                  const Text(
-                    'Yasin diger kullanicilara gosterilecek ancak dogum tarihin gizli kalacak',
-                    style: TextStyle(
+                  Text(
+                    AppRuntimeText.instance.t(
+                      'onboardingAgePrivacyHint',
+                      'Yasin diger kullanicilara gosterilecek ancak dogum tarihin gizli kalacak',
+                    ),
+                    style: const TextStyle(
                       fontFamily: AppFont.family,
                       fontSize: 12,
                       height: 1.45,
@@ -126,7 +147,7 @@ class OnboardingStep1View extends StatelessWidget {
             Padding(
               padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
               child: GradientButton(
-                label: 'Devam Et',
+                label: AppRuntimeText.instance.t('commonContinue', 'Devam Et'),
                 onTap:
                     data.step1Valid &&
                         usernameStatus ==
@@ -237,14 +258,21 @@ class _OnboardingUsernameAvailabilityFieldState
       _requestId++;
       _setStatus(
         OnboardingUsernameAvailabilityStatus.initial,
-        message: 'Kullanici adi en az $_minimumUsernameLength karakter olmali.',
+        message: AppRuntimeText.instance.t(
+          'onboardingUsernameTooShort',
+          'Kullanici adi en az {count} karakter olmali.',
+          args: const {'count': _minimumUsernameLength},
+        ),
       );
       return;
     }
 
     _setStatus(
       OnboardingUsernameAvailabilityStatus.checking,
-      message: 'Kullanici adi kontrol ediliyor...',
+      message: AppRuntimeText.instance.t(
+        'onboardingUsernameChecking',
+        'Kullanici adi kontrol ediliyor...',
+      ),
     );
 
     final requestId = ++_requestId;
@@ -270,8 +298,14 @@ class _OnboardingUsernameAvailabilityFieldState
             ? OnboardingUsernameAvailabilityStatus.available
             : OnboardingUsernameAvailabilityStatus.unavailable,
         message: isAvailable
-            ? 'Bu kullanici adi musait.'
-            : 'Bu kullanici adi zaten kullaniliyor.',
+            ? AppRuntimeText.instance.t(
+                'onboardingUsernameAvailable',
+                'Bu kullanici adi musait.',
+              )
+            : AppRuntimeText.instance.t(
+                'onboardingUsernameTaken',
+                'Bu kullanici adi zaten kullaniliyor.',
+              ),
       );
     } catch (_) {
       if (!mounted || requestId != _requestId) {
@@ -280,7 +314,10 @@ class _OnboardingUsernameAvailabilityFieldState
 
       _setStatus(
         OnboardingUsernameAvailabilityStatus.error,
-        message: 'Kullanici adi su an kontrol edilemiyor.',
+        message: AppRuntimeText.instance.t(
+          'onboardingUsernameCheckFailed',
+          'Kullanici adi su an kontrol edilemiyor.',
+        ),
       );
     }
   }
@@ -337,9 +374,9 @@ class _OnboardingUsernameAvailabilityFieldState
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text(
-          'KULLANICI ADI',
-          style: TextStyle(
+        Text(
+          AppRuntimeText.instance.t('onboardingUsernameLabel', 'KULLANICI ADI'),
+          style: const TextStyle(
             fontFamily: AppFont.family,
             fontWeight: FontWeight.w600,
             fontSize: 12,
@@ -366,7 +403,10 @@ class _OnboardingUsernameAvailabilityFieldState
               _scheduleAvailabilityCheck(value);
             },
             textCapitalization: TextCapitalization.none,
-            placeholder: 'Kullanici adi belirle...',
+            placeholder: AppRuntimeText.instance.t(
+              'onboardingUsernamePlaceholder',
+              'Kullanici adi belirle...',
+            ),
             placeholderStyle: const TextStyle(
               fontFamily: AppFont.family,
               color: AppColors.gray,
@@ -449,22 +489,25 @@ class OnboardingYearField extends StatelessWidget {
                       CupertinoButton(
                         padding: EdgeInsets.zero,
                         onPressed: () => Navigator.of(ctx).pop(),
-                        child: const Text(
-                          'Vazgec',
-                          style: TextStyle(
+                        child: Text(
+                          AppRuntimeText.instance.t('commonCancel', 'Vazgec'),
+                          style: const TextStyle(
                             fontFamily: AppFont.family,
                             color: AppColors.gray,
                             fontWeight: FontWeight.w600,
                           ),
                         ),
                       ),
-                      const Expanded(
+                      Expanded(
                         child: Text(
-                          'Dogum Yili',
+                          AppRuntimeText.instance.t(
+                            'onboardingBirthYearTitle',
+                            'Dogum Yili',
+                          ),
                           textAlign: TextAlign.center,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
+                          style: const TextStyle(
                             fontFamily: AppFont.family,
                             fontWeight: FontWeight.w700,
                             fontSize: 16,
@@ -478,9 +521,9 @@ class OnboardingYearField extends StatelessWidget {
                           onChanged(selected);
                           Navigator.of(ctx).pop();
                         },
-                        child: const Text(
-                          'Tamam',
-                          style: TextStyle(
+                        child: Text(
+                          AppRuntimeText.instance.t('commonOk', 'Tamam'),
+                          style: const TextStyle(
                             fontFamily: AppFont.family,
                             color: AppColors.indigo,
                             fontWeight: FontWeight.w700,
@@ -537,9 +580,9 @@ class OnboardingYearField extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
-            'DOGUM YILI',
-            style: TextStyle(
+          Text(
+            AppRuntimeText.instance.t('onboardingBirthYearLabel', 'DOGUM YILI'),
+            style: const TextStyle(
               fontFamily: AppFont.family,
               fontWeight: FontWeight.w600,
               fontSize: 12,
@@ -559,7 +602,11 @@ class OnboardingYearField extends StatelessWidget {
               children: [
                 Expanded(
                   child: Text(
-                    value?.toString() ?? 'Yil sec...',
+                    value?.toString() ??
+                        AppRuntimeText.instance.t(
+                          'onboardingBirthYearPlaceholder',
+                          'Yil sec...',
+                        ),
                     style: TextStyle(
                       fontFamily: AppFont.family,
                       color: value == null ? AppColors.gray : AppColors.black,

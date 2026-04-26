@@ -21,8 +21,12 @@ class SohbetController extends Controller
             ->with([
                 'eslesme.user:id,ad,kullanici_adi,profil_resmi,cevrim_ici_mi,dil,hesap_tipi',
                 'eslesme.user.aiPersonaProfile:ai_user_id,ana_dil_kodu,ana_dil_adi',
+                'eslesme.user.aiAyar:id,user_id,aktif_mi,saat_dilimi,uyku_baslangic,uyku_bitis,hafta_sonu_uyku_baslangic,hafta_sonu_uyku_bitis',
+                'eslesme.user.availabilitySchedules:id,user_id,recurrence_type,specific_date,day_of_week,starts_at,ends_at,status',
                 'eslesme.eslesenUser:id,ad,kullanici_adi,profil_resmi,cevrim_ici_mi,dil,hesap_tipi',
                 'eslesme.eslesenUser.aiPersonaProfile:ai_user_id,ana_dil_kodu,ana_dil_adi',
+                'eslesme.eslesenUser.aiAyar:id,user_id,aktif_mi,saat_dilimi,uyku_baslangic,uyku_bitis,hafta_sonu_uyku_baslangic,hafta_sonu_uyku_bitis',
+                'eslesme.eslesenUser.availabilitySchedules:id,user_id,recurrence_type,specific_date,day_of_week,starts_at,ends_at,status',
                 'sonMesaj',
             ])
             ->withCount([

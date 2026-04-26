@@ -3,6 +3,7 @@
 namespace App\Http\Requests\Dating;
 
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Rule;
 
 class ProfilGuncelleRequest extends FormRequest
 {
@@ -26,7 +27,13 @@ class ProfilGuncelleRequest extends FormRequest
             'ses_acik_mi' => 'sometimes|boolean',
             'bildirimler_acik_mi' => 'sometimes|boolean',
             'titresim_acik_mi' => 'sometimes|boolean',
-            'dil' => 'sometimes|nullable|in:tr,en,de,fr',
+            'dil' => [
+                'sometimes',
+                'nullable',
+                'string',
+                'max:12',
+                Rule::exists('app_languages', 'code')->where('is_active', true),
+            ],
         ];
     }
 }

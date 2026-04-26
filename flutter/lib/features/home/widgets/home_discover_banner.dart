@@ -188,7 +188,10 @@ class _HomeDiscoverBannerState extends State<HomeDiscoverBanner>
                             mainAxisAlignment: MainAxisAlignment.center,
                             children: [
                               Text(
-                                'Yeni birilerini ke\u015ffet',
+                                AppRuntimeText.instance.t(
+                                  'home.discover.title',
+                                  'Yeni birilerini kesfet',
+                                ),
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                                 style: TextStyle(
@@ -200,7 +203,10 @@ class _HomeDiscoverBannerState extends State<HomeDiscoverBanner>
                               ),
                               const SizedBox(height: 2),
                               Text(
-                                'Y\u00fczlerce ki\u015fi online',
+                                AppRuntimeText.instance.t(
+                                  'home.discover.subtitle',
+                                  'Yuzlerce kisi online',
+                                ),
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                                 style: TextStyle(
@@ -272,12 +278,13 @@ class _DiscoverAvatars extends StatelessWidget {
 
     return _avatarShell(
       ClipOval(
-        child: Image.network(
-          imageUrl,
+        child: CachedAppImage(
+          imageUrl: imageUrl,
           width: 40,
           height: 40,
-          fit: BoxFit.cover,
-          errorBuilder: (_, _, _) => _initialAvatar(profile.displayName),
+          cacheWidth: 80,
+          cacheHeight: 80,
+          errorBuilder: (_) => _initialAvatar(profile.displayName),
         ),
       ),
     );

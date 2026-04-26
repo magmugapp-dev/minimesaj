@@ -40,9 +40,12 @@ class OnboardingStep2View extends StatelessWidget {
                         child: CircleBackButton(onTap: onBack),
                       ),
                       const SizedBox(height: 20),
-                      const Text(
-                        'Cinsiyetini\nbelirle',
-                        style: TextStyle(
+                      Text(
+                        AppRuntimeText.instance.t(
+                          'onboarding.gender.title',
+                          'Cinsiyetini\nbelirle',
+                        ),
+                        style: const TextStyle(
                           fontFamily: AppFont.family,
                           fontWeight: FontWeight.w800,
                           fontSize: 27.3,
@@ -52,9 +55,12 @@ class OnboardingStep2View extends StatelessWidget {
                         ),
                       ),
                       const SizedBox(height: 10),
-                      const Text(
-                        'Bu bilgi profilinde gosterilecek',
-                        style: TextStyle(
+                      Text(
+                        AppRuntimeText.instance.t(
+                          'onboarding.gender.subtitle',
+                          'Bu bilgi profilinde gosterilecek',
+                        ),
+                        style: const TextStyle(
                           fontFamily: AppFont.family,
                           fontSize: 14,
                           color: AppColors.gray,
@@ -62,7 +68,10 @@ class OnboardingStep2View extends StatelessWidget {
                       ),
                       const SizedBox(height: 32),
                       GenderOption(
-                        label: 'Kadin',
+                        label: AppRuntimeText.instance.t(
+                          'onboarding.gender.female',
+                          'Kadin',
+                        ),
                         iconAsset: 'assets/images/icon_female.png',
                         iconBackground: const Color(0x14FF9794),
                         selected: selectedGender == Gender.female,
@@ -70,7 +79,10 @@ class OnboardingStep2View extends StatelessWidget {
                       ),
                       const SizedBox(height: 12),
                       GenderOption(
-                        label: 'Erkek',
+                        label: AppRuntimeText.instance.t(
+                          'onboarding.gender.male',
+                          'Erkek',
+                        ),
                         iconAsset: 'assets/images/icon_male.png',
                         iconBackground: const Color(0x145C6BFF),
                         selected: selectedGender == Gender.male,
@@ -78,7 +90,10 @@ class OnboardingStep2View extends StatelessWidget {
                       ),
                       const SizedBox(height: 24),
                       GradientButton(
-                        label: 'Devam Et',
+                        label: AppRuntimeText.instance.t(
+                          'commonContinue',
+                          'Devam Et',
+                        ),
                         onTap: selectedGender == null ? null : onContinue,
                       ),
                       const SizedBox(height: 16),

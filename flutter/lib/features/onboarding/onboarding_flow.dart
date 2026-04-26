@@ -86,7 +86,12 @@ class _OnboardBodyState extends ConsumerState<_OnboardBody> {
       if (result.status == SocialAuthResultStatus.authenticated) {
         final session = result.session;
         if (session == null || session.token.trim().isEmpty) {
-          throw const ApiException('Oturum jetonu alinamadi.');
+          throw ApiException(
+            AppRuntimeText.instance.t(
+              'socialSessionTokenMissing',
+              'Oturum jetonu alinamadi.',
+            ),
+          );
         }
 
         if (credential.displayName != null) {
@@ -109,7 +114,12 @@ class _OnboardBodyState extends ConsumerState<_OnboardBody> {
 
       final socialSession = result.socialSession;
       if (socialSession == null || socialSession.trim().isEmpty) {
-        throw const ApiException('Onboarding oturumu olusturulamadi.');
+        throw ApiException(
+          AppRuntimeText.instance.t(
+            'onboardingSessionCreateFailed',
+            'Onboarding oturumu olusturulamadi.',
+          ),
+        );
       }
 
       ref

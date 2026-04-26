@@ -1,16 +1,8 @@
-import 'dart:async';
-
 import 'package:magmug/app_core.dart';
 import 'package:magmug/features/chat/chat_local_store.dart';
 import 'package:magmug/features/home/models/chat_preview.dart';
 
-const Duration _homeChatsRefreshCooldown = Duration(seconds: 20);
-DateTime? _lastHomeChatsRefreshAt;
-bool _homeChatsRefreshInFlight = false;
-
-final homeChatsProvider = FutureProvider.autoDispose<List<ChatPreview>>((
-  ref,
-) async {
+final homeChatsProvider = FutureProvider<List<ChatPreview>>((ref) async {
   ref.watch(conversationFeedRefreshProvider);
   final session = await ref.watch(appAuthProvider.future);
   final token = session?.token;
@@ -20,110 +12,24 @@ final homeChatsProvider = FutureProvider.autoDispose<List<ChatPreview>>((
   }
 
   final localStore = ChatLocalStore.instance;
-  final cachedConversations = await localStore.getConversationPreviews();
+  final cachedConversations = await localStore.getConversationPreviews(
+    ownerUserId: userId,
+  );
   if (cachedConversations.isNotEmpty) {
-    if (_shouldRefreshHomeChats()) {
-      unawaited(
-        _refreshHomeChatsFromApi(
-          ref,
-          token: token,
-          userId: userId,
-          previous: cachedConversations,
-        ),
-      );
-    }
     return cachedConversations.map(_chatPreviewFromConversation).toList();
   }
 
-  final api = AppAuthApi();
-  try {
-    final conversations = await api.fetchConversations(
-      token,
-      currentUserId: userId,
-    );
-    await localStore.upsertConversationPreviews(conversations);
-    return conversations.map(_chatPreviewFromConversation).toList();
-  } finally {
-    api.close();
+  final bootstrap = await AppBootstrapCoordinator.instance.bootstrap(token);
+  if (bootstrap.user.id != userId) {
+    return const <ChatPreview>[];
   }
+  final conversations = bootstrap.conversations;
+  await localStore.upsertConversationPreviews(
+    conversations,
+    ownerUserId: userId,
+  );
+  return conversations.map(_chatPreviewFromConversation).toList();
 });
-
-bool _shouldRefreshHomeChats() {
-  if (_homeChatsRefreshInFlight) {
-    return false;
-  }
-
-  final lastRefresh = _lastHomeChatsRefreshAt;
-  if (lastRefresh == null) {
-    return true;
-  }
-
-  return DateTime.now().difference(lastRefresh) >= _homeChatsRefreshCooldown;
-}
-
-Future<void> _refreshHomeChatsFromApi(
-  Ref ref, {
-  required String token,
-  required int userId,
-  required List<AppConversationPreview> previous,
-}) async {
-  _homeChatsRefreshInFlight = true;
-  final api = AppAuthApi();
-  try {
-    final conversations = await api.fetchConversations(
-      token,
-      currentUserId: userId,
-    );
-    await ChatLocalStore.instance.upsertConversationPreviews(conversations);
-    _lastHomeChatsRefreshAt = DateTime.now();
-    if (!_sameConversationList(previous, conversations)) {
-      ref.read(conversationFeedRefreshProvider.notifier).state++;
-    }
-  } catch (_) {
-    // Keep cached data visible when refresh fails.
-  } finally {
-    _homeChatsRefreshInFlight = false;
-    api.close();
-  }
-}
-
-bool _sameConversationList(
-  List<AppConversationPreview> left,
-  List<AppConversationPreview> right,
-) {
-  if (left.length != right.length) {
-    return false;
-  }
-
-  for (var index = 0; index < left.length; index++) {
-    final a = left[index];
-    final b = right[index];
-    if (a.id != b.id ||
-        a.peerName != b.peerName ||
-        a.peerUsername != b.peerUsername ||
-        a.online != b.online ||
-        a.lastMessage != b.lastMessage ||
-        a.lastMessageType != b.lastMessageType ||
-        !_sameMoment(a.lastMessageAt, b.lastMessageAt) ||
-        a.unreadCount != b.unreadCount ||
-        a.myMessageRead != b.myMessageRead ||
-        a.aiStatus != b.aiStatus ||
-        a.aiStatusText != b.aiStatusText ||
-        !_sameMoment(a.aiPlannedAt, b.aiPlannedAt)) {
-      return false;
-    }
-  }
-
-  return true;
-}
-
-bool _sameMoment(DateTime? left, DateTime? right) {
-  if (left == null || right == null) {
-    return left == right;
-  }
-
-  return left.millisecondsSinceEpoch == right.millisecondsSinceEpoch;
-}
 
 ChatPreview _chatPreviewFromConversation(AppConversationPreview conversation) {
   return ChatPreview(

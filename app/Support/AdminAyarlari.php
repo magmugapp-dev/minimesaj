@@ -35,6 +35,20 @@ class AdminAyarlari
                 'tam_genislik' => false,
                 'svg' => '<path stroke-linecap="round" stroke-linejoin="round" d="M6.75 4.5l10.5 7.5-10.5 7.5v-15z"/><path stroke-linecap="round" stroke-linejoin="round" d="M6.75 4.5l7.5 7.5-7.5 7.5"/>',
             ],
+            'admob' => [
+                'etiket' => 'AdMob',
+                'aciklama' => 'Google AdMob app kimlikleri ve reklam birimi ayarları.',
+                'sidebar_grup' => 'Uygulama',
+                'tam_genislik' => false,
+                'svg' => '<path stroke-linecap="round" stroke-linejoin="round" d="M4.5 6.75h15v10.5h-15V6.75z"/><path stroke-linecap="round" stroke-linejoin="round" d="M8.25 10.5h7.5M8.25 13.5h4.5"/><path stroke-linecap="round" stroke-linejoin="round" d="M17.25 4.5v15"/>',
+            ],
+            'yasal' => [
+                'etiket' => 'Yasal Metinler',
+                'aciklama' => 'Gizlilik politikasi, KVKK aydinlatma metni ve kullanim kosullari buradan duzenlenir.',
+                'sidebar_grup' => 'Uygulama',
+                'tam_genislik' => true,
+                'svg' => '<path stroke-linecap="round" stroke-linejoin="round" d="M6.75 3.75h7.5l3 3v13.5H6.75V3.75z"/><path stroke-linecap="round" stroke-linejoin="round" d="M14.25 3.75v3h3M9 11.25h6M9 14.25h6M9 17.25h3"/>',
+            ],
             'apple' => [
                 'etiket' => 'Apple',
                 'aciklama' => 'Apple giriş ve App Store bağlantılı kimlik bilgilerini bu bölümden yönet.',

@@ -31,6 +31,7 @@ class MesajResource extends JsonResource
             'okundu_mu' => $this->okundu_mu,
             'ai_tarafindan_uretildi_mi' => $this->ai_tarafindan_uretildi_mi,
             'cevaplanan_mesaj_id' => $this->cevaplanan_mesaj_id,
+            'client_message_id' => $this->client_message_id,
             'created_at' => $this->created_at,
         ];
     }

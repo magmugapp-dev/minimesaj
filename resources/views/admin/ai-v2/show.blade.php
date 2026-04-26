@@ -21,6 +21,11 @@
                 <a href="{{ route('admin.ai.index') }}" class="ai-console-button ai-console-button--ghost">Studio</a>
                 <a href="{{ route('admin.ai.duzenle', $kullanici) }}" class="ai-console-button ai-console-button--primary">Duzenle</a>
                 <a href="{{ route('admin.ai.traces', ['ai_user_id' => $kullanici->id]) }}" class="ai-console-button ai-console-button--ghost">Trace</a>
+                <form method="POST" action="{{ route('admin.ai.sil', $kullanici) }}" onsubmit="return confirm('Bu AI kullanicisini ve bagli verilerini silmek istediginize emin misiniz?');">
+                    @csrf
+                    @method('DELETE')
+                    <button type="submit" class="ai-console-button ai-console-button--ghost text-rose-300 border-rose-500/30 hover:bg-rose-500/10">Sil</button>
+                </form>
             </div>
         </section>
 

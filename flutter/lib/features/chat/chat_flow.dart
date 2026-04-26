@@ -2,6 +2,8 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/services.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:just_audio/just_audio.dart';
 import 'package:magmug/app_core.dart';
 import 'package:magmug/features/chat/chat_local_store.dart';
 import 'package:magmug/features/chat/chat_realtime.dart';
@@ -9,15 +11,40 @@ import 'package:magmug/features/chat/chat_translation_policy.dart';
 import 'package:magmug/features/match/match_flow.dart';
 import 'package:magmug/features/profile/widgets/profile_overview_widgets.dart'
     show openProfileMediaViewer;
+import 'package:path/path.dart' as path;
+import 'package:path_provider/path_provider.dart';
+import 'package:record/record.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-const Duration _conversationRefreshCooldown = Duration(seconds: 12);
+const Duration _conversationReadReceiptCooldown = Duration(seconds: 5);
 const int _conversationMessagePageSize = 50;
-final Map<int, DateTime> _lastConversationRefreshAt = <int, DateTime>{};
-final Set<int> _conversationRefreshInFlight = <int>{};
+final Map<int, DateTime> _lastConversationReadMarkedAt = <int, DateTime>{};
+final Set<int> _conversationReadMarkInFlight = <int>{};
 final Map<int, AppMatchCandidate> _chatPeerProfileCache =
     <int, AppMatchCandidate>{};
 final Map<int, int> _chatThemeSelectionCache = <int, int>{};
+int _clientMessageSequence = 0;
+bool _chatRuntimeCacheCleanerRegistered = false;
+
+void clearChatRuntimeCaches() {
+  _lastConversationReadMarkedAt.clear();
+  _conversationReadMarkInFlight.clear();
+  _chatPeerProfileCache.clear();
+  _chatThemeSelectionCache.clear();
+}
+
+void _ensureChatRuntimeCacheCleanerRegistered() {
+  if (_chatRuntimeCacheCleanerRegistered) {
+    return;
+  }
+  AppRuntimeCacheRegistry.register(clearChatRuntimeCaches);
+  _chatRuntimeCacheCleanerRegistered = true;
+}
+
+String _newClientMessageId() {
+  final sequence = _clientMessageSequence++;
+  return 'msg-${DateTime.now().microsecondsSinceEpoch}-$sequence';
+}
 
 // =============================================================================
 
@@ -27,8 +54,8 @@ enum ChatMessageType { text, image, audio, typing }
 
 enum ReportTargetType { user, message }
 
-const ChatPeer _emptyChatPeer = ChatPeer(
-  name: 'Sohbet',
+ChatPeer get _emptyChatPeer => ChatPeer(
+  name: AppRuntimeText.instance.t('chat.title.default', 'Sohbet'),
   handle: '',
   status: '',
   online: false,
@@ -46,6 +73,7 @@ class ChatMessage {
   final String? asset;
   final Duration? duration;
   final String time;
+  final String deliveryStatus;
 
   const ChatMessage({
     this.id,
@@ -58,6 +86,7 @@ class ChatMessage {
     this.languageName,
     this.asset,
     this.duration,
+    this.deliveryStatus = 'sent',
   });
 
   const ChatMessage.typing({this.side = ChatBubbleSide.them})
@@ -69,6 +98,7 @@ class ChatMessage {
       languageName = null,
       asset = null,
       duration = null,
+      deliveryStatus = 'sent',
       time = '';
 }
 
@@ -101,7 +131,9 @@ class ChatPeer {
         : (username.startsWith('@') ? username : '@$username');
     final baseStatus =
         conversation.statusText ??
-        (conversation.online ? 'Cevrimici' : 'Aktif degil');
+        (conversation.online
+            ? AppRuntimeText.instance.t('chat.status.online', 'Cevrimici')
+            : AppRuntimeText.instance.t('chat.status.inactive', 'Aktif degil'));
     final languageName = conversation.peerLanguageName?.trim();
     final status = languageName == null || languageName.isEmpty
         ? baseStatus
@@ -126,7 +158,9 @@ ChatPeer _chatPeerFromCandidate(AppMatchCandidate candidate) {
     handle: username.isEmpty
         ? ''
         : (username.startsWith('@') ? username : '@$username'),
-    status: candidate.online ? 'Cevrimici' : 'Aktif degil',
+    status: candidate.online
+        ? AppRuntimeText.instance.t('chat.status.online', 'Cevrimici')
+        : AppRuntimeText.instance.t('chat.status.inactive', 'Aktif degil'),
     avatarUrl: candidate.primaryImageUrl,
     online: candidate.online,
   );
@@ -139,51 +173,63 @@ ChatPeer _chatPeerFromGiftSender(AppGiftSender sender) {
     handle: username.isEmpty
         ? ''
         : (username.startsWith('@') ? username : '@$username'),
-    status: 'Profil',
+    status: AppRuntimeText.instance.t('chat.status.profile', 'Profil'),
     avatarUrl: sender.profileImageUrl,
     online: false,
   );
 }
 
-final conversationMessagesProvider = FutureProvider.autoDispose
-    .family<List<AppConversationMessage>, int>((ref, conversationId) async {
+final conversationMessagesProvider =
+    FutureProvider.family<List<AppConversationMessage>, int>((
+      ref,
+      conversationId,
+    ) async {
+      _ensureChatRuntimeCacheCleanerRegistered();
       final session = await ref.watch(appAuthProvider.future);
       final token = session?.token;
-      if (token == null || token.trim().isEmpty) {
+      final userId = session?.user?.id;
+      if (token == null || token.trim().isEmpty || userId == null) {
         return const [];
       }
 
       final localStore = ChatLocalStore.instance;
       final cachedMessages = await localStore.getConversationMessages(
         conversationId,
+        ownerUserId: userId,
         limit: _conversationMessagePageSize,
       );
       if (cachedMessages.isNotEmpty) {
-        if (_shouldRefreshConversation(conversationId)) {
-          unawaited(
-            _refreshConversationMessagesFromApi(
-              ref,
-              token: token,
-              conversationId: conversationId,
-              previous: cachedMessages,
-            ),
-          );
-        }
+        unawaited(
+          _markConversationReadLocalAndRemote(
+            ref,
+            token: token,
+            userId: userId,
+            conversationId: conversationId,
+          ),
+        );
         return cachedMessages;
       }
 
       final api = AppAuthApi();
       try {
-        final messages = await api.fetchConversationMessages(
+        final page = await api.fetchMobileConversationMessages(
           token,
           conversationId: conversationId,
+          limit: _conversationMessagePageSize,
         );
-        await localStore.upsertConversationMessages(messages);
-        try {
-          await api.markConversationRead(token, conversationId: conversationId);
-          ref.read(conversationFeedRefreshProvider.notifier).state++;
-        } catch (_) {}
-        return messages;
+        await localStore.upsertConversationMessages(
+          page.messages,
+          ownerUserId: userId,
+        );
+        unawaited(
+          _markConversationReadLocalAndRemote(
+            ref,
+            token: token,
+            userId: userId,
+            conversationId: conversationId,
+          ),
+        );
+        return page.messages;
       } catch (_) {
         if (cachedMessages.isNotEmpty) {
           return cachedMessages;
@@ -196,6 +242,7 @@ final conversationMessagesProvider = FutureProvider.autoDispose
 
 final chatPeerProfileProvider = FutureProvider.autoDispose
     .family<AppMatchCandidate, int>((ref, userId) async {
+      _ensureChatRuntimeCacheCleanerRegistered();
       ref.keepAlive();
       final cached = _chatPeerProfileCache[userId];
       if (cached != null) {
@@ -205,8 +252,11 @@ final chatPeerProfileProvider = FutureProvider.autoDispose
       final session = await ref.watch(appAuthProvider.future);
       final token = session?.token;
       if (token == null || token.trim().isEmpty) {
-        throw const ApiException(
-          'Bu profili gormek icin once giris yapmalisin.',
+        throw ApiException(
+          AppRuntimeText.instance.t(
+            'chat.profile.error.login_required',
+            'Bu profili gormek icin once giris yapmalisin.',
+          ),
         );
       }
 
@@ -220,43 +270,42 @@ final chatPeerProfileProvider = FutureProvider.autoDispose
       }
     });
 
-final chatGiftsProvider = FutureProvider.autoDispose<List<AppGift>>((
-  ref,
-) async {
+final chatGiftsProvider = FutureProvider<List<AppGift>>((ref) async {
   final session = await ref.watch(appAuthProvider.future);
   final token = session?.token;
-  if (token == null || token.trim().isEmpty) {
+  final ownerUserId = session?.user?.id;
+  if (token == null || token.trim().isEmpty || ownerUserId == null) {
     return const [];
   }
 
-  final api = AppAuthApi();
-  try {
-    return await api.fetchGifts(token);
-  } finally {
-    api.close();
-  }
+  return AppRepository.instance.gifts(token: token, ownerUserId: ownerUserId);
 });
 
 @immutable
 class _ChatThemePalette {
-  final String label;
+  final String labelKey;
+  final String fallbackLabel;
   final Color background;
   final Color incomingBubble;
   final Color incomingText;
   final LinearGradient outgoingGradient;
 
   const _ChatThemePalette({
-    required this.label,
+    required this.labelKey,
+    required this.fallbackLabel,
     required this.background,
     required this.incomingBubble,
     required this.incomingText,
     required this.outgoingGradient,
   });
+
+  String get label => AppRuntimeText.instance.t(labelKey, fallbackLabel);
 }
 
 const List<_ChatThemePalette> _chatThemes = [
   _ChatThemePalette(
-    label: 'Varsayilan',
+    labelKey: 'chat.theme.default',
+    fallbackLabel: 'Varsayilan',
     background: AppColors.white,
     incomingBubble: AppColors.grayField,
     incomingText: AppColors.black,
@@ -267,7 +316,8 @@ const List<_ChatThemePalette> _chatThemes = [
     ),
   ),
   _ChatThemePalette(
-    label: 'Gece',
+    labelKey: 'chat.theme.night',
+    fallbackLabel: 'Gece',
     background: Color(0xFF111118),
     incomingBubble: Color(0xFF222230),
     incomingText: AppColors.white,
@@ -278,7 +328,8 @@ const List<_ChatThemePalette> _chatThemes = [
     ),
   ),
   _ChatThemePalette(
-    label: 'Gunbatimi',
+    labelKey: 'chat.theme.sunset',
+    fallbackLabel: 'Gunbatimi',
     background: Color(0xFFFFF4ED),
     incomingBubble: Color(0xFFFFE0D2),
     incomingText: Color(0xFF4B2A22),
@@ -289,7 +340,8 @@ const List<_ChatThemePalette> _chatThemes = [
     ),
   ),
   _ChatThemePalette(
-    label: 'Orman',
+    labelKey: 'chat.theme.forest',
+    fallbackLabel: 'Orman',
     background: Color(0xFFF0F8F1),
     incomingBubble: Color(0xFFDDEFE1),
     incomingText: Color(0xFF173322),
@@ -300,7 +352,8 @@ const List<_ChatThemePalette> _chatThemes = [
     ),
   ),
   _ChatThemePalette(
-    label: 'Pamuk',
+    labelKey: 'chat.theme.cotton',
+    fallbackLabel: 'Pamuk',
     background: Color(0xFFFFF7FB),
     incomingBubble: Color(0xFFFFE4F1),
     incomingText: Color(0xFF4A1931),
@@ -311,7 +364,8 @@ const List<_ChatThemePalette> _chatThemes = [
     ),
   ),
   _ChatThemePalette(
-    label: 'Deniz',
+    labelKey: 'chat.theme.sea',
+    fallbackLabel: 'Deniz',
     background: Color(0xFFEFF9FF),
     incomingBubble: Color(0xFFDDF1FF),
     incomingText: Color(0xFF123044),
@@ -416,98 +470,79 @@ List<AppProfilePhoto> _galleryMediaForProfile(
   ];
 }
 
-bool _shouldRefreshConversation(int conversationId) {
-  if (_conversationRefreshInFlight.contains(conversationId)) {
+bool _claimConversationReadMark(int conversationId) {
+  if (_conversationReadMarkInFlight.contains(conversationId)) {
     return false;
   }
 
-  final lastRefresh = _lastConversationRefreshAt[conversationId];
-  if (lastRefresh == null) {
-    return true;
-  }
-
-  return DateTime.now().difference(lastRefresh) >= _conversationRefreshCooldown;
-}
-
-Future<void> _refreshConversationMessagesFromApi(
-  Ref ref, {
-  required String token,
-  required int conversationId,
-  required List<AppConversationMessage> previous,
-}) async {
-  _conversationRefreshInFlight.add(conversationId);
-  final api = AppAuthApi();
-  try {
-    final messages = await api.fetchConversationMessages(
-      token,
-      conversationId: conversationId,
-    );
-    await ChatLocalStore.instance.upsertConversationMessages(messages);
-    _lastConversationRefreshAt[conversationId] = DateTime.now();
-    try {
-      await api.markConversationRead(token, conversationId: conversationId);
-      ref.read(conversationFeedRefreshProvider.notifier).state++;
-    } catch (_) {}
-    if (!_sameMessageList(previous, messages)) {
-      ref.invalidate(conversationMessagesProvider(conversationId));
-    }
-  } catch (_) {
-    // Keep cached messages visible when refresh fails.
-  } finally {
-    _conversationRefreshInFlight.remove(conversationId);
-    api.close();
-  }
-}
-
-bool _sameMessageList(
-  List<AppConversationMessage> left,
-  List<AppConversationMessage> right,
-) {
-  if (left.length != right.length) {
+  final lastMarkedAt = _lastConversationReadMarkedAt[conversationId];
+  final now = DateTime.now();
+  if (lastMarkedAt != null &&
+      now.difference(lastMarkedAt) < _conversationReadReceiptCooldown) {
     return false;
   }
 
-  for (var index = 0; index < left.length; index++) {
-    final a = left[index];
-    final b = right[index];
-    if (a.id != b.id ||
-        a.senderId != b.senderId ||
-        a.senderName != b.senderName ||
-        a.type != b.type ||
-        a.text != b.text ||
-        a.fileDuration != b.fileDuration ||
-        a.isRead != b.isRead ||
-        a.isAiGenerated != b.isAiGenerated ||
-        a.languageCode != b.languageCode ||
-        a.languageName != b.languageName ||
-        a.translatedText != b.translatedText ||
-        !_sameMessageMoment(a.createdAt, b.createdAt)) {
-      return false;
-    }
-  }
-
+  _conversationReadMarkInFlight.add(conversationId);
+  _lastConversationReadMarkedAt[conversationId] = now;
   return true;
 }
 
-bool _sameMessageMoment(DateTime? left, DateTime? right) {
-  if (left == null || right == null) {
-    return left == right;
+Future<void> _markConversationReadLocalAndRemote(
+  dynamic ref, {
+  required String token,
+  required int userId,
+  required int conversationId,
+}) async {
+  if (!_claimConversationReadMark(conversationId)) {
+    return;
   }
 
-  return left.millisecondsSinceEpoch == right.millisecondsSinceEpoch;
+  try {
+    await ChatLocalStore.instance.applyConversationReadEvent(
+      conversationId,
+      ownerUserId: userId,
+      readerUserId: userId,
+      currentUserId: userId,
+    );
+    ref.read(conversationFeedRefreshProvider.notifier).state++;
+
+    final api = AppAuthApi();
+    try {
+      await api.markConversationRead(token, conversationId: conversationId);
+    } catch (_) {
+      // Local read state keeps the UI correct even if the receipt is retried later.
+    } finally {
+      api.close();
+    }
+  } finally {
+    _conversationReadMarkInFlight.remove(conversationId);
+  }
+}
+
+int? _oldestServerMessageId(List<AppConversationMessage> messages) {
+  for (final message in messages) {
+    if (message.id > 0) {
+      return message.id;
+    }
+  }
+  return null;
 }
 
 List<AppConversationMessage> _mergeConversationMessages(
   Iterable<AppConversationMessage> left,
   Iterable<AppConversationMessage> right,
 ) {
-  final merged = <int, AppConversationMessage>{};
+  final merged = <String, AppConversationMessage>{};
 
   for (final message in left) {
-    merged[message.id] = message;
+    merged[_conversationMessageMergeKey(message)] = message;
   }
   for (final message in right) {
-    merged[message.id] = message;
+    final key = _conversationMessageMergeKey(message);
+    final existing = merged[key];
+    merged[key] = existing == null
+        ? message
+        : _preferredConversationMessage(existing, message);
   }
 
   final result = merged.values.toList(growable: false);
@@ -523,6 +558,47 @@ List<AppConversationMessage> _mergeConversationMessages(
   });
 
   return result;
+}
+
+String _conversationMessageMergeKey(AppConversationMessage message) {
+  final clientMessageId = message.clientMessageId?.trim();
+  if (clientMessageId != null && clientMessageId.isNotEmpty) {
+    return 'client:$clientMessageId';
+  }
+
+  if (message.id > 0) {
+    return 'server:${message.id}';
+  }
+  if (message.id < 0) {
+    return 'local:${message.id}';
+  }
+
+  final createdAtMs = message.createdAt?.millisecondsSinceEpoch ?? 0;
+  return [
+    'fallback',
+    message.conversationId,
+    message.senderId ?? '',
+    message.type,
+    message.text ?? '',
+    message.fileUrl ?? '',
+    createdAtMs,
+  ].join(':');
+}
+
+AppConversationMessage _preferredConversationMessage(
+  AppConversationMessage existing,
+  AppConversationMessage incoming,
+) {
+  final existingIsServerMessage = existing.id > 0;
+  final incomingIsServerMessage = incoming.id > 0;
+  if (incomingIsServerMessage && !existingIsServerMessage) {
+    return incoming;
+  }
+  if (existingIsServerMessage && !incomingIsServerMessage) {
+    return existing;
+  }
+
+  return incoming;
 }
 
 String _initialsOfName(String fullName) {
@@ -581,45 +657,38 @@ class _ChatPeerAvatar extends StatelessWidget {
 
     if (avatarUrl != null && avatarUrl.isNotEmpty) {
       avatar = ClipOval(
-        child: avatarUrl.startsWith('http')
-            ? Image.network(
-                avatarUrl,
-                width: size,
-                height: size,
-                fit: BoxFit.cover,
-                gaplessPlayback: true,
-              )
-            : Image.file(
-                File(avatarUrl),
-                width: size,
-                height: size,
-                fit: BoxFit.cover,
-                errorBuilder: (_, _, _) {
-                  final base = _peerAvatarColor(peer.name);
-                  return Container(
-                    width: size,
-                    height: size,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      gradient: LinearGradient(
-                        begin: Alignment.topLeft,
-                        end: Alignment.bottomRight,
-                        colors: [base.withValues(alpha: 0.65), base],
-                      ),
-                    ),
-                    alignment: Alignment.center,
-                    child: Text(
-                      _initialsOfName(peer.name),
-                      style: TextStyle(
-                        fontFamily: AppFont.family,
-                        fontWeight: FontWeight.w700,
-                        fontSize: size * 0.34,
-                        color: AppColors.white,
-                      ),
-                    ),
-                  );
-                },
+        child: CachedAppImage(
+          imageUrl: avatarUrl,
+          width: size,
+          height: size,
+          cacheWidth: (size * 2).round(),
+          cacheHeight: (size * 2).round(),
+          errorBuilder: (_) {
+            final base = _peerAvatarColor(peer.name);
+            return Container(
+              width: size,
+              height: size,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [base.withValues(alpha: 0.65), base],
+                ),
               ),
+              alignment: Alignment.center,
+              child: Text(
+                _initialsOfName(peer.name),
+                style: TextStyle(
+                  fontFamily: AppFont.family,
+                  fontWeight: FontWeight.w700,
+                  fontSize: size * 0.34,
+                  color: AppColors.white,
+                ),
+              ),
+            );
+          },
+        ),
       );
     } else if (avatarAsset != null && avatarAsset.isNotEmpty) {
       avatar = ClipOval(
@@ -842,19 +911,24 @@ class _MessageBubble extends StatelessWidget {
   final VoidCallback? onReport;
   final bool showTranslateAction;
   final VoidCallback? onTranslate;
+  final VoidCallback? onRetry;
 
   const _MessageBubble({
+    super.key,
     required this.message,
     required this.peer,
     required this.theme,
     this.onReport,
     this.showTranslateAction = false,
     this.onTranslate,
+    this.onRetry,
   });
 
   @override
   Widget build(BuildContext context) {
     final isMe = message.side == ChatBubbleSide.me;
+    final deliveryLabel = _deliveryStatusLabel(message.deliveryStatus);
+    final canRetry = message.deliveryStatus == 'failed' && onRetry != null;
 
     Widget content;
     switch (message.type) {
@@ -866,6 +940,7 @@ class _MessageBubble extends StatelessWidget {
         content = _AudioBubble(
           isMe: isMe,
           duration: message.duration ?? const Duration(),
+          source: message.asset,
         );
       case ChatMessageType.text:
         content = _TextBubble(
@@ -899,13 +974,54 @@ class _MessageBubble extends StatelessWidget {
                 const SizedBox(height: 4),
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 4),
-                  child: Text(
-                    message.time,
-                    style: const TextStyle(
-                      fontFamily: AppFont.family,
-                      fontSize: 10,
-                      color: Color(0xFFCCCCCC),
-                    ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        message.time,
+                        style: const TextStyle(
+                          fontFamily: AppFont.family,
+                          fontSize: 10,
+                          color: Color(0xFFCCCCCC),
+                        ),
+                      ),
+                      if (deliveryLabel != null) ...[
+                        const SizedBox(width: 6),
+                        canRetry
+                            ? PressableScale(
+                                onTap: onRetry,
+                                scale: 0.96,
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    const Icon(
+                                      CupertinoIcons.arrow_clockwise,
+                                      size: 11,
+                                      color: Color(0xFFEF4444),
+                                    ),
+                                    const SizedBox(width: 3),
+                                    Text(
+                                      deliveryLabel,
+                                      style: const TextStyle(
+                                        fontFamily: AppFont.family,
+                                        fontSize: 10,
+                                        fontWeight: FontWeight.w600,
+                                        color: Color(0xFFEF4444),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              )
+                            : Text(
+                                deliveryLabel,
+                                style: const TextStyle(
+                                  fontFamily: AppFont.family,
+                                  fontSize: 10,
+                                  color: Color(0xFF999999),
+                                ),
+                              ),
+                      ],
+                    ],
                   ),
                 ),
               ],
@@ -915,17 +1031,34 @@ class _MessageBubble extends StatelessWidget {
       ],
     );
 
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 6, 16, 6),
-      child: onReport == null
-          ? bubble
-          : GestureDetector(
-              behavior: HitTestBehavior.opaque,
-              onLongPress: onReport,
-              child: bubble,
-            ),
+    return RepaintBoundary(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 6, 16, 6),
+        child: onReport == null
+            ? bubble
+            : GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onLongPress: onReport,
+                child: bubble,
+              ),
+      ),
     );
   }
+}
+
+String? _deliveryStatusLabel(String status) {
+  return switch (status) {
+    'queued' => AppRuntimeText.instance.t('chat.delivery.queued', 'Sirada'),
+    'sending' => AppRuntimeText.instance.t(
+      'chat.delivery.sending',
+      'Gonderiliyor',
+    ),
+    'failed' => AppRuntimeText.instance.t(
+      'chat.delivery.failed',
+      'Tekrar dene',
+    ),
+    _ => null,
+  };
 }
 
 void _openMessageReportSheet(
@@ -955,9 +1088,12 @@ void _showMessageActions(
         peer.name,
         style: const TextStyle(fontFamily: AppFont.family),
       ),
-      message: const Text(
-        'Bu mesajla ilgili islem secin.',
-        style: TextStyle(fontFamily: AppFont.family),
+      message: Text(
+        AppRuntimeText.instance.t(
+          'chat.message.action_sheet.subtitle',
+          'Bu mesajla ilgili islem secin.',
+        ),
+        style: const TextStyle(fontFamily: AppFont.family),
       ),
       actions: [
         CupertinoActionSheetAction(
@@ -970,17 +1106,20 @@ void _showMessageActions(
               peerName: peer.name,
             );
           },
-          child: const Text(
-            'Bu Mesaji Sikayet Et',
-            style: TextStyle(fontFamily: AppFont.family),
+          child: Text(
+            AppRuntimeText.instance.t(
+              'chat.message.action.report',
+              'Bu Mesaji Sikayet Et',
+            ),
+            style: const TextStyle(fontFamily: AppFont.family),
           ),
         ),
       ],
       cancelButton: CupertinoActionSheetAction(
         onPressed: () => Navigator.of(sheetContext).pop(),
-        child: const Text(
-          'Vazgec',
-          style: TextStyle(fontFamily: AppFont.family),
+        child: Text(
+          AppRuntimeText.instance.t('commonCancel', 'Vazgec'),
+          style: const TextStyle(fontFamily: AppFont.family),
         ),
       ),
     ),
@@ -1118,24 +1257,24 @@ class _ImageBubble extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final imageWidget = asset.startsWith('http')
-        ? Image.network(
-            asset,
-            fit: BoxFit.cover,
-            gaplessPlayback: true,
-            errorBuilder: (_, _, _) => _imagePlaceholder(),
-          )
-        : asset.startsWith('assets/')
-        ? Image.asset(asset, fit: BoxFit.cover)
-        : Image.file(
-            File(asset),
-            fit: BoxFit.cover,
-            errorBuilder: (_, _, _) => _imagePlaceholder(),
-          );
+    final imageWidget = _chatImageWidget(
+      asset,
+      fit: BoxFit.cover,
+      errorBuilder: (_) => _imagePlaceholder(),
+    );
 
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(20),
-      child: SizedBox(width: 198, height: 220, child: imageWidget),
+    return PressableScale(
+      onTap: () => Navigator.of(context).push(
+        CupertinoPageRoute<void>(
+          builder: (_) => _ChatImageViewerScreen(asset: asset),
+          fullscreenDialog: true,
+        ),
+      ),
+      scale: 0.98,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(20),
+        child: SizedBox(width: 198, height: 220, child: imageWidget),
+      ),
     );
   }
 
@@ -1148,11 +1287,124 @@ class _ImageBubble extends StatelessWidget {
   }
 }
 
-class _AudioBubble extends StatelessWidget {
+class _ChatImageViewerScreen extends StatelessWidget {
+  final String asset;
+
+  const _ChatImageViewerScreen({required this.asset});
+
+  @override
+  Widget build(BuildContext context) {
+    return CupertinoPageScaffold(
+      backgroundColor: AppColors.black,
+      child: Stack(
+        key: const ValueKey('chat-image-viewer'),
+        children: [
+          Positioned.fill(
+            child: SafeArea(
+              child: Center(
+                child: InteractiveViewer(
+                  minScale: 1,
+                  maxScale: 4,
+                  child: _chatImageWidget(
+                    asset,
+                    fit: BoxFit.contain,
+                    errorBuilder: (_) => const _ChatImageViewerFallback(),
+                  ),
+                ),
+              ),
+            ),
+          ),
+          SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(12, 10, 12, 0),
+              child: PressableScale(
+                onTap: () => Navigator.of(context).maybePop(),
+                scale: 0.9,
+                child: Container(
+                  width: 40,
+                  height: 40,
+                  decoration: BoxDecoration(
+                    color: const Color(0x8A000000),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  alignment: Alignment.center,
+                  child: const Icon(
+                    CupertinoIcons.xmark,
+                    size: 18,
+                    color: AppColors.white,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ChatImageViewerFallback extends StatelessWidget {
+  const _ChatImageViewerFallback();
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        const Icon(CupertinoIcons.photo, size: 30, color: AppColors.white),
+        const SizedBox(height: 10),
+        Text(
+          AppRuntimeText.instance.t(
+            'chat.image.error.open_failed',
+            'Fotograf acilamadi.',
+          ),
+          style: const TextStyle(
+            fontFamily: AppFont.family,
+            fontWeight: FontWeight.w700,
+            fontSize: 13,
+            color: AppColors.white,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+Widget _chatImageWidget(
+  String source, {
+  required BoxFit fit,
+  WidgetBuilder? errorBuilder,
+}) {
+  final normalized = source.trim();
+  final uri = Uri.tryParse(normalized);
+  if (uri?.scheme.toLowerCase() == 'file') {
+    return Image.file(
+      File(uri!.toFilePath()),
+      fit: fit,
+      gaplessPlayback: true,
+      errorBuilder: (context, _, _) =>
+          errorBuilder?.call(context) ??
+          const ColoredBox(color: AppColors.grayField),
+    );
+  }
+
+  return CachedAppImage(
+    imageUrl: normalized,
+    fit: fit,
+    errorBuilder: errorBuilder,
+  );
+}
+
+class _AudioBubble extends StatefulWidget {
   final bool isMe;
   final Duration duration;
+  final String? source;
 
-  const _AudioBubble({required this.isMe, required this.duration});
+  const _AudioBubble({
+    required this.isMe,
+    required this.duration,
+    required this.source,
+  });
 
   static const List<double> _bars = [
     0.35,
@@ -1181,7 +1433,118 @@ class _AudioBubble extends StatelessWidget {
   ];
 
   @override
+  State<_AudioBubble> createState() => _AudioBubbleState();
+}
+
+class _AudioBubbleState extends State<_AudioBubble> {
+  late final AudioPlayer _player;
+  StreamSubscription<Duration>? _positionSubscription;
+  StreamSubscription<Duration?>? _durationSubscription;
+  StreamSubscription<PlayerState>? _stateSubscription;
+  Duration _position = Duration.zero;
+  Duration? _resolvedDuration;
+  bool _sourceLoaded = false;
+  bool _playing = false;
+  bool _loading = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _player = AudioPlayer();
+    _positionSubscription = _player.positionStream.listen((position) {
+      if (!mounted) {
+        return;
+      }
+      setState(() => _position = position);
+    });
+    _durationSubscription = _player.durationStream.listen((duration) {
+      if (!mounted || duration == null) {
+        return;
+      }
+      setState(() => _resolvedDuration = duration);
+    });
+    _stateSubscription = _player.playerStateStream.listen((state) {
+      if (!mounted) {
+        return;
+      }
+      final completed = state.processingState == ProcessingState.completed;
+      setState(() {
+        _playing = state.playing && !completed;
+        _loading =
+            state.processingState == ProcessingState.loading ||
+            state.processingState == ProcessingState.buffering;
+        if (completed) {
+          _position = Duration.zero;
+        }
+      });
+      if (completed) {
+        unawaited(_player.seek(Duration.zero));
+      }
+    });
+  }
+
+  @override
+  void didUpdateWidget(covariant _AudioBubble oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.source != widget.source) {
+      _sourceLoaded = false;
+      _position = Duration.zero;
+      _resolvedDuration = null;
+      unawaited(_player.stop());
+    }
+  }
+
+  @override
+  void dispose() {
+    unawaited(_positionSubscription?.cancel());
+    unawaited(_durationSubscription?.cancel());
+    unawaited(_stateSubscription?.cancel());
+    unawaited(_player.dispose());
+    super.dispose();
+  }
+
+  Future<void> _togglePlayback() async {
+    final source = widget.source?.trim();
+    if (source == null || source.isEmpty || _loading) {
+      return;
+    }
+
+    if (_playing) {
+      await _player.pause();
+      return;
+    }
+
+    try {
+      if (!_sourceLoaded) {
+        await _loadSource(source);
+        _sourceLoaded = true;
+      }
+      await _player.play();
+    } catch (_) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _sourceLoaded = false;
+        _loading = false;
+        _playing = false;
+      });
+    }
+  }
+
+  Future<void> _loadSource(String source) {
+    final uri = Uri.tryParse(source);
+    final scheme = uri?.scheme.toLowerCase();
+    if (scheme == 'http' || scheme == 'https' || scheme == 'file') {
+      return _player.setUrl(source).then((_) {});
+    }
+
+    return _player.setFilePath(source).then((_) {});
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final isMe = widget.isMe;
     final bg = isMe
         ? const BoxDecoration(
             gradient: LinearGradient(
@@ -1204,8 +1567,16 @@ class _AudioBubble extends StatelessWidget {
             bottomLeft: Radius.circular(6),
             bottomRight: Radius.circular(20),
           );
-    final minutes = duration.inMinutes.remainder(60).toString().padLeft(1, '0');
-    final seconds = duration.inSeconds.remainder(60).toString().padLeft(2, '0');
+    final displayDuration = _resolvedDuration ?? widget.duration;
+    final displayPosition = _position > Duration.zero
+        ? _position
+        : displayDuration;
+    final progress = displayDuration.inMilliseconds <= 0
+        ? 0.0
+        : (_position.inMilliseconds / displayDuration.inMilliseconds).clamp(
+            0.0,
+            1.0,
+          );
     final playBg = isMe
         ? AppColors.white.withValues(alpha: 0.2)
         : AppColors.black;
@@ -1223,30 +1594,43 @@ class _AudioBubble extends StatelessWidget {
       decoration: bg.copyWith(borderRadius: radius),
       child: Row(
         children: [
-          Container(
-            width: 34,
-            height: 34,
-            decoration: BoxDecoration(
-              color: playBg,
-              borderRadius: BorderRadius.circular(17),
-            ),
-            alignment: Alignment.center,
-            child: Icon(
-              CupertinoIcons.play_fill,
-              size: 14,
-              color: AppColors.white,
+          PressableScale(
+            onTap: _togglePlayback,
+            scale: 0.92,
+            child: Container(
+              width: 34,
+              height: 34,
+              decoration: BoxDecoration(
+                color: playBg,
+                borderRadius: BorderRadius.circular(17),
+              ),
+              alignment: Alignment.center,
+              child: _loading
+                  ? const CupertinoActivityIndicator(radius: 8)
+                  : Icon(
+                      _playing
+                          ? CupertinoIcons.pause_fill
+                          : CupertinoIcons.play_fill,
+                      size: 14,
+                      color: AppColors.white,
+                    ),
             ),
           ),
           const SizedBox(width: 10),
           Expanded(
             child: CustomPaint(
               size: const Size.fromHeight(22),
-              painter: _WaveformPainter(bars: _bars, color: barColor),
+              painter: _WaveformPainter(
+                bars: _AudioBubble._bars,
+                color: barColor,
+                playedColor: isMe ? AppColors.white : AppColors.onlineGreen,
+                progress: progress,
+              ),
             ),
           ),
           const SizedBox(width: 8),
           Text(
-            '$minutes:$seconds',
+            _formatDuration(displayPosition),
             style: TextStyle(
               fontFamily: AppFont.family,
               fontWeight: FontWeight.w700,
@@ -1258,32 +1642,57 @@ class _AudioBubble extends StatelessWidget {
       ),
     );
   }
+
+  String _formatDuration(Duration value) {
+    final minutes = value.inMinutes.remainder(60).toString().padLeft(1, '0');
+    final seconds = value.inSeconds.remainder(60).toString().padLeft(2, '0');
+    return '$minutes:$seconds';
+  }
 }
 
 class _WaveformPainter extends CustomPainter {
   final List<double> bars;
   final Color color;
+  final Color? playedColor;
+  final double progress;
 
-  _WaveformPainter({required this.bars, required this.color});
+  _WaveformPainter({
+    required this.bars,
+    required this.color,
+    this.playedColor,
+    this.progress = 0,
+  });
 
   @override
   void paint(Canvas canvas, Size size) {
-    final paint = Paint()
+    final basePaint = Paint()
       ..color = color
+      ..strokeCap = StrokeCap.round
+      ..strokeWidth = 2.5;
+    final activePaint = Paint()
+      ..color = playedColor ?? color
       ..strokeCap = StrokeCap.round
       ..strokeWidth = 2.5;
     final gap = size.width / bars.length;
     final midY = size.height / 2;
+    final activeX = size.width * progress.clamp(0.0, 1.0);
     for (var i = 0; i < bars.length; i++) {
       final h = bars[i] * size.height;
       final x = i * gap + gap / 2;
-      canvas.drawLine(Offset(x, midY - h / 2), Offset(x, midY + h / 2), paint);
+      canvas.drawLine(
+        Offset(x, midY - h / 2),
+        Offset(x, midY + h / 2),
+        x <= activeX ? activePaint : basePaint,
+      );
     }
   }
 
   @override
   bool shouldRepaint(covariant _WaveformPainter old) =>
-      old.color != color || old.bars != bars;
+      old.color != color ||
+      old.playedColor != playedColor ||
+      old.progress != progress ||
+      old.bars != bars;
 }
 
 class _TypingBubble extends StatefulWidget {
@@ -1353,7 +1762,33 @@ class _TypingBubbleState extends State<_TypingBubble>
 
 enum ChatInputVariant { empty, full }
 
+class _ChatInputDock extends StatelessWidget {
+  final _ChatThemePalette theme;
+  final Widget child;
+
+  const _ChatInputDock({required this.theme, required this.child});
+
+  @override
+  Widget build(BuildContext context) {
+    final safeBottom = MediaQuery.viewPaddingOf(context).bottom;
+
+    return ColoredBox(
+      key: const ValueKey('chat-input-dock'),
+      color: theme.incomingBubble,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          child,
+          SizedBox(height: safeBottom),
+        ],
+      ),
+    );
+  }
+}
+
 class _ChatInputBar extends StatelessWidget {
+  static const double _composerControlHeight = 44;
+
   final ChatInputVariant variant;
   final _ChatThemePalette theme;
   final TextEditingController? controller;
@@ -1361,8 +1796,14 @@ class _ChatInputBar extends StatelessWidget {
   final VoidCallback? onSend;
   final VoidCallback? onLeadingTap;
   final VoidCallback? onMicTap;
+  final VoidCallback? onVoiceCancel;
+  final VoidCallback? onVoiceSend;
   final bool canSend;
   final bool isSending;
+  final bool isVoiceRecording;
+  final bool isVoiceStarting;
+  final bool isVoiceSending;
+  final Duration voiceElapsed;
   final String? errorText;
 
   const _ChatInputBar({
@@ -1373,28 +1814,32 @@ class _ChatInputBar extends StatelessWidget {
     this.onSend,
     this.onLeadingTap,
     this.onMicTap,
+    this.onVoiceCancel,
+    this.onVoiceSend,
     this.canSend = false,
     this.isSending = false,
+    this.isVoiceRecording = false,
+    this.isVoiceStarting = false,
+    this.isVoiceSending = false,
+    this.voiceElapsed = Duration.zero,
     this.errorText,
   });
 
   @override
   Widget build(BuildContext context) {
-    final isEmpty = variant == ChatInputVariant.empty;
     final hasComposer = controller != null;
     final canUseSend = hasComposer && canSend;
     final barColor = theme.incomingBubble;
     final fieldColor = theme.background;
-    final barIconColor = _readableColorOn(barColor);
     final fieldTextColor = _readableColorOn(fieldColor);
     final placeholderColor = _mutedReadableColorOn(fieldColor);
-    final sendColor = canUseSend || onMicTap != null
-        ? theme.outgoingGradient.colors.first
-        : fieldColor;
-    final sendIconColor = _readableColorOn(sendColor);
+    final actionColor = theme.outgoingGradient.colors.first;
+    final actionIconColor = _readableColorOn(actionColor);
 
     return Container(
-      padding: const EdgeInsets.fromLTRB(14, 12, 14, 16),
+      key: const ValueKey('chat-input-bar'),
+      constraints: const BoxConstraints(minHeight: 62),
+      padding: const EdgeInsets.fromLTRB(8, 8, 8, 10),
       decoration: BoxDecoration(color: barColor),
       child: Column(
         mainAxisSize: MainAxisSize.min,
@@ -1415,91 +1860,129 @@ class _ChatInputBar extends StatelessWidget {
               ),
             ),
           ],
-          Row(
-            children: [
-              _circleButton(
-                icon: isEmpty ? CupertinoIcons.camera : CupertinoIcons.photo,
-                bg: fieldColor,
-                iconColor: fieldTextColor,
-                onTap: onLeadingTap,
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: hasComposer
-                    ? CupertinoTextField(
-                        controller: controller,
-                        focusNode: focusNode,
-                        placeholder: 'Mesaj yaz...',
-                        textInputAction: TextInputAction.send,
-                        onSubmitted: (_) => onSend?.call(),
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 16,
-                          vertical: 12,
+          AnimatedSize(
+            duration: const Duration(milliseconds: 160),
+            curve: Curves.easeOutCubic,
+            alignment: Alignment.bottomCenter,
+            child: AnimatedSwitcher(
+              duration: const Duration(milliseconds: 160),
+              switchInCurve: Curves.easeOutCubic,
+              switchOutCurve: Curves.easeInCubic,
+              child: isVoiceRecording
+                  ? _voiceRecordingBar(
+                      sending: isVoiceSending,
+                      starting: isVoiceStarting,
+                      elapsed: voiceElapsed,
+                      onCancel: onVoiceCancel,
+                      onSend: onVoiceSend,
+                    )
+                  : Row(
+                      key: const ValueKey('chat-input-row'),
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        _circleButton(
+                          key: const ValueKey('chat-input-leading'),
+                          icon: CupertinoIcons.camera_fill,
+                          bg: barColor,
+                          iconColor: _mutedReadableColorOn(barColor),
+                          onTap: onLeadingTap,
                         ),
-                        decoration: BoxDecoration(
-                          color: fieldColor,
-                          borderRadius: BorderRadius.circular(24),
-                        ),
-                        style: TextStyle(
-                          fontFamily: AppFont.family,
-                          fontWeight: FontWeight.w500,
-                          fontSize: 14.5,
-                          color: fieldTextColor,
-                        ),
-                        placeholderStyle: TextStyle(
-                          fontFamily: AppFont.family,
-                          fontWeight: FontWeight.w500,
-                          fontSize: 14.5,
-                          color: placeholderColor,
-                        ),
-                      )
-                    : Container(
-                        height: 44,
-                        padding: const EdgeInsets.symmetric(horizontal: 16),
-                        decoration: BoxDecoration(
-                          color: fieldColor,
-                          borderRadius: BorderRadius.circular(24),
-                        ),
-                        child: Row(
-                          children: [
-                            Expanded(
-                              child: Text(
-                                isEmpty ? 'Message...' : 'Mesaj yaz...',
-                                style: TextStyle(
-                                  fontFamily: AppFont.family,
-                                  fontWeight: FontWeight.w500,
-                                  fontSize: 14.5,
-                                  color: placeholderColor,
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: hasComposer
+                              ? ConstrainedBox(
+                                  constraints: const BoxConstraints(
+                                    minHeight: _composerControlHeight,
+                                  ),
+                                  child: CupertinoTextField(
+                                    controller: controller,
+                                    focusNode: focusNode,
+                                    placeholder: AppRuntimeText.instance.t(
+                                      'chatComposerPlaceholder',
+                                      'Mesaj yaz...',
+                                    ),
+                                    minLines: 1,
+                                    maxLines: 4,
+                                    keyboardType: TextInputType.multiline,
+                                    textInputAction: TextInputAction.newline,
+                                    textCapitalization:
+                                        TextCapitalization.sentences,
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 16,
+                                      vertical: 11,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: fieldColor,
+                                      borderRadius: BorderRadius.circular(24),
+                                    ),
+                                    style: TextStyle(
+                                      fontFamily: AppFont.family,
+                                      fontWeight: FontWeight.w500,
+                                      fontSize: 14.5,
+                                      height: 1.25,
+                                      color: fieldTextColor,
+                                    ),
+                                    placeholderStyle: TextStyle(
+                                      fontFamily: AppFont.family,
+                                      fontWeight: FontWeight.w500,
+                                      fontSize: 14.5,
+                                      height: 1.25,
+                                      color: placeholderColor,
+                                    ),
+                                  ),
+                                )
+                              : Container(
+                                  constraints: const BoxConstraints(
+                                    minHeight: _composerControlHeight,
+                                  ),
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 16,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: fieldColor,
+                                    borderRadius: BorderRadius.circular(21),
+                                  ),
+                                  child: Row(
+                                    children: [
+                                      Expanded(
+                                        child: Text(
+                                          'Mesaj yaz...',
+                                          style: TextStyle(
+                                            fontFamily: AppFont.family,
+                                            fontWeight: FontWeight.w500,
+                                            fontSize: 14.5,
+                                            height: 1.25,
+                                            color: placeholderColor,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
                                 ),
-                              ),
-                            ),
-                            if (isEmpty) ...[
-                              const SizedBox(width: 8),
-                              Icon(
-                                CupertinoIcons.paperclip,
-                                size: 18,
-                                color: placeholderColor,
-                              ),
-                            ],
-                          ],
                         ),
-                      ),
-              ),
-              const SizedBox(width: 8),
-              _circleButton(
-                icon: canUseSend
-                    ? CupertinoIcons.arrow_up
-                    : CupertinoIcons.mic_fill,
-                bg: sendColor,
-                iconColor: canUseSend || onMicTap != null
-                    ? sendIconColor
-                    : barIconColor,
-                onTap: canUseSend && !isSending ? onSend : onMicTap,
-                child: canUseSend && isSending
-                    ? const CupertinoActivityIndicator(radius: 9)
-                    : null,
-              ),
-            ],
+                        const SizedBox(width: 6),
+                        canUseSend
+                            ? _circleButton(
+                                key: const ValueKey('chat-input-send'),
+                                icon: CupertinoIcons.arrow_up,
+                                bg: actionColor,
+                                iconColor: actionIconColor,
+                                onTap: !isSending ? onSend : null,
+                                child: isSending
+                                    ? const CupertinoActivityIndicator(
+                                        radius: 9,
+                                      )
+                                    : null,
+                              )
+                            : _micButton(
+                                key: const ValueKey('chat-input-mic'),
+                                bg: actionColor,
+                                iconColor: actionIconColor,
+                                enabled: hasComposer,
+                              ),
+                      ],
+                    ),
+            ),
           ),
         ],
       ),
@@ -1507,6 +1990,7 @@ class _ChatInputBar extends StatelessWidget {
   }
 
   Widget _circleButton({
+    Key? key,
     required IconData icon,
     required Color bg,
     required Color iconColor,
@@ -1517,6 +2001,7 @@ class _ChatInputBar extends StatelessWidget {
       onTap: onTap,
       scale: onTap == null ? 1 : 0.92,
       child: Container(
+        key: key,
         width: 44,
         height: 44,
         decoration: BoxDecoration(
@@ -1528,6 +2013,214 @@ class _ChatInputBar extends StatelessWidget {
       ),
     );
   }
+
+  Widget _micButton({
+    Key? key,
+    required Color bg,
+    required Color iconColor,
+    required bool enabled,
+  }) {
+    return GestureDetector(
+      key: key,
+      behavior: HitTestBehavior.opaque,
+      onTap: enabled ? onMicTap : null,
+      child: Container(
+        width: 44,
+        height: 44,
+        decoration: BoxDecoration(
+          color: bg,
+          borderRadius: BorderRadius.circular(22),
+        ),
+        alignment: Alignment.center,
+        child: Icon(CupertinoIcons.mic_fill, size: 19, color: iconColor),
+      ),
+    );
+  }
+
+  Widget _voiceRecordingBar({
+    required bool sending,
+    required bool starting,
+    required Duration elapsed,
+    VoidCallback? onCancel,
+    VoidCallback? onSend,
+  }) {
+    const accent = AppColors.coral;
+    final minutes = elapsed.inMinutes.remainder(60).toString().padLeft(1, '0');
+    final seconds = elapsed.inSeconds.remainder(60).toString().padLeft(2, '0');
+
+    return Row(
+      key: const ValueKey('chat-voice-recorder'),
+      children: [
+        _circleButton(
+          key: const ValueKey('chat-voice-cancel'),
+          icon: CupertinoIcons.delete,
+          bg: AppColors.grayField,
+          iconColor: AppColors.black,
+          onTap: sending ? null : onCancel,
+        ),
+        const SizedBox(width: 6),
+        Expanded(
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 160),
+            height: 44,
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            decoration: BoxDecoration(
+              color: AppColors.grayField,
+              borderRadius: BorderRadius.circular(22),
+            ),
+            child: Row(
+              children: [
+                TweenAnimationBuilder<double>(
+                  tween: Tween<double>(begin: 0.72, end: 1),
+                  duration: const Duration(milliseconds: 620),
+                  curve: Curves.easeInOut,
+                  builder: (context, scale, child) {
+                    return Transform.scale(scale: scale, child: child);
+                  },
+                  onEnd: () {},
+                  child: Icon(CupertinoIcons.mic_fill, size: 18, color: accent),
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  '$minutes:$seconds',
+                  style: const TextStyle(
+                    fontFamily: AppFont.family,
+                    fontWeight: FontWeight.w800,
+                    fontSize: 13,
+                    color: AppColors.black,
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: CustomPaint(
+                    size: const Size.fromHeight(18),
+                    painter: _WaveformPainter(
+                      bars: _AudioBubble._bars,
+                      color: accent.withValues(alpha: 0.78),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                const Text(
+                  'Kaydediliyor',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontFamily: AppFont.family,
+                    fontWeight: FontWeight.w700,
+                    fontSize: 11,
+                    color: AppColors.neutral600,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(width: 6),
+        _circleButton(
+          key: const ValueKey('chat-voice-send'),
+          icon: CupertinoIcons.paperplane_fill,
+          bg: AppColors.onlineGreen,
+          iconColor: AppColors.white,
+          onTap: sending || starting ? null : onSend,
+          child: sending || starting
+              ? const CupertinoActivityIndicator(radius: 9)
+              : null,
+        ),
+      ],
+    );
+  }
+}
+
+Widget buildChatInputBarForTest({
+  TextEditingController? controller,
+  required bool canSend,
+  VoidCallback? onSend,
+  VoidCallback? onLeadingTap,
+  VoidCallback? onMicTap,
+  VoidCallback? onVoiceCancel,
+  VoidCallback? onVoiceSend,
+  bool isVoiceRecording = false,
+  bool isVoiceStarting = false,
+  bool isVoiceSending = false,
+  Duration voiceElapsed = Duration.zero,
+}) {
+  return _ChatInputBar(
+    variant: ChatInputVariant.full,
+    theme: _chatThemes.first,
+    controller: controller,
+    onSend: onSend,
+    onLeadingTap: onLeadingTap,
+    onMicTap: onMicTap,
+    onVoiceCancel: onVoiceCancel,
+    onVoiceSend: onVoiceSend,
+    canSend: canSend,
+    isVoiceRecording: isVoiceRecording,
+    isVoiceStarting: isVoiceStarting,
+    isVoiceSending: isVoiceSending,
+    voiceElapsed: voiceElapsed,
+  );
+}
+
+Widget buildPassiveChatInputBarForTest() {
+  return _ChatInputBar(
+    variant: ChatInputVariant.empty,
+    theme: _chatThemes.first,
+    canSend: false,
+  );
+}
+
+Widget buildChatInputDockForTest({required Widget child}) {
+  return _ChatInputDock(theme: _chatThemes.first, child: child);
+}
+
+Widget buildChatImageBubbleForTest(String asset) {
+  return _ImageBubble(asset: asset);
+}
+
+Widget buildChatMessageBubbleForTest({
+  required ChatMessage message,
+  VoidCallback? onRetry,
+}) {
+  return _MessageBubble(
+    message: message,
+    peer: const ChatPeer(name: 'Test', handle: '@test', status: 'Cevrim ici'),
+    theme: _chatThemes.first,
+    onRetry: onRetry,
+  );
+}
+
+Widget buildBottomAlignedChatMessagesForTest({required List<Widget> children}) {
+  return _BottomAlignedMessageList(
+    controller: ScrollController(),
+    children: children,
+  );
+}
+
+Key buildConversationMessageKeyForTest(AppConversationMessage message) {
+  return _conversationMessageWidgetKey(message);
+}
+
+List<AppConversationMessage> mergeConversationMessagesForTest(
+  Iterable<AppConversationMessage> left,
+  Iterable<AppConversationMessage> right,
+) {
+  return _mergeConversationMessages(left, right);
+}
+
+Widget buildChatEmptyBodyForTest() {
+  return const _ChatEmptyBody();
+}
+
+Widget buildMediaAttachmentSheetForTest({
+  VoidCallback? onCameraTap,
+  VoidCallback? onGalleryTap,
+}) {
+  return MediaAttachmentSheet(
+    peerName: 'Test',
+    onCameraTap: onCameraTap,
+    onGalleryTap: onGalleryTap,
+  );
 }
 
 // ------ Chat Screen -----------------------------------------------------------
@@ -1551,8 +2244,6 @@ class ChatScreen extends ConsumerStatefulWidget {
 class _ChatScreenState extends ConsumerState<ChatScreen> {
   late final TextEditingController _messageController;
   late final FocusNode _messageFocusNode;
-  ChatRealtimeSubscription? _realtimeSubscription;
-  String? _authToken;
   int? _currentUserId;
   bool _isSending = false;
   bool? _mutedOverride;
@@ -1564,14 +2255,22 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   Timer? _typingDebounce;
   bool _typingActive = false;
   bool _peerTyping = false;
-  int? _realtimeConversationId;
-  String? _realtimeToken;
+  Timer? _voiceTimer;
+  AudioRecorder? _voiceRecorder;
+  String? _voiceRecordingPath;
+  int _voiceElapsedSeconds = 0;
+  bool _voiceRecording = false;
+  bool _voiceStarting = false;
+  bool _voiceSending = false;
+  bool _voicePressActive = false;
+  bool _attachmentSheetOpening = false;
+  bool _disposing = false;
 
   @override
   void initState() {
     super.initState();
+    _ensureChatRuntimeCacheCleanerRegistered();
     final authState = ref.read(appAuthProvider).asData?.value;
-    _authToken = authState?.token;
     _currentUserId = authState?.user?.id;
     _messageFocusNode = FocusNode()..addListener(_handleInputFocusChange);
     _messageController = TextEditingController()
@@ -1580,7 +2279,6 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
       if (!mounted) {
         return;
       }
-      unawaited(_bindRealtimeSubscription());
       unawaited(_loadThemeSelection());
     });
   }
@@ -1589,33 +2287,34 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   void didUpdateWidget(covariant ChatScreen oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.conversation?.id != widget.conversation?.id) {
-      unawaited(
-        _setConversationTyping(
-          false,
-          force: true,
-          conversationOverride: oldWidget.conversation,
-        ),
-      );
+      if (_typingActive) {
+        unawaited(
+          _setConversationTyping(
+            false,
+            force: true,
+            conversationOverride: oldWidget.conversation,
+          ),
+        );
+      }
       _typingDebounce?.cancel();
       _typingActive = false;
       _peerTyping = false;
+      _attachmentSheetOpening = false;
       _themeIndex = null;
       _peerStatusOverride = null;
       _aiStatusOverride = null;
-      unawaited(_bindRealtimeSubscription(force: true));
       unawaited(_loadThemeSelection());
     }
   }
 
   @override
   void dispose() {
-    unawaited(_setConversationTyping(false, force: true));
-    _typingDebounce?.cancel();
-    final realtimeSubscription = _realtimeSubscription;
-    _realtimeSubscription = null;
-    if (realtimeSubscription != null) {
-      unawaited(realtimeSubscription.dispose());
+    _disposing = true;
+    if (_typingActive) {
+      unawaited(_setConversationTyping(false, force: true));
     }
+    unawaited(_cancelInlineVoiceRecording());
+    _typingDebounce?.cancel();
     _messageFocusNode
       ..removeListener(_handleInputFocusChange)
       ..dispose();
@@ -1637,7 +2336,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     }
 
     if (!hasText) {
-      unawaited(_setConversationTyping(false, force: true));
+      if (_typingActive) {
+        unawaited(_setConversationTyping(false, force: true));
+      }
       return;
     }
 
@@ -1651,7 +2352,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
 
   void _handleInputFocusChange() {
     if (!_messageFocusNode.hasFocus) {
-      unawaited(_setConversationTyping(false, force: true));
+      if (_typingActive) {
+        unawaited(_setConversationTyping(false, force: true));
+      }
       return;
     }
 
@@ -1666,8 +2369,42 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   void _scheduleTypingStop() {
     _typingDebounce?.cancel();
     _typingDebounce = Timer(const Duration(seconds: 2), () {
-      unawaited(_setConversationTyping(false, force: true));
+      if (_typingActive) {
+        unawaited(_setConversationTyping(false, force: true));
+      }
     });
+  }
+
+  Future<void> _openAttachmentMenuAfterKeyboardDismiss() async {
+    if (widget.conversation == null ||
+        _attachmentSheetOpening ||
+        _voiceRecording ||
+        _voiceStarting) {
+      return;
+    }
+
+    _attachmentSheetOpening = true;
+    _messageFocusNode.unfocus();
+
+    await Future<void>.delayed(const Duration(milliseconds: 250));
+
+    if (!mounted || widget.conversation == null) {
+      _attachmentSheetOpening = false;
+      return;
+    }
+
+    try {
+      await showCupertinoModalPopup<void>(
+        context: context,
+        builder: (_) => MediaAttachmentSheet(
+          peerName: _peer.name,
+          onCameraTap: () => _pickAndQueueImage(ImageSource.camera),
+          onGalleryTap: () => _pickAndQueueImage(ImageSource.gallery),
+        ),
+      );
+    } finally {
+      _attachmentSheetOpening = false;
+    }
   }
 
   Future<void> _setConversationTyping(
@@ -1676,22 +2413,34 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     AppConversationPreview? conversationOverride,
   }) async {
     final conversation = conversationOverride ?? widget.conversation;
-    final token = _authToken ?? _realtimeToken;
+    final token = ref.read(appAuthProvider).asData?.value?.token;
+    final isCurrentConversation = conversationOverride == null;
+    final wasTyping = _typingActive;
 
     if (!typing) {
       _typingDebounce?.cancel();
-      _typingActive = false;
+      if (isCurrentConversation) {
+        _typingActive = false;
+      }
     }
 
     if (conversation == null || token == null || token.trim().isEmpty) {
       return;
     }
 
-    if (!force && conversationOverride == null && _typingActive == typing) {
+    if (isCurrentConversation && wasTyping == typing) {
       return;
     }
 
-    if (conversationOverride == null) {
+    if (!typing && !force && !wasTyping) {
+      return;
+    }
+
+    if (!typing && force && isCurrentConversation && !wasTyping) {
+      return;
+    }
+
+    if (isCurrentConversation) {
       _typingActive = typing;
     }
 
@@ -1754,60 +2503,12 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     await _saveChatThemeIndex(peerId, index);
   }
 
-  Future<void> _bindRealtimeSubscription({bool force = false}) async {
-    if (!mounted) {
-      return;
-    }
-
-    final conversation = widget.conversation;
-    final authState = ref.read(appAuthProvider).asData?.value;
-    final token = authState?.token;
-
-    if (conversation == null || token == null || token.trim().isEmpty) {
-      await _disposeRealtimeSubscription();
-      return;
-    }
-
-    if (!force &&
-        _realtimeSubscription != null &&
-        _realtimeConversationId == conversation.id &&
-        _realtimeToken == token) {
-      return;
-    }
-
-    await _disposeRealtimeSubscription();
-
-    try {
-      final subscription = await ChatRealtimeService.instance
-          .subscribeToConversation(
-            token: token,
-            conversationId: conversation.id,
-            onEvent: _handleRealtimeEvent,
-          );
-
-      if (!mounted) {
-        await subscription?.dispose();
-        return;
-      }
-
-      _realtimeSubscription = subscription;
-      _realtimeConversationId = conversation.id;
-      _realtimeToken = token;
-    } catch (error) {
-      debugPrint('Chat realtime subscribe error: $error');
-    }
-  }
-
-  Future<void> _disposeRealtimeSubscription() async {
-    final realtimeSubscription = _realtimeSubscription;
-    _realtimeSubscription = null;
-    _realtimeConversationId = null;
-    _realtimeToken = null;
-    await realtimeSubscription?.dispose();
-  }
-
   void _handleRealtimeEvent(ChatRealtimeEvent event) {
     if (!mounted) {
+      return;
+    }
+
+    if (event.conversationId != widget.conversation?.id) {
       return;
     }
 
@@ -1855,9 +2556,6 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
         });
       }
     }
-
-    ref.invalidate(conversationMessagesProvider(event.conversationId));
-    ref.read(conversationFeedRefreshProvider.notifier).state++;
   }
 
   Future<void> _sendMessage() async {
@@ -1867,10 +2565,13 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
 
     if (conversation == null ||
         authState == null ||
+        authState.user?.id == null ||
         text.isEmpty ||
         _isSending) {
       return;
     }
+    final currentUser = authState.user!;
+    final clientMessageId = _newClientMessageId();
 
     setState(() {
       _isSending = true;
@@ -1880,17 +2581,44 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     final api = AppAuthApi();
     try {
       unawaited(_setConversationTyping(false, force: true));
-      final sentMessage = await api.sendConversationMessage(
+      final sentMessage = await api.sendMobileConversationMessage(
         authState.token,
         conversationId: conversation.id,
+        clientMessageId: clientMessageId,
+        messageType: 'metin',
         text: text,
       );
-      await ChatLocalStore.instance.upsertConversationMessage(sentMessage);
+      await ChatLocalStore.instance.upsertConversationMessage(
+        sentMessage,
+        ownerUserId: currentUser.id,
+      );
       _messageController.clear();
       ref.invalidate(conversationMessagesProvider(conversation.id));
       ref.read(conversationFeedRefreshProvider.notifier).state++;
+      _playSendSound(currentUser);
     } catch (error) {
       if (!mounted) {
+        return;
+      }
+      if (error is SocketException ||
+          error is HandshakeException ||
+          error is TimeoutException) {
+        await ChatLocalStore.instance.enqueueTextMessage(
+          ownerUserId: currentUser.id,
+          conversationId: conversation.id,
+          senderId: currentUser.id,
+          senderName: currentUser.displayName,
+          senderProfileImageUrl: currentUser.profileImageUrl,
+          text: text,
+          clientMessageId: clientMessageId,
+        );
+        _messageController.clear();
+        setState(() {
+          _inputError = null;
+        });
+        ref.invalidate(conversationMessagesProvider(conversation.id));
+        ref.read(conversationFeedRefreshProvider.notifier).state++;
+        _playSendSound(currentUser);
         return;
       }
       final message = AppAuthErrorFormatter.messageFrom(error);
@@ -1899,9 +2627,12 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
         await showCupertinoDialog<void>(
           context: context,
           builder: (dialogContext) => CupertinoAlertDialog(
-            title: const Text(
-              'Mesaj Gonderilemedi',
-              style: TextStyle(fontFamily: AppFont.family),
+            title: Text(
+              AppRuntimeText.instance.t(
+                'chat.message.error.send_failed_title',
+                'Mesaj Gonderilemedi',
+              ),
+              style: const TextStyle(fontFamily: AppFont.family),
             ),
             content: Padding(
               padding: const EdgeInsets.only(top: 8),
@@ -1913,9 +2644,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
             actions: [
               CupertinoDialogAction(
                 onPressed: () => Navigator.of(dialogContext).pop(),
-                child: const Text(
-                  'Tamam',
-                  style: TextStyle(fontFamily: AppFont.family),
+                child: Text(
+                  AppRuntimeText.instance.t('commonOk', 'Tamam'),
+                  style: const TextStyle(fontFamily: AppFont.family),
                 ),
               ),
             ],
@@ -1936,11 +2667,305 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     }
   }
 
+  Future<void> _pickAndQueueImage(ImageSource source) async {
+    final picked = await ImagePicker().pickImage(
+      source: source,
+      imageQuality: 88,
+      maxWidth: 1600,
+    );
+    if (picked == null) {
+      return;
+    }
+
+    await _queueMediaMessage(sourceFilePath: picked.path, messageType: 'foto');
+  }
+
+  Future<void> _queueVoiceMessage(VoiceRecordingResult recording) {
+    return _queueMediaMessage(
+      sourceFilePath: recording.filePath,
+      messageType: 'ses',
+      fileDuration: recording.duration,
+    );
+  }
+
+  Future<void> _startInlineVoiceRecording() async {
+    if (_voiceRecording ||
+        _voiceStarting ||
+        _voiceSending ||
+        _voicePressActive ||
+        _messageController.text.trim().isNotEmpty ||
+        widget.conversation == null) {
+      return;
+    }
+
+    _voicePressActive = true;
+    _messageFocusNode.unfocus();
+    unawaited(HapticFeedback.mediumImpact());
+    setState(() {
+      _inputError = null;
+      _voiceRecording = true;
+      _voiceStarting = true;
+      _voiceSending = false;
+      _voiceElapsedSeconds = 0;
+    });
+
+    final recorder = AudioRecorder();
+    try {
+      final hasPermission = await recorder.hasPermission();
+      if (!hasPermission) {
+        await recorder.dispose();
+        _voicePressActive = false;
+        if (!mounted) {
+          return;
+        }
+        setState(() {
+          _voiceRecording = false;
+          _voiceStarting = false;
+          _voiceSending = false;
+          _voiceElapsedSeconds = 0;
+          _inputError = 'Mikrofon izni verilmedi.';
+        });
+        return;
+      }
+
+      if (!_voicePressActive) {
+        await recorder.dispose();
+        return;
+      }
+
+      final directory = await getTemporaryDirectory();
+      final filePath = path.join(
+        directory.path,
+        'voice_${DateTime.now().microsecondsSinceEpoch}.m4a',
+      );
+      await recorder.start(
+        const RecordConfig(encoder: AudioEncoder.aacLc),
+        path: filePath,
+      );
+      if (!mounted || !_voicePressActive) {
+        await recorder.stop();
+        await recorder.dispose();
+        if (!_voicePressActive) {
+          try {
+            final file = File(filePath);
+            if (await file.exists()) {
+              await file.delete();
+            }
+          } catch (_) {}
+        }
+        return;
+      }
+
+      _voiceRecorder = recorder;
+      _voiceRecordingPath = filePath;
+      _voiceTimer?.cancel();
+      _voiceTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+        if (!mounted || !_voiceRecording) {
+          return;
+        }
+        setState(() => _voiceElapsedSeconds++);
+      });
+      setState(() {
+        _inputError = null;
+        _voiceRecording = true;
+        _voiceStarting = false;
+        _voiceSending = false;
+      });
+    } catch (_) {
+      await recorder.dispose();
+      _voicePressActive = false;
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _voiceRecording = false;
+        _voiceStarting = false;
+        _voiceSending = false;
+        _voiceElapsedSeconds = 0;
+        _inputError = AppRuntimeText.instance.t(
+          'chat.voice.error.start_failed',
+          'Ses kaydi baslatilamadi.',
+        );
+      });
+    }
+  }
+
+  Future<void> _cancelInlineVoiceRecording() async {
+    final wasRecording = _voiceRecording;
+    _voicePressActive = false;
+    final recorder = _voiceRecorder;
+    final filePath = _voiceRecordingPath;
+    _voiceTimer?.cancel();
+    _voiceTimer = null;
+    _voiceRecorder = null;
+    _voiceRecordingPath = null;
+
+    if (mounted && !_disposing && wasRecording) {
+      setState(() {
+        _voiceRecording = false;
+        _voiceStarting = false;
+        _voiceSending = false;
+        _voicePressActive = false;
+        _voiceElapsedSeconds = 0;
+      });
+    }
+
+    try {
+      await recorder?.stop();
+    } catch (_) {}
+    try {
+      await recorder?.dispose();
+    } catch (_) {}
+    if (filePath != null && filePath.trim().isNotEmpty) {
+      try {
+        final file = File(filePath);
+        if (await file.exists()) {
+          await file.delete();
+        }
+      } catch (_) {}
+    }
+  }
+
+  Future<void> _sendInlineVoiceRecording() async {
+    if (!_voiceRecording || _voiceStarting || _voiceSending) {
+      return;
+    }
+
+    if (_voiceRecorder == null) {
+      return;
+    }
+
+    setState(() => _voiceSending = true);
+    final recorder = _voiceRecorder;
+    _voiceTimer?.cancel();
+    _voiceTimer = null;
+
+    String? filePath = _voiceRecordingPath;
+    try {
+      final stoppedPath = await recorder?.stop();
+      if (stoppedPath != null && stoppedPath.trim().isNotEmpty) {
+        filePath = stoppedPath;
+      }
+    } catch (_) {}
+    try {
+      await recorder?.dispose();
+    } catch (_) {}
+
+    _voiceRecorder = null;
+    _voiceRecordingPath = null;
+    final durationSeconds = _voiceElapsedSeconds < 1 ? 1 : _voiceElapsedSeconds;
+
+    if (filePath == null || filePath.trim().isEmpty) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _voiceRecording = false;
+        _voiceStarting = false;
+        _voiceSending = false;
+        _voicePressActive = false;
+        _voiceElapsedSeconds = 0;
+        _inputError = AppRuntimeText.instance.t(
+          'chat.voice.error.missing_recording',
+          'Gonderilecek ses kaydi bulunamadi.',
+        );
+      });
+      return;
+    }
+
+    await _queueVoiceMessage(
+      VoiceRecordingResult(
+        filePath: filePath,
+        duration: Duration(seconds: durationSeconds),
+      ),
+    );
+
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _voiceRecording = false;
+      _voiceStarting = false;
+      _voiceSending = false;
+      _voicePressActive = false;
+      _voiceElapsedSeconds = 0;
+    });
+  }
+
+  Future<void> _queueMediaMessage({
+    required String sourceFilePath,
+    required String messageType,
+    Duration? fileDuration,
+  }) async {
+    final conversation = widget.conversation;
+    final authState = ref.read(appAuthProvider).asData?.value;
+    final currentUser = authState?.user;
+    if (conversation == null ||
+        authState == null ||
+        currentUser == null ||
+        authState.token.trim().isEmpty) {
+      return;
+    }
+
+    final clientMessageId = _newClientMessageId();
+    final clientUploadId =
+        'upload-${DateTime.now().microsecondsSinceEpoch}-$clientMessageId';
+
+    try {
+      await ChatLocalStore.instance.enqueueMediaMessage(
+        ownerUserId: currentUser.id,
+        conversationId: conversation.id,
+        senderId: currentUser.id,
+        senderName: currentUser.displayName,
+        senderProfileImageUrl: currentUser.profileImageUrl,
+        sourceFilePath: sourceFilePath,
+        messageType: messageType,
+        clientMessageId: clientMessageId,
+        clientUploadId: clientUploadId,
+        fileDuration: fileDuration,
+      );
+      ref.invalidate(conversationMessagesProvider(conversation.id));
+      ref.read(conversationFeedRefreshProvider.notifier).state++;
+      _playSendSound(currentUser);
+      unawaited(_flushOutboxAndRefresh(conversation.id));
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _inputError = AppAuthErrorFormatter.messageFrom(error);
+      });
+    }
+  }
+
+  void _playSendSound(AppUser user) {
+    unawaited(
+      AppMessageSoundService.instance.playSend(
+        enabled: user.messageSoundsEnabled ?? true,
+      ),
+    );
+  }
+
+  Future<void> _flushOutboxAndRefresh(int conversationId) async {
+    final authState = ref.read(appAuthProvider).asData?.value;
+    final token = authState?.token;
+    final userId = authState?.user?.id;
+    if (token == null || token.trim().isEmpty || userId == null) {
+      return;
+    }
+
+    await AppSyncEngine.instance.flushOutbox(token: token, ownerUserId: userId);
+    if (!mounted) {
+      return;
+    }
+    ref.invalidate(conversationMessagesProvider(conversationId));
+    ref.read(conversationFeedRefreshProvider.notifier).state++;
+  }
+
   @override
   Widget build(BuildContext context) {
     final hasConversation = widget.conversation != null;
     final authState = ref.watch(appAuthProvider).asData?.value;
-    _authToken = authState?.token;
     _currentUserId = authState?.user?.id;
     final peerProfile = hasConversation
         ? ref
@@ -1954,16 +2979,19 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
         ? _chatThemeForPeer(widget.conversation?.peerId)
         : _chatThemes[_themeIndex!];
 
-    ref.listen<AsyncValue<AppAuthState?>>(appAuthProvider, (previous, next) {
-      if (!mounted) {
+    ref.listen<ChatRealtimeEventSignal?>(chatRealtimeEventBusProvider, (
+      previous,
+      next,
+    ) {
+      final event = next?.event;
+      if (event == null) {
         return;
       }
+      _handleRealtimeEvent(event);
+    });
 
-      final previousToken = previous?.asData?.value?.token;
-      final nextToken = next.asData?.value?.token;
-      if (previousToken != nextToken) {
-        unawaited(_bindRealtimeSubscription(force: true));
-      }
+    ref.listen<AsyncValue<AppAuthState?>>(appAuthProvider, (previous, next) {
+      _currentUserId = next.asData?.value?.user?.id;
     });
 
     void openProfile() {
@@ -2014,20 +3042,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
       if (!hasConversation) {
         return;
       }
-      showCupertinoModalPopup<void>(
-        context: context,
-        builder: (_) => MediaAttachmentSheet(peerName: _peer.name),
-      );
-    }
-
-    void openRecorder() {
-      if (!hasConversation) {
-        return;
-      }
-      showCupertinoModalPopup<void>(
-        context: context,
-        builder: (_) => VoiceRecorderSheet(peerName: _peer.name),
-      );
+      unawaited(_openAttachmentMenuAfterKeyboardDismiss());
     }
 
     void openMore() {
@@ -2044,7 +3059,15 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                 openMute();
               },
               child: Text(
-                isMuted ? 'Sessizden Cikar' : 'Sessize Al',
+                isMuted
+                    ? AppRuntimeText.instance.t(
+                        'chat.profile.action.unmute',
+                        'Sessizden Cikar',
+                      )
+                    : AppRuntimeText.instance.t(
+                        'chat.profile.action.mute',
+                        'Sessize Al',
+                      ),
                 style: const TextStyle(fontFamily: AppFont.family),
               ),
             ),
@@ -2059,9 +3082,12 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                   ),
                 );
               },
-              child: const Text(
-                'Sikayet Et',
-                style: TextStyle(
+              child: Text(
+                AppRuntimeText.instance.t(
+                  'chat.profile.action.report',
+                  'Sikayet Et',
+                ),
+                style: const TextStyle(
                   fontFamily: AppFont.family,
                   color: Color(0xFFEF4444),
                 ),
@@ -2083,16 +3109,24 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                 );
               },
               child: Text(
-                isBlocked ? 'Engelden Cikar' : 'Engelle',
+                isBlocked
+                    ? AppRuntimeText.instance.t(
+                        'chat.profile.action.unblock',
+                        'Engelden Cikar',
+                      )
+                    : AppRuntimeText.instance.t(
+                        'chat.profile.action.block',
+                        'Engelle',
+                      ),
                 style: const TextStyle(fontFamily: AppFont.family),
               ),
             ),
           ],
           cancelButton: CupertinoActionSheetAction(
             onPressed: () => Navigator.of(ctx).pop(),
-            child: const Text(
-              'Vazgec',
-              style: TextStyle(fontFamily: AppFont.family),
+            child: Text(
+              AppRuntimeText.instance.t('commonCancel', 'Vazgec'),
+              style: const TextStyle(fontFamily: AppFont.family),
             ),
           ),
         ),
@@ -2103,6 +3137,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
       value: _systemOverlayForTheme(theme),
       child: CupertinoPageScaffold(
         backgroundColor: theme.incomingBubble,
+        resizeToAvoidBottomInset: true,
         child: SafeArea(
           bottom: false,
           child: Column(
@@ -2130,28 +3165,33 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                         ),
                 ),
               ),
-              _ChatInputBar(
-                variant: widget.mode == ChatScreenMode.empty
-                    ? ChatInputVariant.empty
-                    : ChatInputVariant.full,
+              _ChatInputDock(
                 theme: theme,
-                controller: widget.conversation == null
-                    ? null
-                    : _messageController,
-                focusNode: widget.conversation == null
-                    ? null
-                    : _messageFocusNode,
-                onSend: _sendMessage,
-                onLeadingTap: openAttachmentMenu,
-                onMicTap: openRecorder,
-                canSend:
-                    _messageController.text.trim().isNotEmpty && !_isSending,
-                isSending: _isSending,
-                errorText: _inputError,
-              ),
-              ColoredBox(
-                color: theme.incomingBubble,
-                child: SizedBox(height: MediaQuery.paddingOf(context).bottom),
+                child: _ChatInputBar(
+                  variant: widget.mode == ChatScreenMode.empty
+                      ? ChatInputVariant.empty
+                      : ChatInputVariant.full,
+                  theme: theme,
+                  controller: widget.conversation == null
+                      ? null
+                      : _messageController,
+                  focusNode: widget.conversation == null
+                      ? null
+                      : _messageFocusNode,
+                  onSend: _sendMessage,
+                  onLeadingTap: openAttachmentMenu,
+                  onMicTap: _startInlineVoiceRecording,
+                  onVoiceCancel: _cancelInlineVoiceRecording,
+                  onVoiceSend: _sendInlineVoiceRecording,
+                  canSend:
+                      _messageController.text.trim().isNotEmpty && !_isSending,
+                  isSending: _isSending,
+                  isVoiceRecording: _voiceRecording,
+                  isVoiceStarting: _voiceStarting,
+                  isVoiceSending: _voiceSending,
+                  voiceElapsed: Duration(seconds: _voiceElapsedSeconds),
+                  errorText: _inputError,
+                ),
               ),
             ],
           ),
@@ -2187,40 +3227,79 @@ class _ChatEmptyBody extends StatelessWidget {
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {
-        final compact = constraints.maxHeight < 620;
+        final mediaSize = MediaQuery.sizeOf(context);
+        final width = constraints.maxWidth.isFinite
+            ? constraints.maxWidth
+            : mediaSize.width;
+        final height = constraints.maxHeight.isFinite
+            ? constraints.maxHeight
+            : mediaSize.height;
+        final keyboardOpen = MediaQuery.viewInsetsOf(context).bottom > 0;
+        final compact = keyboardOpen || height < 520;
+        final mascotWidth = (width * (compact ? 0.48 : 0.58))
+            .clamp(164.0, compact ? 210.0 : 260.0)
+            .toDouble();
+        final mascotHeight = mascotWidth * 1.16;
+        final horizontalPadding = width < 360 ? 20.0 : 28.0;
+        final topFlex = compact ? 1 : 2;
+        final bottomFlex = compact ? 1 : 3;
 
-        return Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const Spacer(),
-            Image.asset(
-              'assets/images/hello_mascot.png',
-              width: compact ? 180 : 220,
-              height: compact ? 210 : 260,
-              fit: BoxFit.contain,
+        return SizedBox(
+          key: const ValueKey('chat-empty-body'),
+          width: double.infinity,
+          child: Padding(
+            padding: EdgeInsets.symmetric(horizontal: horizontalPadding),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Spacer(flex: topFlex),
+                Center(
+                  child: Image.asset(
+                    'assets/images/hello_mascot.png',
+                    key: const ValueKey('chat-empty-mascot'),
+                    width: mascotWidth,
+                    height: mascotHeight,
+                    fit: BoxFit.contain,
+                  ),
+                ),
+                SizedBox(height: compact ? 6 : 10),
+                Align(
+                  alignment: Alignment.center,
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 360),
+                    child: const Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          'Bir Selam Ver!',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            fontFamily: AppFont.family,
+                            fontWeight: FontWeight.w800,
+                            fontSize: 17,
+                            color: AppColors.black,
+                          ),
+                        ),
+                        SizedBox(height: 4),
+                        Text(
+                          'Hadi bu firsati kacirma...',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            fontFamily: AppFont.family,
+                            fontSize: 13.5,
+                            height: 1.5,
+                            color: Color(0xFF666666),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                Spacer(flex: bottomFlex),
+              ],
             ),
-            const SizedBox(height: 8),
-            const Text(
-              'Bir Selam Ver!',
-              style: TextStyle(
-                fontFamily: AppFont.family,
-                fontWeight: FontWeight.w800,
-                fontSize: 17,
-                color: AppColors.black,
-              ),
-            ),
-            const SizedBox(height: 4),
-            const Text(
-              'Hadi bu firsati kacirma...',
-              style: TextStyle(
-                fontFamily: AppFont.family,
-                fontSize: 13.5,
-                height: 1.5,
-                color: Color(0xFF666666),
-              ),
-            ),
-            const Spacer(flex: 2),
-          ],
+          ),
         );
       },
     );
@@ -2276,6 +3355,15 @@ class _LiveChatMessagesBody extends ConsumerStatefulWidget {
   @override
   ConsumerState<_LiveChatMessagesBody> createState() =>
       _LiveChatMessagesBodyState();
+}
+
+Key _conversationMessageWidgetKey(AppConversationMessage message) {
+  final clientMessageId = message.clientMessageId?.trim();
+  if (clientMessageId != null && clientMessageId.isNotEmpty) {
+    return ValueKey('chat-message-client-$clientMessageId');
+  }
+
+  return ValueKey('chat-message-server-${message.id}');
 }
 
 class _LiveChatMessagesBodyState extends ConsumerState<_LiveChatMessagesBody> {
@@ -2343,62 +3431,35 @@ class _LiveChatMessagesBodyState extends ConsumerState<_LiveChatMessagesBody> {
 
   void _handleScroll() {
     if (!_scrollController.hasClients ||
-        _scrollController.position.pixels > 96) {
+        _scrollController.position.maxScrollExtent -
+                _scrollController.position.pixels >
+            96) {
       return;
     }
     unawaited(_loadOlderMessages());
   }
 
-  bool _isNearBottom() {
-    if (!_scrollController.hasClients) {
-      return true;
-    }
-
-    return _scrollController.position.maxScrollExtent -
-            _scrollController.position.pixels <=
-        88;
-  }
-
-  void _scrollToBottom({bool animated = true}) {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted || !_scrollController.hasClients) {
-        return;
-      }
-
-      final target = _scrollController.position.maxScrollExtent;
-      if (animated) {
-        _scrollController.animateTo(
-          target,
-          duration: const Duration(milliseconds: 220),
-          curve: Curves.easeOutCubic,
-        );
-        return;
-      }
-
-      _scrollController.jumpTo(target);
-    });
-  }
-
   Future<void> _markConversationRead(String token) async {
-    final api = AppAuthApi();
-    try {
-      await api.markConversationRead(
-        token,
-        conversationId: widget.conversation.id,
-      );
-    } catch (_) {
-      // Keep chat readable when read receipts fail.
-    } finally {
-      api.close();
+    final currentUserId = ref.read(appAuthProvider).asData?.value?.user?.id;
+    if (currentUserId == null) {
+      return;
     }
+
+    await _markConversationReadLocalAndRemote(
+      ref,
+      token: token,
+      userId: currentUserId,
+      conversationId: widget.conversation.id,
+    );
   }
 
   Future<void> _loadInitialMessages() async {
     final authState = ref.read(appAuthProvider).asData?.value;
     final token = authState?.token;
+    final userId = authState?.user?.id;
     final conversationId = widget.conversation.id;
 
-    if (token == null || token.trim().isEmpty) {
+    if (token == null || token.trim().isEmpty || userId == null) {
       if (!mounted) {
         return;
       }
@@ -2422,6 +3483,7 @@ class _LiveChatMessagesBodyState extends ConsumerState<_LiveChatMessagesBody> {
     final localStore = ChatLocalStore.instance;
     final cachedMessages = await localStore.getConversationMessages(
       conversationId,
+      ownerUserId: userId,
       limit: _conversationMessagePageSize,
     );
     if (!mounted || widget.conversation.id != conversationId) {
@@ -2433,33 +3495,38 @@ class _LiveChatMessagesBodyState extends ConsumerState<_LiveChatMessagesBody> {
         _messages = cachedMessages;
         _initialLoading = false;
         _errorText = null;
+        _highestFetchedPage = 1;
+        _hasMoreOlder = cachedMessages.length >= _conversationMessagePageSize;
       });
-      _scrollToBottom(animated: false);
+      unawaited(_markConversationRead(token));
+      return;
     }
 
     final api = AppAuthApi();
     try {
-      final page = await api.fetchConversationMessagesPage(
+      final page = await api.fetchMobileConversationMessages(
         token,
         conversationId: conversationId,
-        page: 1,
+        limit: _conversationMessagePageSize,
       );
       if (!mounted || widget.conversation.id != conversationId) {
         return;
       }
 
-      await localStore.upsertConversationMessages(page.messages);
+      await localStore.upsertConversationMessages(
+        page.messages,
+        ownerUserId: userId,
+      );
       unawaited(_markConversationRead(token));
 
       setState(() {
-        _messages = _mergeConversationMessages(const [], page.messages);
+        _messages = page.messages;
         _initialLoading = false;
         _errorText = null;
         _highestFetchedPage = 1;
         _hasMoreOlder = page.hasMore;
         _aiStatus = page.aiStatus;
       });
-      _scrollToBottom(animated: false);
     } catch (error) {
       if (!mounted || widget.conversation.id != conversationId) {
         return;
@@ -2478,61 +3545,86 @@ class _LiveChatMessagesBodyState extends ConsumerState<_LiveChatMessagesBody> {
     }
   }
 
-  Future<void> _refreshLatestMessages({bool scrollToBottom = false}) async {
+  Future<void> _reloadMessagesFromCache() async {
     if (_refreshingLatest) {
       return;
     }
 
     final authState = ref.read(appAuthProvider).asData?.value;
     final token = authState?.token;
+    final userId = authState?.user?.id;
     final conversationId = widget.conversation.id;
-    if (token == null || token.trim().isEmpty) {
+    if (token == null || token.trim().isEmpty || userId == null) {
       return;
     }
 
     _refreshingLatest = true;
-    final api = AppAuthApi();
     try {
-      final page = await api.fetchConversationMessagesPage(
-        token,
-        conversationId: conversationId,
-        page: 1,
-      );
-      if (!mounted || widget.conversation.id != conversationId) {
+      final cachedMessages = await ChatLocalStore.instance
+          .getConversationMessages(
+            conversationId,
+            ownerUserId: userId,
+            limit: _conversationMessagePageSize,
+          );
+      if (!mounted ||
+          widget.conversation.id != conversationId ||
+          cachedMessages.isEmpty) {
         return;
       }
 
-      await ChatLocalStore.instance.upsertConversationMessages(page.messages);
       unawaited(_markConversationRead(token));
-
-      final previousLastId = _messages.isNotEmpty ? _messages.last.id : null;
       final mergedMessages = _mergeConversationMessages(
         _messages,
-        page.messages,
+        cachedMessages,
       );
-      final nextLastId = mergedMessages.isNotEmpty
-          ? mergedMessages.last.id
-          : null;
 
       setState(() {
         _messages = mergedMessages;
         _errorText = null;
-        _aiStatus = page.aiStatus;
         if (_highestFetchedPage == 0) {
           _highestFetchedPage = 1;
-          _hasMoreOlder = page.hasMore;
+          _hasMoreOlder = cachedMessages.length >= _conversationMessagePageSize;
         }
       });
-
-      if (scrollToBottom || previousLastId != nextLastId) {
-        _scrollToBottom(animated: previousLastId != null);
-      }
-    } catch (_) {
-      // Keep the current message list visible when refresh fails.
     } finally {
       _refreshingLatest = false;
-      api.close();
     }
+  }
+
+  Future<void> _retryPendingMessage(AppConversationMessage message) async {
+    final authState = ref.read(appAuthProvider).asData?.value;
+    final token = authState?.token;
+    final userId = authState?.user?.id;
+    final clientMessageId = message.clientMessageId?.trim();
+    if (token == null ||
+        token.trim().isEmpty ||
+        userId == null ||
+        clientMessageId == null ||
+        clientMessageId.isEmpty) {
+      return;
+    }
+
+    await ChatLocalStore.instance.queueOutboxRetry(
+      ownerUserId: userId,
+      clientMessageId: clientMessageId,
+    );
+    if (!mounted) {
+      return;
+    }
+    ref.invalidate(conversationMessagesProvider(widget.conversation.id));
+    unawaited(
+      AppSyncEngine.instance
+          .flushOutbox(token: token, ownerUserId: userId)
+          .whenComplete(() {
+            if (!mounted) {
+              return;
+            }
+            ref.invalidate(
+              conversationMessagesProvider(widget.conversation.id),
+            );
+            ref.read(conversationFeedRefreshProvider.notifier).state++;
+          }),
+    );
   }
 
   Future<void> _loadOlderMessages() async {
@@ -2542,50 +3634,43 @@ class _LiveChatMessagesBodyState extends ConsumerState<_LiveChatMessagesBody> {
 
     final authState = ref.read(appAuthProvider).asData?.value;
     final token = authState?.token;
+    final userId = authState?.user?.id;
     final conversationId = widget.conversation.id;
-    if (token == null || token.trim().isEmpty) {
+    if (token == null || token.trim().isEmpty || userId == null) {
       return;
     }
 
-    final previousOffset = _scrollController.hasClients
-        ? _scrollController.position.pixels
-        : 0.0;
-    final previousMaxExtent = _scrollController.hasClients
-        ? _scrollController.position.maxScrollExtent
-        : 0.0;
-    final nextPageNumber = _highestFetchedPage + 1;
+    final beforeId = _oldestServerMessageId(_messages);
+    if (beforeId == null) {
+      setState(() => _hasMoreOlder = false);
+      return;
+    }
 
     setState(() => _loadingOlder = true);
 
     final api = AppAuthApi();
     try {
-      final page = await api.fetchConversationMessagesPage(
+      final page = await api.fetchMobileConversationMessages(
         token,
         conversationId: conversationId,
-        page: nextPageNumber,
+        beforeId: beforeId,
+        limit: _conversationMessagePageSize,
       );
       if (!mounted || widget.conversation.id != conversationId) {
         return;
       }
 
-      await ChatLocalStore.instance.upsertConversationMessages(page.messages);
+      await ChatLocalStore.instance.upsertConversationMessages(
+        page.messages,
+        ownerUserId: userId,
+      );
 
       setState(() {
         _messages = _mergeConversationMessages(page.messages, _messages);
         _loadingOlder = false;
         _errorText = null;
-        _highestFetchedPage = nextPageNumber;
+        _highestFetchedPage = _highestFetchedPage + 1;
         _hasMoreOlder = page.hasMore;
-      });
-
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted || !_scrollController.hasClients) {
-          return;
-        }
-
-        final newMaxExtent = _scrollController.position.maxScrollExtent;
-        final delta = newMaxExtent - previousMaxExtent;
-        _scrollController.jumpTo(previousOffset + delta);
       });
     } catch (_) {
       if (!mounted || widget.conversation.id != conversationId) {
@@ -2672,7 +3757,7 @@ class _LiveChatMessagesBodyState extends ConsumerState<_LiveChatMessagesBody> {
         if (!mounted) {
           return;
         }
-        unawaited(_refreshLatestMessages(scrollToBottom: _isNearBottom()));
+        unawaited(_reloadMessagesFromCache());
       });
     }
 
@@ -2701,12 +3786,11 @@ class _LiveChatMessagesBodyState extends ConsumerState<_LiveChatMessagesBody> {
 
     if (_messages.isEmpty) {
       if (showTypingIndicator) {
-        return ListView(
+        return _BottomAlignedMessageList(
           controller: _scrollController,
-          physics: const BouncingScrollPhysics(),
-          padding: const EdgeInsets.only(top: 16, bottom: 16),
           children: [
             _MessageBubble(
+              key: const ValueKey('chat-message-typing'),
               message: const ChatMessage.typing(),
               peer: widget.peer,
               theme: widget.theme,
@@ -2729,58 +3813,92 @@ class _LiveChatMessagesBodyState extends ConsumerState<_LiveChatMessagesBody> {
     if (showTypingIndicator) {
       uiMessages.add(const ChatMessage.typing());
     }
-    final extraTopItemCount = _loadingOlder ? 1 : 0;
 
-    return ListView.builder(
-      controller: _scrollController,
-      physics: const BouncingScrollPhysics(),
-      padding: const EdgeInsets.only(top: 16, bottom: 16),
-      itemCount: uiMessages.length + extraTopItemCount,
-      itemBuilder: (context, index) {
-        if (_loadingOlder && index == 0) {
-          return const Padding(
-            padding: EdgeInsets.only(bottom: 10),
-            child: Center(child: CupertinoActivityIndicator(radius: 11)),
-          );
-        }
-
-        final messageIndex = index - extraTopItemCount;
-        final uiMessage = uiMessages[messageIndex];
-        if (messageIndex >= displayMessages.length) {
-          return _MessageBubble(
-            message: uiMessage,
+    final messageWidgets = <Widget>[
+      if (_loadingOlder)
+        const Padding(
+          key: ValueKey('chat-loading-older'),
+          padding: EdgeInsets.only(bottom: 10),
+          child: Center(child: CupertinoActivityIndicator(radius: 11)),
+        ),
+      for (
+        var messageIndex = 0;
+        messageIndex < uiMessages.length;
+        messageIndex++
+      )
+        if (messageIndex >= displayMessages.length)
+          _MessageBubble(
+            key: const ValueKey('chat-message-typing'),
+            message: uiMessages[messageIndex],
             peer: widget.peer,
             theme: widget.theme,
-          );
-        }
-
-        final apiMessage = _messages[messageIndex];
-        final displayMessage = displayMessages[messageIndex];
-        final canReportMessage =
-            !apiMessage.isFromUser(currentUserId) && uiMessage.id != null;
-        final canTranslateMessage = shouldShowInlineTranslateAction(
-          message: apiMessage,
-          currentUserId: currentUserId,
-          viewerLanguageCode: viewerLanguageCode,
-          peerLanguageCode: widget.peer.languageCode,
-        );
-
-        return _MessageBubble(
-          message: uiMessage,
-          peer: widget.peer,
-          theme: widget.theme,
-          showTranslateAction: canTranslateMessage,
-          onTranslate: canTranslateMessage
-              ? () => _translateMessage(apiMessage)
-              : null,
-          onReport: canReportMessage
-              ? () => _showMessageActions(
-                  context,
-                  message: displayMessage,
-                  peer: widget.peer,
+          )
+        else
+          _MessageBubble(
+            key: _conversationMessageWidgetKey(displayMessages[messageIndex]),
+            message: uiMessages[messageIndex],
+            peer: widget.peer,
+            theme: widget.theme,
+            showTranslateAction: shouldShowInlineTranslateAction(
+              message: _messages[messageIndex],
+              currentUserId: currentUserId,
+              viewerLanguageCode: viewerLanguageCode,
+              peerLanguageCode: widget.peer.languageCode,
+            ),
+            onTranslate:
+                shouldShowInlineTranslateAction(
+                  message: _messages[messageIndex],
+                  currentUserId: currentUserId,
+                  viewerLanguageCode: viewerLanguageCode,
+                  peerLanguageCode: widget.peer.languageCode,
                 )
-              : null,
-        );
+                ? () => _translateMessage(_messages[messageIndex])
+                : null,
+            onReport:
+                !_messages[messageIndex].isFromUser(currentUserId) &&
+                    uiMessages[messageIndex].id != null
+                ? () => _showMessageActions(
+                    context,
+                    message: displayMessages[messageIndex],
+                    peer: widget.peer,
+                  )
+                : null,
+            onRetry:
+                _messages[messageIndex].isFromUser(currentUserId) &&
+                    _messages[messageIndex].deliveryStatus == 'failed'
+                ? () => _retryPendingMessage(_messages[messageIndex])
+                : null,
+          ),
+    ];
+
+    return _BottomAlignedMessageList(
+      controller: _scrollController,
+      children: messageWidgets,
+    );
+  }
+}
+
+class _BottomAlignedMessageList extends StatelessWidget {
+  final ScrollController controller;
+  final List<Widget> children;
+
+  const _BottomAlignedMessageList({
+    required this.controller,
+    required this.children,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView.builder(
+      controller: controller,
+      reverse: true,
+      physics: const RangeMaintainingScrollPhysics(
+        parent: ClampingScrollPhysics(),
+      ),
+      padding: const EdgeInsets.only(top: 16, bottom: 16),
+      itemCount: children.length,
+      itemBuilder: (context, index) {
+        return children[children.length - 1 - index];
       },
     );
   }
@@ -2808,6 +3926,7 @@ ChatMessage _chatMessageFromApi(
     languageName: message.languageName,
     asset: message.fileUrl,
     duration: message.fileDuration,
+    deliveryStatus: message.deliveryStatus,
     time: _formatChatClock(message.createdAt),
   );
 }
@@ -2986,7 +4105,10 @@ class _ChatProfileScreenState extends ConsumerState<ChatProfileScreen> {
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
                       _ProfileActionChip(
-                        label: 'Hediye Gonder',
+                        label: AppRuntimeText.instance.t(
+                          'chat.profile.action.send_gift',
+                          'Hediye Gonder',
+                        ),
                         gradient: false,
                         icon: const Icon(
                           CupertinoIcons.gift_fill,
@@ -2997,7 +4119,15 @@ class _ChatProfileScreenState extends ConsumerState<ChatProfileScreen> {
                       ),
                       const SizedBox(width: 18),
                       _ProfileActionChip(
-                        label: isMuted ? 'Sessizden Cikar' : 'Sessize Al',
+                        label: isMuted
+                            ? AppRuntimeText.instance.t(
+                                'chat.profile.action.unmute',
+                                'Sessizden Cikar',
+                              )
+                            : AppRuntimeText.instance.t(
+                                'chat.profile.action.mute',
+                                'Sessize Al',
+                              ),
                         gradient: false,
                         icon: Icon(
                           isMuted
@@ -3162,9 +4292,12 @@ class _GiftSendersSection extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
-            'Hediye Gonderenler',
-            style: TextStyle(
+          Text(
+            AppRuntimeText.instance.t(
+              'chat.profile.gift_senders.title',
+              'Hediye Gonderenler',
+            ),
+            style: const TextStyle(
               fontFamily: AppFont.family,
               fontWeight: FontWeight.w800,
               fontSize: 15,
@@ -3289,7 +4422,11 @@ class _GiftSenderListItem extends StatelessWidget {
                   ),
                   const SizedBox(height: 3),
                   Text(
-                    '${entry.totalGiftCount} hediye gonderdi',
+                    AppRuntimeText.instance.t(
+                      'chat.profile.gift_senders.count',
+                      '{count} hediye gonderdi',
+                      args: {'count': entry.totalGiftCount},
+                    ),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
@@ -3390,10 +4527,11 @@ class _GiftSenderAvatar extends StatelessWidget {
                   ),
                 ),
               )
-            : Image.network(
-                imageUrl,
-                fit: BoxFit.cover,
-                errorBuilder: (_, _, _) => Center(
+            : CachedAppImage(
+                imageUrl: imageUrl,
+                cacheWidth: (size * 2).round(),
+                cacheHeight: (size * 2).round(),
+                errorBuilder: (_) => Center(
                   child: Text(
                     initial,
                     style: TextStyle(
@@ -3473,10 +4611,13 @@ class _PeerProfileMediaSectionState extends State<_PeerProfileMediaSection> {
                     color: AppColors.grayField,
                     borderRadius: BorderRadius.circular(14),
                   ),
-                  child: const Text(
-                    'Bu sekmede medya yok.',
+                  child: Text(
+                    AppRuntimeText.instance.t(
+                      'chat.media.empty',
+                      'Bu sekmede medya yok.',
+                    ),
                     textAlign: TextAlign.center,
-                    style: TextStyle(
+                    style: const TextStyle(
                       fontFamily: AppFont.family,
                       fontWeight: FontWeight.w600,
                       fontSize: 13,
@@ -3524,11 +4665,11 @@ class _PeerProfileMediaSectionState extends State<_PeerProfileMediaSection> {
           fit: StackFit.expand,
           children: [
             if (media.isPhoto || media.previewUrl != null)
-              Image.network(
-                media.displayUrl,
-                fit: BoxFit.cover,
-                gaplessPlayback: true,
-                errorBuilder: (_, _, _) => _videoPlaceholder(),
+              CachedAppImage(
+                imageUrl: media.displayUrl,
+                cacheWidth: 240,
+                cacheHeight: 240,
+                errorBuilder: (_) => _videoPlaceholder(),
               )
             else
               _videoPlaceholder(),
@@ -3549,18 +4690,18 @@ class _PeerProfileMediaSectionState extends State<_PeerProfileMediaSection> {
           color: const Color(0xA6111111),
           borderRadius: BorderRadius.circular(999),
         ),
-        child: const Row(
+        child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(
+            const Icon(
               CupertinoIcons.videocam_fill,
               size: 10,
               color: AppColors.white,
             ),
-            SizedBox(width: 4),
+            const SizedBox(width: 4),
             Text(
-              'Video',
-              style: TextStyle(
+              AppRuntimeText.instance.t('profile.media.type.video', 'Video'),
+              style: const TextStyle(
                 fontFamily: AppFont.family,
                 fontWeight: FontWeight.w700,
                 fontSize: 10,
@@ -3604,17 +4745,23 @@ class _MediaTabBar extends StatelessWidget {
       child: Row(
         children: [
           _MediaTabItem(
-            label: 'Tumu',
+            label: AppRuntimeText.instance.t('chat.media.tab.all', 'Tumu'),
             selected: selected == _PeerMediaTab.all,
             onTap: () => onChanged(_PeerMediaTab.all),
           ),
           _MediaTabItem(
-            label: 'Fotograflar',
+            label: AppRuntimeText.instance.t(
+              'chat.media.tab.photos',
+              'Fotograflar',
+            ),
             selected: selected == _PeerMediaTab.photos,
             onTap: () => onChanged(_PeerMediaTab.photos),
           ),
           _MediaTabItem(
-            label: 'Videolar',
+            label: AppRuntimeText.instance.t(
+              'chat.media.tab.videos',
+              'Videolar',
+            ),
             selected: selected == _PeerMediaTab.videos,
             onTap: () => onChanged(_PeerMediaTab.videos),
           ),
@@ -3650,6 +4797,8 @@ class _MediaTabItem extends StatelessWidget {
           alignment: Alignment.center,
           child: Text(
             label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
             style: TextStyle(
               fontFamily: AppFont.family,
               fontWeight: FontWeight.w600,
@@ -3716,9 +4865,12 @@ class _ChatThemeSectionState extends State<_ChatThemeSection> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
-            'Sohbet Temasi',
-            style: TextStyle(
+          Text(
+            AppRuntimeText.instance.t(
+              'chat.theme.section.title',
+              'Sohbet Temasi',
+            ),
+            style: const TextStyle(
               fontFamily: AppFont.family,
               fontWeight: FontWeight.w700,
               fontSize: 16,
@@ -3726,9 +4878,12 @@ class _ChatThemeSectionState extends State<_ChatThemeSection> {
             ),
           ),
           const SizedBox(height: 4),
-          const Text(
-            'Mesajlasma gorunumunu degistir',
-            style: TextStyle(
+          Text(
+            AppRuntimeText.instance.t(
+              'chat.theme.section.subtitle',
+              'Mesajlasma gorunumunu degistir',
+            ),
+            style: const TextStyle(
               fontFamily: AppFont.family,
               fontSize: 12,
               color: Color(0xFF999999),
@@ -3933,7 +5088,15 @@ class _DangerListCard extends StatelessWidget {
             icon: isBlocked
                 ? CupertinoIcons.check_mark_circled
                 : CupertinoIcons.nosign,
-            label: isBlocked ? 'Engelden Cikar' : 'Engelle',
+            label: isBlocked
+                ? AppRuntimeText.instance.t(
+                    'chat.profile.action.unblock',
+                    'Engelden Cikar',
+                  )
+                : AppRuntimeText.instance.t(
+                    'chat.profile.action.block',
+                    'Engelle',
+                  ),
             onTap: onBlock,
           ),
           Container(
@@ -3943,7 +5106,10 @@ class _DangerListCard extends StatelessWidget {
           ),
           _DangerListRow(
             icon: CupertinoIcons.exclamationmark_triangle,
-            label: 'Sikayet Et',
+            label: AppRuntimeText.instance.t(
+              'chat.profile.action.report',
+              'Sikayet Et',
+            ),
             onTap: onReport,
           ),
         ],
@@ -4079,14 +5245,20 @@ class _MuteConversationSheetState extends ConsumerState<MuteConversationSheet> {
   bool _submitting = false;
   String? _notice;
 
-  static const List<String> _options = [
-    '1 saat',
-    '8 saat',
-    '1 gun',
-    'Her zaman',
+  static const List<({String code, String key, String fallback})> _options = [
+    (code: '1_saat', key: 'chat.mute.option.one_hour', fallback: '1 saat'),
+    (code: '8_saat', key: 'chat.mute.option.eight_hours', fallback: '8 saat'),
+    (code: '1_gun', key: 'chat.mute.option.one_day', fallback: '1 gun'),
+    (code: 'suresiz', key: 'chat.mute.option.always', fallback: 'Her zaman'),
   ];
 
-  static const List<String> _codes = ['1_saat', '8_saat', '1_gun', 'suresiz'];
+  String _t(
+    String key,
+    String fallback, {
+    Map<String, Object?> args = const {},
+  }) {
+    return AppRuntimeText.instance.t(key, fallback, args: args);
+  }
 
   Future<void> _applyMute() async {
     if (_submitting) {
@@ -4094,7 +5266,12 @@ class _MuteConversationSheetState extends ConsumerState<MuteConversationSheet> {
     }
     final token = ref.read(appAuthProvider).asData?.value?.token;
     if (token == null || token.trim().isEmpty) {
-      setState(() => _notice = 'Bu islemi yapmak icin once giris yapmalisin.');
+      setState(() {
+        _notice = _t(
+          'auth.error.login_required_action',
+          'Bu islemi yapmak icin once giris yapmalisin.',
+        );
+      });
       return;
     }
 
@@ -4112,7 +5289,7 @@ class _MuteConversationSheetState extends ConsumerState<MuteConversationSheet> {
         await api.muteUser(
           token,
           userId: widget.targetUserId,
-          durationCode: _codes[_selected],
+          durationCode: _options[_selected].code,
         );
         widget.onChanged?.call(true);
       }
@@ -4147,9 +5324,9 @@ class _MuteConversationSheetState extends ConsumerState<MuteConversationSheet> {
           children: [
             const _ChatSheetHandle(),
             const SizedBox(height: 18),
-            const Text(
-              'Sessizden Cikar',
-              style: TextStyle(
+            Text(
+              _t('chat.mute.unmute.title', 'Sessizden Cikar'),
+              style: const TextStyle(
                 fontFamily: AppFont.family,
                 fontWeight: FontWeight.w800,
                 fontSize: 20,
@@ -4158,7 +5335,11 @@ class _MuteConversationSheetState extends ConsumerState<MuteConversationSheet> {
             ),
             const SizedBox(height: 6),
             Text(
-              '${widget.peerName} icin bildirimleri yeniden acmak ister misin?',
+              _t(
+                'chat.mute.unmute.subtitle',
+                '{name} icin bildirimleri yeniden acmak ister misin?',
+                args: {'name': widget.peerName},
+              ),
               style: const TextStyle(
                 fontFamily: AppFont.family,
                 fontSize: 12.5,
@@ -4178,7 +5359,9 @@ class _MuteConversationSheetState extends ConsumerState<MuteConversationSheet> {
             ],
             const SizedBox(height: 18),
             GradientButton(
-              label: _submitting ? 'Kaldiriliyor...' : 'Sessizden cikar',
+              label: _submitting
+                  ? _t('chat.mute.unmute.processing', 'Kaldiriliyor...')
+                  : _t('chat.mute.unmute.button', 'Sessizden cikar'),
               onTap: _submitting ? null : _applyMute,
             ),
           ],
@@ -4193,9 +5376,9 @@ class _MuteConversationSheetState extends ConsumerState<MuteConversationSheet> {
         children: [
           const _ChatSheetHandle(),
           const SizedBox(height: 18),
-          const Text(
-            'Sessize Al',
-            style: TextStyle(
+          Text(
+            _t('chat.mute.title', 'Sessize Al'),
+            style: const TextStyle(
               fontFamily: AppFont.family,
               fontWeight: FontWeight.w800,
               fontSize: 20,
@@ -4204,7 +5387,11 @@ class _MuteConversationSheetState extends ConsumerState<MuteConversationSheet> {
           ),
           const SizedBox(height: 6),
           Text(
-            '${widget.peerName} icin bildirimleri ne kadar susturmak istiyorsun?',
+            _t(
+              'chat.mute.subtitle',
+              '{name} icin bildirimleri ne kadar susturmak istiyorsun?',
+              args: {'name': widget.peerName},
+            ),
             style: const TextStyle(
               fontFamily: AppFont.family,
               fontSize: 12.5,
@@ -4239,7 +5426,7 @@ class _MuteConversationSheetState extends ConsumerState<MuteConversationSheet> {
                     children: [
                       Expanded(
                         child: Text(
-                          _options[index],
+                          _t(_options[index].key, _options[index].fallback),
                           style: const TextStyle(
                             fontFamily: AppFont.family,
                             fontWeight: FontWeight.w700,
@@ -4273,7 +5460,9 @@ class _MuteConversationSheetState extends ConsumerState<MuteConversationSheet> {
             const SizedBox(height: 10),
           ],
           GradientButton(
-            label: _submitting ? 'Uygulaniyor...' : 'Sessize almayi uygula',
+            label: _submitting
+                ? _t('chat.mute.processing', 'Uygulaniyor...')
+                : _t('chat.mute.apply', 'Sessize almayi uygula'),
             onTap: _submitting ? null : _applyMute,
           ),
         ],
@@ -4284,8 +5473,15 @@ class _MuteConversationSheetState extends ConsumerState<MuteConversationSheet> {
 
 class MediaAttachmentSheet extends StatelessWidget {
   final String peerName;
+  final VoidCallback? onCameraTap;
+  final VoidCallback? onGalleryTap;
 
-  const MediaAttachmentSheet({super.key, required this.peerName});
+  const MediaAttachmentSheet({
+    super.key,
+    required this.peerName,
+    this.onCameraTap,
+    this.onGalleryTap,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -4293,11 +5489,15 @@ class MediaAttachmentSheet extends StatelessWidget {
       required IconData icon,
       required String title,
       required String subtitle,
+      VoidCallback? onTap,
     }) {
       return Padding(
         padding: const EdgeInsets.only(bottom: 10),
         child: PressableScale(
-          onTap: () => Navigator.of(context).maybePop(),
+          onTap: () {
+            Navigator.of(context).maybePop();
+            onTap?.call();
+          },
           scale: 0.98,
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
@@ -4357,9 +5557,12 @@ class MediaAttachmentSheet extends StatelessWidget {
         children: [
           const _ChatSheetHandle(),
           const SizedBox(height: 18),
-          const Text(
-            'Medya Ekle',
-            style: TextStyle(
+          Text(
+            AppRuntimeText.instance.t(
+              'chat.attachment.title',
+              'Fotograf Gonder',
+            ),
+            style: const TextStyle(
               fontFamily: AppFont.family,
               fontWeight: FontWeight.w800,
               fontSize: 20,
@@ -4368,7 +5571,11 @@ class MediaAttachmentSheet extends StatelessWidget {
           ),
           const SizedBox(height: 6),
           Text(
-            '$peerName ile sohbete bir sey ekle.',
+            AppRuntimeText.instance.t(
+              'chatAttachmentSubtitle',
+              '{name} ile sohbete bir sey ekle.',
+              args: {'name': peerName},
+            ),
             style: const TextStyle(
               fontFamily: AppFont.family,
               fontSize: 12.5,
@@ -4378,23 +5585,21 @@ class MediaAttachmentSheet extends StatelessWidget {
           const SizedBox(height: 16),
           item(
             icon: CupertinoIcons.camera_fill,
-            title: 'Kamera',
-            subtitle: 'Anlik fotograf cek ve gonder',
+            title: AppRuntimeText.instance.t('chatAttachmentCamera', 'Kamera'),
+            subtitle: AppRuntimeText.instance.t(
+              'chatAttachmentCameraSubtitle',
+              'Anlik fotograf cek ve gonder',
+            ),
+            onTap: onCameraTap,
           ),
           item(
             icon: CupertinoIcons.photo_fill_on_rectangle_fill,
-            title: 'Galeri',
-            subtitle: 'Fotograf veya ekran goruntusu sec',
-          ),
-          item(
-            icon: CupertinoIcons.videocam_fill,
-            title: 'Video',
-            subtitle: 'Kisa bir klip paylas',
-          ),
-          item(
-            icon: CupertinoIcons.paperclip,
-            title: 'Dosya',
-            subtitle: 'Belge veya baska bir icerik ekle',
+            title: AppRuntimeText.instance.t('chatAttachmentPhoto', 'Fotograf'),
+            subtitle: AppRuntimeText.instance.t(
+              'chatAttachmentPhotoSubtitle',
+              'Galeriden fotograf veya ekran goruntusu sec',
+            ),
+            onTap: onGalleryTap,
           ),
         ],
       ),
@@ -4402,10 +5607,19 @@ class MediaAttachmentSheet extends StatelessWidget {
   }
 }
 
+@immutable
+class VoiceRecordingResult {
+  final String filePath;
+  final Duration duration;
+
+  const VoiceRecordingResult({required this.filePath, required this.duration});
+}
+
 class VoiceRecorderSheet extends StatefulWidget {
   final String peerName;
+  final Future<void> Function(VoiceRecordingResult recording)? onSend;
 
-  const VoiceRecorderSheet({super.key, required this.peerName});
+  const VoiceRecorderSheet({super.key, required this.peerName, this.onSend});
 
   @override
   State<VoiceRecorderSheet> createState() => _VoiceRecorderSheetState();
@@ -4413,30 +5627,119 @@ class VoiceRecorderSheet extends StatefulWidget {
 
 class _VoiceRecorderSheetState extends State<VoiceRecorderSheet> {
   Timer? _timer;
+  AudioRecorder? _recorder;
+  String? _recordingPath;
   int _elapsed = 0;
   bool _recordingStopped = false;
   bool _sending = false;
+  bool _recordingReady = false;
+  String? _notice;
 
   @override
   void initState() {
     super.initState();
-    _timer = Timer.periodic(const Duration(seconds: 1), (_) {
-      if (!mounted || _recordingStopped) {
-        return;
-      }
-      setState(() => _elapsed++);
-    });
+    unawaited(_startRecording());
   }
 
   @override
   void dispose() {
     _timer?.cancel();
+    unawaited(_recorder?.dispose());
     super.dispose();
+  }
+
+  Future<void> _startRecording() async {
+    final recorder = AudioRecorder();
+    _recorder = recorder;
+    try {
+      final hasPermission = await recorder.hasPermission();
+      if (!hasPermission) {
+        if (mounted) {
+          setState(() {
+            _recordingStopped = true;
+            _notice = 'Mikrofon izni verilmedi.';
+          });
+        }
+        return;
+      }
+
+      final directory = await getTemporaryDirectory();
+      final filePath = path.join(
+        directory.path,
+        'voice_${DateTime.now().microsecondsSinceEpoch}.m4a',
+      );
+      await recorder.start(
+        const RecordConfig(encoder: AudioEncoder.aacLc),
+        path: filePath,
+      );
+      if (!mounted) {
+        return;
+      }
+      _recordingPath = filePath;
+      _recordingReady = true;
+      _timer = Timer.periodic(const Duration(seconds: 1), (_) {
+        if (!mounted || _recordingStopped) {
+          return;
+        }
+        setState(() => _elapsed++);
+      });
+      setState(() {});
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _recordingStopped = true;
+          _notice = AppRuntimeText.instance.t(
+            'chat.voice.error.start_failed',
+            'Ses kaydi baslatilamadi.',
+          );
+        });
+      }
+    }
+  }
+
+  Future<void> _stopRecording() async {
+    if (_recordingStopped) {
+      return;
+    }
+
+    _timer?.cancel();
+    try {
+      final stoppedPath = await _recorder?.stop();
+      if (stoppedPath != null && stoppedPath.trim().isNotEmpty) {
+        _recordingPath = stoppedPath;
+      }
+    } catch (_) {}
+    if (!mounted) {
+      return;
+    }
+    setState(() => _recordingStopped = true);
   }
 
   Future<void> _sendRecording() async {
     setState(() => _sending = true);
-    await Future<void>.delayed(const Duration(milliseconds: 900));
+    if (!_recordingStopped) {
+      await _stopRecording();
+    }
+    final filePath = _recordingPath;
+    if (filePath == null || filePath.trim().isEmpty) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _sending = false;
+        _notice = AppRuntimeText.instance.t(
+          'chat.voice.error.missing_recording',
+          'Gonderilecek ses kaydi bulunamadi.',
+        );
+      });
+      return;
+    }
+    await widget.onSend?.call(
+      VoiceRecordingResult(
+        filePath: filePath,
+        duration: Duration(seconds: _elapsed),
+      ),
+    );
     if (!mounted) {
       return;
     }
@@ -4456,7 +5759,15 @@ class _VoiceRecorderSheetState extends State<VoiceRecorderSheet> {
           const _ChatSheetHandle(),
           const SizedBox(height: 18),
           Text(
-            _recordingStopped ? 'Kayit Hazir' : 'Ses Kaydi',
+            _recordingStopped
+                ? AppRuntimeText.instance.t(
+                    'chat.voice.title.ready',
+                    'Kayit Hazir',
+                  )
+                : AppRuntimeText.instance.t(
+                    'chat.voice.title.recording',
+                    'Ses Kaydi',
+                  ),
             style: const TextStyle(
               fontFamily: AppFont.family,
               fontWeight: FontWeight.w800,
@@ -4466,9 +5777,17 @@ class _VoiceRecorderSheetState extends State<VoiceRecorderSheet> {
           ),
           const SizedBox(height: 6),
           Text(
-            _recordingStopped
-                ? '${widget.peerName} icin kaydi gonderebilirsin.'
-                : 'Konusmaya basla, kayit otomatik ilerliyor.',
+            _notice ??
+                (_recordingStopped
+                    ? AppRuntimeText.instance.t(
+                        'chat.voice.subtitle.ready',
+                        '{name} icin kaydi gonderebilirsin.',
+                        args: {'name': widget.peerName},
+                      )
+                    : AppRuntimeText.instance.t(
+                        'chat.voice.subtitle.recording',
+                        'Konusmaya basla, kayit otomatik ilerliyor.',
+                      )),
             style: const TextStyle(
               fontFamily: AppFont.family,
               fontSize: 12.5,
@@ -4543,8 +5862,14 @@ class _VoiceRecorderSheetState extends State<VoiceRecorderSheet> {
                     const SizedBox(width: 8),
                     Text(
                       _recordingStopped
-                          ? 'Kayit durduruldu'
-                          : 'Kayit devam ediyor',
+                          ? AppRuntimeText.instance.t(
+                              'chat.voice.recording.stopped',
+                              'Kayit durduruldu',
+                            )
+                          : AppRuntimeText.instance.t(
+                              'chat.voice.recording.active',
+                              'Kayit devam ediyor',
+                            ),
                       style: const TextStyle(
                         fontFamily: AppFont.family,
                         fontWeight: FontWeight.w600,
@@ -4558,25 +5883,92 @@ class _VoiceRecorderSheetState extends State<VoiceRecorderSheet> {
             ),
           ),
           const SizedBox(height: 18),
-          if (!_recordingStopped)
-            GradientButton(
-              label: 'Kaydi Durdur',
-              onTap: () {
-                _timer?.cancel();
-                setState(() => _recordingStopped = true);
-              },
-            )
-          else
-            GradientButton(
-              label: _sending ? 'Gonderiliyor...' : 'Kaydi Gonder',
-              onTap: _sending ? null : _sendRecording,
-            ),
-          const SizedBox(height: 8),
-          SecondaryButton(
-            label: 'Vazgec',
-            onTap: () => Navigator.of(context).maybePop(),
+          Row(
+            children: [
+              _voiceActionButton(
+                icon: CupertinoIcons.delete,
+                label: AppRuntimeText.instance.t('commonCancel', 'Iptal'),
+                background: AppColors.grayField,
+                color: AppColors.black,
+                onTap: () => Navigator.of(context).maybePop(),
+              ),
+              const Spacer(),
+              if (!_recordingStopped)
+                _voiceActionButton(
+                  icon: CupertinoIcons.stop_fill,
+                  label: _recordingReady
+                      ? AppRuntimeText.instance.t(
+                          'chat.voice.action.stop',
+                          'Durdur',
+                        )
+                      : AppRuntimeText.instance.t(
+                          'chat.voice.action.ready',
+                          'Hazir',
+                        ),
+                  background: AppColors.coral,
+                  color: AppColors.white,
+                  onTap: _recordingReady ? _stopRecording : null,
+                )
+              else
+                _voiceActionButton(
+                  icon: CupertinoIcons.paperplane_fill,
+                  label: _sending
+                      ? AppRuntimeText.instance.t(
+                          'chat.voice.action.sending',
+                          'Gidiyor',
+                        )
+                      : AppRuntimeText.instance.t(
+                          'chat.voice.action.send',
+                          'Gonder',
+                        ),
+                  background: AppColors.onlineGreen,
+                  color: AppColors.white,
+                  onTap: _sending ? null : _sendRecording,
+                ),
+            ],
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _voiceActionButton({
+    required IconData icon,
+    required String label,
+    required Color background,
+    required Color color,
+    VoidCallback? onTap,
+  }) {
+    return PressableScale(
+      onTap: onTap,
+      scale: onTap == null ? 1 : 0.92,
+      child: Opacity(
+        opacity: onTap == null ? 0.55 : 1,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 50,
+              height: 50,
+              decoration: BoxDecoration(
+                color: background,
+                shape: BoxShape.circle,
+              ),
+              alignment: Alignment.center,
+              child: Icon(icon, size: 22, color: color),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              label,
+              style: const TextStyle(
+                fontFamily: AppFont.family,
+                fontWeight: FontWeight.w700,
+                fontSize: 11,
+                color: AppColors.neutral600,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -4610,7 +6002,12 @@ class _GiftSheetState extends ConsumerState<GiftSheet> {
     }
     final token = ref.read(appAuthProvider).asData?.value?.token;
     if (token == null || token.trim().isEmpty) {
-      setState(() => _notice = 'Hediye gondermek icin once giris yapmalisin.');
+      setState(
+        () => _notice = AppRuntimeText.instance.t(
+          'chat.gift.error.login_required',
+          'Hediye gondermek icin once giris yapmalisin.',
+        ),
+      );
       return;
     }
 
@@ -4699,9 +6096,12 @@ class _GiftSheetState extends ConsumerState<GiftSheet> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    const Text(
-                      'Hediye Gonder',
-                      style: TextStyle(
+                    Text(
+                      AppRuntimeText.instance.t(
+                        'chat.gift.title',
+                        'Hediye Gonder',
+                      ),
+                      style: const TextStyle(
                         fontFamily: AppFont.family,
                         fontWeight: FontWeight.w800,
                         fontSize: 20,
@@ -4710,7 +6110,11 @@ class _GiftSheetState extends ConsumerState<GiftSheet> {
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      '${widget.peerName} icin bir hediye sec',
+                      AppRuntimeText.instance.t(
+                        'chat.gift.subtitle',
+                        '{name} icin bir hediye sec',
+                        args: {'name': widget.peerName},
+                      ),
                       style: const TextStyle(
                         fontFamily: AppFont.family,
                         fontSize: 12.5,
@@ -4734,8 +6138,11 @@ class _GiftSheetState extends ConsumerState<GiftSheet> {
             ),
             data: (items) {
               if (items.isEmpty) {
-                return const _GiftStateMessage(
-                  message: 'Su anda gonderilebilir hediye bulunmuyor.',
+                return _GiftStateMessage(
+                  message: AppRuntimeText.instance.t(
+                    'giftListEmpty',
+                    'Su anda gonderilebilir hediye bulunmuyor.',
+                  ),
                 );
               }
 
@@ -4938,7 +6345,12 @@ class _SendGiftButton extends StatelessWidget {
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Text(
-              sending ? 'Gonderiliyor...' : 'Gonder',
+              sending
+                  ? AppRuntimeText.instance.t(
+                      'chat.gift.send.processing',
+                      'Gonderiliyor...',
+                    )
+                  : AppRuntimeText.instance.t('chat.gift.send', 'Gonder'),
               style: const TextStyle(
                 fontFamily: AppFont.family,
                 fontWeight: FontWeight.w800,
@@ -4963,7 +6375,11 @@ class _SendGiftButton extends StatelessWidget {
                   ),
                   const SizedBox(width: 6),
                   Text(
-                    '$cost tas',
+                    AppRuntimeText.instance.t(
+                      'chat.gift.cost',
+                      '{count} tas',
+                      args: {'count': cost},
+                    ),
                     style: const TextStyle(
                       fontFamily: AppFont.family,
                       fontWeight: FontWeight.w600,
@@ -4986,13 +6402,13 @@ class _SendGiftButton extends StatelessWidget {
 class ReportSheet extends ConsumerStatefulWidget {
   final ReportTargetType targetType;
   final int? targetId;
-  final String targetDisplayName;
+  final String? targetDisplayName;
 
   const ReportSheet({
     super.key,
     this.targetType = ReportTargetType.user,
     this.targetId,
-    this.targetDisplayName = 'Bu kullanici',
+    this.targetDisplayName,
   });
 
   @override
@@ -5005,12 +6421,20 @@ class _ReportSheetState extends ConsumerState<ReportSheet> {
   String? _notice;
   late final TextEditingController _descriptionController;
 
-  static const List<String> _options = [
-    'Uygunsuz icerik',
-    'Sahte profil',
-    'Taciz veya zorbalik',
-    'Diger',
+  static const List<({String key, String fallback})> _options = [
+    (key: 'chat.report.option.inappropriate', fallback: 'Uygunsuz icerik'),
+    (key: 'chat.report.option.fake_profile', fallback: 'Sahte profil'),
+    (key: 'chat.report.option.harassment', fallback: 'Taciz veya zorbalik'),
+    (key: 'chat.report.option.other', fallback: 'Diger'),
   ];
+
+  String _t(
+    String key,
+    String fallback, {
+    Map<String, Object?> args = const {},
+  }) {
+    return AppRuntimeText.instance.t(key, fallback, args: args);
+  }
 
   @override
   void initState() {
@@ -5033,8 +6457,14 @@ class _ReportSheetState extends ConsumerState<ReportSheet> {
     if (targetId == null) {
       setState(() {
         _notice = widget.targetType == ReportTargetType.user
-            ? 'Bu kullaniciyi sikayet etmek icin aktif bir sohbet gerekli.'
-            : 'Bu mesaji sikayet etmek icin gecerli bir mesaj gerekli.';
+            ? _t(
+                'chat.report.error.user_target_required',
+                'Bu kullaniciyi sikayet etmek icin aktif bir sohbet gerekli.',
+              )
+            : _t(
+                'chat.report.error.message_target_required',
+                'Bu mesaji sikayet etmek icin gecerli bir mesaj gerekli.',
+              );
       });
       return;
     }
@@ -5042,7 +6472,10 @@ class _ReportSheetState extends ConsumerState<ReportSheet> {
     final token = ref.read(appAuthProvider).asData?.value?.token;
     if (token == null || token.trim().isEmpty) {
       setState(() {
-        _notice = 'Bu islemi yapmak icin once giris yapmalisin.';
+        _notice = _t(
+          'auth.error.login_required_action',
+          'Bu islemi yapmak icin once giris yapmalisin.',
+        );
       });
       return;
     }
@@ -5060,7 +6493,7 @@ class _ReportSheetState extends ConsumerState<ReportSheet> {
             ? 'user'
             : 'mesaj',
         targetId: targetId,
-        category: _options[_selected!],
+        category: _options[_selected!].fallback,
         description: _descriptionController.text,
       );
       if (!mounted) {
@@ -5069,12 +6502,19 @@ class _ReportSheetState extends ConsumerState<ReportSheet> {
       await showCupertinoDialog<void>(
         context: context,
         builder: (dialogContext) => CupertinoAlertDialog(
-          title: const Text('Sikayet alindi'),
-          content: const Text('Bildiriminiz inceleme ekibine iletildi.'),
+          title: Text(
+            AppRuntimeText.instance.t('reportReceivedTitle', 'Sikayet alindi'),
+          ),
+          content: Text(
+            AppRuntimeText.instance.t(
+              'reportReceivedMessage',
+              'Bildiriminiz inceleme ekibine iletildi.',
+            ),
+          ),
           actions: [
             CupertinoDialogAction(
               onPressed: () => Navigator.of(dialogContext).pop(),
-              child: const Text('Tamam'),
+              child: Text(AppRuntimeText.instance.t('commonOk', 'Tamam')),
             ),
           ],
         ),
@@ -5101,10 +6541,15 @@ class _ReportSheetState extends ConsumerState<ReportSheet> {
   @override
   Widget build(BuildContext context) {
     final objectLabel = widget.targetType == ReportTargetType.user
-        ? widget.targetDisplayName
-        : 'secilen mesaj';
-    final subtitle =
-        '$objectLabel icin bir sebep secin. Aciklama alani istege baglidir.';
+        ? (widget.targetDisplayName?.trim().isNotEmpty == true
+              ? widget.targetDisplayName!
+              : _t('chat.report.default_user', 'Bu kullanici'))
+        : _t('chat.report.selected_message', 'secilen mesaj');
+    final subtitle = _t(
+      'chat.report.subtitle',
+      '{target} icin bir sebep secin. Aciklama alani istege baglidir.',
+      args: {'target': objectLabel},
+    );
 
     return _AdaptiveChatSheet(
       child: Column(
@@ -5119,9 +6564,9 @@ class _ReportSheetState extends ConsumerState<ReportSheet> {
             ),
           ),
           const SizedBox(height: 20),
-          const Text(
-            'Sikayet Et',
-            style: TextStyle(
+          Text(
+            _t('chat.report.title', 'Sikayet Et'),
+            style: const TextStyle(
               fontFamily: AppFont.family,
               fontWeight: FontWeight.w800,
               fontSize: 18,
@@ -5144,7 +6589,7 @@ class _ReportSheetState extends ConsumerState<ReportSheet> {
             (i) => Padding(
               padding: const EdgeInsets.only(bottom: 8),
               child: _ReportOption(
-                label: _options[i],
+                label: _t(_options[i].key, _options[i].fallback),
                 selected: _selected == i,
                 onTap: () => setState(() => _selected = i),
               ),
@@ -5160,7 +6605,10 @@ class _ReportSheetState extends ConsumerState<ReportSheet> {
             child: CupertinoTextField(
               controller: _descriptionController,
               maxLines: 3,
-              placeholder: 'Isterseniz kisa bir aciklama ekleyin...',
+              placeholder: AppRuntimeText.instance.t(
+                'reportDescriptionPlaceholder',
+                'Isterseniz kisa bir aciklama ekleyin...',
+              ),
               placeholderStyle: const TextStyle(
                 fontFamily: AppFont.family,
                 color: Color(0xFF999999),
@@ -5201,7 +6649,9 @@ class _ReportSheetState extends ConsumerState<ReportSheet> {
               ),
               alignment: Alignment.center,
               child: Text(
-                _submitting ? 'Gonderiliyor...' : 'Sikayet Et',
+                _submitting
+                    ? _t('chat.report.submit.processing', 'Gonderiliyor...')
+                    : _t('chat.report.submit', 'Sikayet Et'),
                 style: TextStyle(
                   fontFamily: AppFont.family,
                   fontWeight: FontWeight.w700,
@@ -5220,9 +6670,9 @@ class _ReportSheetState extends ConsumerState<ReportSheet> {
             child: Container(
               height: 44,
               alignment: Alignment.center,
-              child: const Text(
-                'Vazgec',
-                style: TextStyle(
+              child: Text(
+                _t('commonCancel', 'Vazgec'),
+                style: const TextStyle(
                   fontFamily: AppFont.family,
                   fontWeight: FontWeight.w600,
                   fontSize: 14,
@@ -5355,7 +6805,10 @@ class _BlockConfirmSheetState extends ConsumerState<BlockConfirmSheet> {
     final token = ref.read(appAuthProvider).asData?.value?.token;
     if (token == null || token.trim().isEmpty) {
       setState(() {
-        _notice = 'Bu islemi yapmak icin once giris yapmalisin.';
+        _notice = AppRuntimeText.instance.t(
+          'auth.error.login_required_action',
+          'Bu islemi yapmak icin once giris yapmalisin.',
+        );
       });
       return;
     }
@@ -5401,13 +6854,25 @@ class _BlockConfirmSheetState extends ConsumerState<BlockConfirmSheet> {
   @override
   Widget build(BuildContext context) {
     final canSubmit = widget.targetUserId != null;
+    final runtime = AppRuntimeText.instance;
     final subtitle =
         _notice ??
         (canSubmit
             ? (widget.initiallyBlocked
-                  ? '${widget.targetDisplayName} engeli kaldirilacak.'
-                  : '${widget.targetDisplayName} size mesaj gonderemeyecek ve profilinizi goremeyecek.')
-            : 'Bu kullaniciyi engellemek icin aktif bir sohbet gerekli.');
+                  ? runtime.t(
+                      'chat.block.subtitle.unblock',
+                      '{name} engeli kaldirilacak.',
+                      args: {'name': widget.targetDisplayName},
+                    )
+                  : runtime.t(
+                      'chat.block.subtitle.block',
+                      '{name} size mesaj gonderemeyecek ve profilinizi goremeyecek.',
+                      args: {'name': widget.targetDisplayName},
+                    ))
+            : runtime.t(
+                'chat.block.error.conversation_required',
+                'Bu kullaniciyi engellemek icin aktif bir sohbet gerekli.',
+              ));
 
     return _AdaptiveChatSheet(
       padding: const EdgeInsets.fromLTRB(24, 12, 24, 24),
@@ -5440,8 +6905,14 @@ class _BlockConfirmSheetState extends ConsumerState<BlockConfirmSheet> {
           const SizedBox(height: 16),
           Text(
             widget.initiallyBlocked
-                ? 'Engeli kaldirmak istediginize emin misiniz?'
-                : 'Engellemek istediginize emin misiniz?',
+                ? runtime.t(
+                    'chat.block.title.unblock',
+                    'Engeli kaldirmak istediginize emin misiniz?',
+                  )
+                : runtime.t(
+                    'chat.block.title.block',
+                    'Engellemek istediginize emin misiniz?',
+                  ),
             textAlign: TextAlign.center,
             style: const TextStyle(
               fontFamily: AppFont.family,
@@ -5482,13 +6953,25 @@ class _BlockConfirmSheetState extends ConsumerState<BlockConfirmSheet> {
               child: Text(
                 _submitting
                     ? (widget.initiallyBlocked
-                          ? 'Kaldiriliyor...'
-                          : 'Engelleniyor...')
+                          ? runtime.t(
+                              'chat.block.processing.unblock',
+                              'Kaldiriliyor...',
+                            )
+                          : runtime.t(
+                              'chat.block.processing.block',
+                              'Engelleniyor...',
+                            ))
                     : (canSubmit
                           ? (widget.initiallyBlocked
-                                ? 'Engelden Cikar'
-                                : 'Engelle')
-                          : 'Tamam'),
+                                ? runtime.t(
+                                    'chat.profile.action.unblock',
+                                    'Engelden Cikar',
+                                  )
+                                : runtime.t(
+                                    'chat.profile.action.block',
+                                    'Engelle',
+                                  ))
+                          : runtime.t('commonOk', 'Tamam')),
                 style: TextStyle(
                   fontFamily: AppFont.family,
                   fontWeight: FontWeight.w700,
@@ -5510,9 +6993,9 @@ class _BlockConfirmSheetState extends ConsumerState<BlockConfirmSheet> {
                 borderRadius: BorderRadius.circular(14),
               ),
               alignment: Alignment.center,
-              child: const Text(
-                'Vazgec',
-                style: TextStyle(
+              child: Text(
+                runtime.t('commonCancel', 'Vazgec'),
+                style: const TextStyle(
                   fontFamily: AppFont.family,
                   fontWeight: FontWeight.w600,
                   fontSize: 15,

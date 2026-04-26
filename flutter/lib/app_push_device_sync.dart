@@ -1,5 +1,9 @@
+import 'dart:convert';
+
+import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
 import 'package:magmug/app_core.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 typedef RegisterNotificationDevice =
     Future<void> Function(
@@ -26,6 +30,12 @@ Future<void> syncNotificationDevice(
   final normalizedDeviceToken = deviceToken.trim();
   if (normalizedDeviceToken.isEmpty) {
     return;
+  }
+  SharedPreferences? prefs;
+  try {
+    prefs = await SharedPreferences.getInstance();
+  } catch (_) {
+    prefs = null;
   }
 
   AppAuthApi? api;
@@ -65,23 +75,58 @@ Future<void> syncNotificationDevice(
     }
 
     if (authToken == null || authToken.trim().isEmpty) {
+      await prefs?.remove(_pushDeviceSyncFingerprintKey);
       return;
     }
 
     final notificationsEnabled = session?.user?.notificationsEnabled != false;
+    final resolvedLanguageCode =
+        (languageCode == null || languageCode.trim().isEmpty)
+        ? AppPreferencesStorage.fallbackLanguage().code
+        : languageCode.trim();
+    final fingerprint = _pushDeviceSyncFingerprint(
+      userId: session?.user?.id,
+      deviceToken: normalizedDeviceToken,
+      platform: currentPushPlatformName,
+      permissionGranted: permissionGranted && notificationsEnabled,
+      languageCode: resolvedLanguageCode,
+    );
+    if (!hasPreviousAuthToken &&
+        !hasPreviousDeviceToken &&
+        prefs?.getString(_pushDeviceSyncFingerprintKey) == fingerprint) {
+      return;
+    }
+
     final register = registerDevice ?? api!.registerNotificationDevice;
     await register(
       authToken,
       deviceToken: normalizedDeviceToken,
       platform: currentPushPlatformName,
       notificationPermission: permissionGranted && notificationsEnabled,
-      languageCode: (languageCode == null || languageCode.trim().isEmpty)
-          ? AppPreferencesStorage.fallbackLanguage().code
-          : languageCode,
+      languageCode: resolvedLanguageCode,
     );
+    await prefs?.setString(_pushDeviceSyncFingerprintKey, fingerprint);
   } finally {
     api?.close();
   }
+}
+
+const String _pushDeviceSyncFingerprintKey = 'push.device.sync.fingerprint';
+
+String _pushDeviceSyncFingerprint({
+  required int? userId,
+  required String deviceToken,
+  required String platform,
+  required bool permissionGranted,
+  required String languageCode,
+}) {
+  return sha256
+      .convert(
+        utf8.encode(
+          '$userId|$platform|$permissionGranted|$languageCode|$deviceToken',
+        ),
+      )
+      .toString();
 }
 
 String get currentPushPlatformName {

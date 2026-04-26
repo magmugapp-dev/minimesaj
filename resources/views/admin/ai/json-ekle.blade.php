@@ -63,7 +63,7 @@
                 <textarea id="jsonAlani" name="json_veri" rows="20"
                     placeholder="JSON formatinda AI kullanici verilerini buraya yapistirin..."
                     @input="try { const v = JSON.parse($el.value); sayi = Array.isArray(v) ? v.length : (typeof v === 'object' && v !== null ? 1 : 0); } catch { sayi = 0; }"
-                    class="studio-textarea font-mono text-xs leading-relaxed">{{ old('json_veri') }}</textarea>
+                    class="studio-textarea font-mono text-xs leading-relaxed">{{ old('json_veri', $sablon ?? '') }}</textarea>
                 @error('json_veri')
                     <span class="studio-hint text-red-600">{{ $message }}</span>
                 @enderror

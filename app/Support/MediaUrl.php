@@ -25,7 +25,10 @@ class MediaUrl
             return null;
         }
 
-        return self::normalizeGeneratedUrl(Storage::disk('public')->url($relativePath));
+        return self::appendVersion(
+            self::normalizeGeneratedUrl(Storage::disk('public')->url($relativePath)),
+            $relativePath,
+        );
     }
 
     private static function buildPublicUrl(string $path): string
@@ -53,7 +56,7 @@ class MediaUrl
             return null;
         }
 
-        return $rewritten;
+        return $relativePath === null ? $rewritten : self::appendVersion($rewritten, $relativePath);
     }
 
     private static function rewriteLoopbackUrl(string $url): string
@@ -135,6 +138,21 @@ class MediaUrl
     private static function storageFileExists(string $path): bool
     {
         return Storage::disk('public')->exists(ltrim($path, '/'));
+    }
+
+    private static function appendVersion(string $url, string $relativePath): string
+    {
+        if (str_contains($url, 'v=')) {
+            return $url;
+        }
+
+        try {
+            $version = Storage::disk('public')->lastModified(ltrim($relativePath, '/'));
+        } catch (\Throwable) {
+            return $url;
+        }
+
+        return $url.(str_contains($url, '?') ? '&' : '?').'v='.$version;
     }
 
     private static function publicBaseUrl(): string

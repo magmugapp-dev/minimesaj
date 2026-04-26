@@ -12,6 +12,7 @@
             </div>
             <div class="flex flex-wrap gap-3">
                 <a href="{{ route('admin.ai.ekle') }}" class="inline-flex items-center rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700">Yeni AI ekle</a>
+                <a href="{{ route('admin.ai.json-ekle') }}" class="inline-flex items-center rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50">JSON import</a>
                 <a href="{{ route('admin.ai.traces') }}" class="inline-flex items-center rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50">Tum kayitlar</a>
             </div>
         </section>
@@ -203,6 +204,11 @@
                                         <div class="flex flex-wrap items-center justify-end gap-2">
                                             <a href="{{ route('admin.ai.goster', $personaUser) }}" class="rounded-lg border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50">Ac</a>
                                             <a href="{{ route('admin.ai.duzenle', $personaUser) }}" class="rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-indigo-700">Duzenle</a>
+                                            <form method="POST" action="{{ route('admin.ai.sil', $personaUser) }}" onsubmit="return confirm('Bu AI kullanicisini ve bagli verilerini silmek istediginize emin misiniz?');">
+                                                @csrf
+                                                @method('DELETE')
+                                                <button type="submit" class="rounded-lg border border-rose-300 px-3 py-1.5 text-xs font-medium text-rose-700 hover:bg-rose-50">Sil</button>
+                                            </form>
                                         </div>
                                     </td>
                                 </tr>

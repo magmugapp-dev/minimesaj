@@ -1,12 +1,25 @@
 import 'package:magmug/app_core.dart';
 
-class OnboardingKvkkView extends StatelessWidget {
+class OnboardingKvkkView extends ConsumerWidget {
   final VoidCallback onBack;
 
   const OnboardingKvkkView({super.key, required this.onBack});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final legalTexts = ref.watch(appLegalTextsProvider).asData?.value;
+    final kvkk = legalTexts?.kvkk;
+    final title = kvkk?.title.trim().isNotEmpty == true
+        ? kvkk!.title
+        : AppRuntimeText.instance.t('profileKvkk', 'KVKK Aydinlatma Metni');
+    final content = kvkk?.content.trim();
+    final body = content != null && content.isNotEmpty
+        ? content
+        : AppRuntimeText.instance.t(
+            'legalContentUnavailable',
+            'Icerik su anda goruntulenemiyor.',
+          );
+
     return CupertinoPageScaffold(
       backgroundColor: AppColors.white,
       child: SafeArea(
@@ -20,10 +33,10 @@ class OnboardingKvkkView extends StatelessWidget {
                 children: [
                   CircleBackButton(filled: true, onTap: onBack),
                   const SizedBox(width: 12),
-                  const Expanded(
+                  Expanded(
                     child: Text(
-                      'KVKK Aydinlatma Metni',
-                      style: TextStyle(
+                      title,
+                      style: const TextStyle(
                         fontFamily: AppFont.family,
                         fontWeight: FontWeight.w800,
                         fontSize: 20,
@@ -38,33 +51,9 @@ class OnboardingKvkkView extends StatelessWidget {
               Expanded(
                 child: ListView(
                   physics: const BouncingScrollPhysics(),
-                  children: const [
-                    OnboardingKvkkSection(
-                      title: 'Veri Sorumlusu',
-                      body:
-                          'magmug Teknoloji A.S. olarak kisisel verilerinizin korunmasina buyuk onem veriyoruz. 6698 sayili Kisisel Verilerin Korunmasi Kanunu kapsaminda aydinlatma yukumlulugumuzu yerine getirmekteyiz.',
-                    ),
-                    OnboardingKvkkSection(
-                      title: 'Islenen Kisisel Veriler',
-                      body:
-                          'Kimlik bilgileri (ad, soyad, dogum tarihi), iletisim bilgileri (e-posta, telefon), konum verileri, gorsel veriler (profil fotograflari), uygulama kullanim verileri.',
-                    ),
-                    OnboardingKvkkSection(
-                      title: 'Isleme Amaclari',
-                      body:
-                          'Hizmet sunumu, kullanici deneyiminin iyilestirilmesi, yasal yukumluluklerin yerine getirilmesi, guvenligin saglanmasi.',
-                    ),
-                    OnboardingKvkkSection(
-                      title: 'Aktarim',
-                      body:
-                          'Kisisel verileriniz, yasal zorunluluklar disinda yurt ici veya yurt disina aktarilmamaktadir.',
-                    ),
-                    OnboardingKvkkSection(
-                      title: 'Haklariniz',
-                      body:
-                          'Kisisel verilerinizin islenip islenmedigini ogrenme, duzeltilmesini isteme, silinmesini talep etme haklarina sahipsiniz. Basvurularinizi destek sayfamiz uzerinden iletebilirsiniz.',
-                    ),
-                    SizedBox(height: 24),
+                  children: [
+                    OnboardingKvkkSection(body: body),
+                    const SizedBox(height: 24),
                   ],
                 ),
               ),
@@ -80,11 +69,7 @@ class OnboardingKvkkSection extends StatelessWidget {
   final String title;
   final String body;
 
-  const OnboardingKvkkSection({
-    super.key,
-    required this.title,
-    required this.body,
-  });
+  const OnboardingKvkkSection({super.key, this.title = '', required this.body});
 
   @override
   Widget build(BuildContext context) {
@@ -93,16 +78,18 @@ class OnboardingKvkkSection extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            title,
-            style: const TextStyle(
-              fontFamily: AppFont.family,
-              fontWeight: FontWeight.w700,
-              fontSize: 14,
-              color: AppColors.black,
+          if (title.trim().isNotEmpty) ...[
+            Text(
+              title,
+              style: const TextStyle(
+                fontFamily: AppFont.family,
+                fontWeight: FontWeight.w700,
+                fontSize: 14,
+                color: AppColors.black,
+              ),
             ),
-          ),
-          const SizedBox(height: 6),
+            const SizedBox(height: 6),
+          ],
           Text(
             body,
             style: const TextStyle(

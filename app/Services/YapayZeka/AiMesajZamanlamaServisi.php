@@ -6,12 +6,19 @@ use App\Models\AiAyar;
 use App\Models\Mesaj;
 use App\Models\Sohbet;
 use App\Models\User;
+use App\Services\Users\UserOnlineStatusService;
 use Carbon\CarbonInterface;
 use DateTimeZone;
 use Illuminate\Support\Carbon;
 
 class AiMesajZamanlamaServisi
 {
+    public function __construct(
+        private ?UserOnlineStatusService $userOnlineStatusService = null,
+    ) {
+        $this->userOnlineStatusService ??= app(UserOnlineStatusService::class);
+    }
+
     public function sohbetCevabiDurumu(
         Mesaj $gelenMesaj,
         User $aiUser,
@@ -78,9 +85,10 @@ class AiMesajZamanlamaServisi
             $tohum,
             $dakikaGecikmesiniDahilEt,
         );
-        $aktifSaatteMi = $this->aktifSaatteMi($ayar, $simdi);
-        $this->cevrimIciDurumunuEsitle($aiUser, $aktifSaatteMi, $simdi);
-        $cevrimIciMi = (bool) $aiUser->cevrim_ici_mi;
+        $onlineState = $this->userOnlineStatusService->resolve($aiUser, $simdi);
+        $this->userOnlineStatusService->syncResolvedStatus($aiUser, $onlineState, $simdi);
+        $aktifSaatteMi = (bool) ($onlineState['active_time'] ?? $onlineState['is_online']);
+        $cevrimIciMi = (bool) $onlineState['is_online'];
         $sessizModBitisAt = $sohbet?->ai_sessiz_mod_bitis_at
             ? Carbon::instance($sohbet->ai_sessiz_mod_bitis_at)
             : null;
@@ -92,7 +100,7 @@ class AiMesajZamanlamaServisi
             $beklemeNedeni = 'aktif_saat_disinda';
             $sonrakiKontrolAt = $this->enGecTarihiBul(
                 $planlananAt,
-                $this->sonrakiAktifAn($ayar, $simdi),
+                $onlineState['next_active_at'] ?? $this->sonrakiAktifAn($ayar, $simdi),
             );
         } elseif (!$cevrimIciMi) {
             $beklemeNedeni = 'cevrim_disi';
@@ -183,11 +191,6 @@ class AiMesajZamanlamaServisi
         return Carbon::instance($referansAn)->addSeconds($cevapSuresi + $ekGecikme);
     }
 
-    private function aktifSaatteMi(AiAyar $ayar, CarbonInterface $an): bool
-    {
-        return $this->icindeOlduguUykuAraligi($ayar, $an) === null;
-    }
-
     private function sonrakiAktifAn(AiAyar $ayar, CarbonInterface $an): ?Carbon
     {
         $uykuAraligi = $this->icindeOlduguUykuAraligi($ayar, $an);
@@ -248,31 +251,6 @@ class AiMesajZamanlamaServisi
         }
 
         return Carbon::instance($an)->setTimezone($gecerliSaatDilimi);
-    }
-
-    private function cevrimIciDurumunuEsitle(
-        User $aiUser,
-        bool $aktifSaatteMi,
-        CarbonInterface $simdi,
-    ): void {
-        if ($aiUser->hesap_tipi !== 'ai') {
-            return;
-        }
-
-        if ($aktifSaatteMi && !$aiUser->cevrim_ici_mi) {
-            $aiUser->forceFill([
-                'cevrim_ici_mi' => true,
-            ])->save();
-
-            return;
-        }
-
-        if (!$aktifSaatteMi && $aiUser->cevrim_ici_mi) {
-            $aiUser->forceFill([
-                'cevrim_ici_mi' => false,
-                'son_gorulme_tarihi' => Carbon::instance($simdi),
-            ])->save();
-        }
     }
 
     private function enGecTarihiBul(?CarbonInterface ...$tarihler): ?Carbon

@@ -7,6 +7,7 @@ import 'package:magmug/app_push_device_sync.dart';
 import 'package:magmug/app_push_message_effect.dart';
 import 'package:magmug/app_push_messaging.dart';
 import 'package:magmug/app_push_payload_handler.dart';
+import 'package:magmug/features/chat/chat_local_store.dart';
 
 class PushBootstrap extends ConsumerStatefulWidget {
   final Widget child;
@@ -17,12 +18,14 @@ class PushBootstrap extends ConsumerStatefulWidget {
   ConsumerState<PushBootstrap> createState() => _PushBootstrapState();
 }
 
-class _PushBootstrapState extends ConsumerState<PushBootstrap> {
+class _PushBootstrapState extends ConsumerState<PushBootstrap>
+    with WidgetsBindingObserver {
   PushMessagingBindings? _pushBindings;
   bool _configured = false;
   bool _isHandlingPendingPush = false;
   bool _permissionRequested = false;
   bool _permissionGranted = false;
+  String? _permissionRequestScheduledForToken;
   String? _deviceToken;
   late final StateController<int> _conversationFeedRefreshController;
   late final StateController<int> _notificationsFeedRefreshController;
@@ -32,6 +35,7 @@ class _PushBootstrapState extends ConsumerState<PushBootstrap> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _conversationFeedRefreshController = ref.read(
       conversationFeedRefreshProvider.notifier,
     );
@@ -46,8 +50,35 @@ class _PushBootstrapState extends ConsumerState<PushBootstrap> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _pushBindings?.cancel();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed || !mounted) {
+      return;
+    }
+
+    final session = ref.read(appAuthProvider).asData?.value;
+    final token = session?.token;
+    final ownerUserId = session?.user?.id;
+    if (token == null || token.trim().isEmpty || ownerUserId == null) {
+      return;
+    }
+
+    unawaited(
+      AppCacheSyncCoordinator.instance
+          .reconcile(token: token, ownerUserId: ownerUserId)
+          .then((didSync) {
+            if (!mounted || !didSync) {
+              return;
+            }
+            _conversationFeedRefreshController.state++;
+          })
+          .catchError((_) {}),
+    );
   }
 
   Future<void> _configurePushNotifications() async {
@@ -136,7 +167,7 @@ class _PushBootstrapState extends ConsumerState<PushBootstrap> {
 
     final effect = resolvePushMessageEffect(message);
     if (effect.refreshConversationFeed) {
-      _conversationFeedRefreshController.state++;
+      unawaited(_applyConversationPushEffect(message));
     }
 
     if (effect.refreshNotificationsFeed) {
@@ -151,12 +182,90 @@ class _PushBootstrapState extends ConsumerState<PushBootstrap> {
 
     final effect = resolvePushMessageEffect(message, includePayload: true);
     if (effect.refreshConversationFeed) {
-      _conversationFeedRefreshController.state++;
+      unawaited(_applyConversationPushEffect(message));
     }
     if (effect.refreshNotificationsFeed) {
       _notificationsFeedRefreshController.state++;
     }
     _pendingPushPayloadController.state = effect.payload;
+  }
+
+  Future<void> _applyConversationPushEffect(RemoteMessage message) async {
+    final session = ref.read(appAuthProvider).asData?.value;
+    final token = session?.token;
+    final ownerUserId = session?.user?.id;
+    if (token == null || token.trim().isEmpty || ownerUserId == null) {
+      return;
+    }
+
+    final applied = await _applyConversationPushToLocalCache(
+      message,
+      currentUserId: ownerUserId,
+    );
+    final senderId = _payloadInt(
+      message.data['gonderen_id'] ?? message.data['gonderen_user_id'],
+    );
+    if (senderId != null && senderId != ownerUserId) {
+      unawaited(
+        AppMessageSoundService.instance.playReceive(
+          enabled: session?.user?.messageSoundsEnabled ?? true,
+        ),
+      );
+    }
+    if (!mounted) {
+      return;
+    }
+
+    if (applied) {
+      _conversationFeedRefreshController.state++;
+      return;
+    }
+
+    AppCacheSyncCoordinator.instance.scheduleDebounced(
+      token: token,
+      ownerUserId: ownerUserId,
+      force: true,
+      onComplete: (didSync) {
+        if (!mounted || !didSync) {
+          return;
+        }
+        _conversationFeedRefreshController.state++;
+      },
+    );
+  }
+
+  Future<bool> _applyConversationPushToLocalCache(
+    RemoteMessage message, {
+    required int currentUserId,
+  }) async {
+    final data = message.data;
+    final type = data['tip']?.toString() ?? data['type']?.toString();
+    if (type != 'yeni_mesaj') {
+      return false;
+    }
+
+    final conversationId = _payloadInt(
+      data['sohbet_id'] ?? data['conversation_id'],
+    );
+    final senderId = _payloadInt(
+      data['gonderen_id'] ?? data['gonderen_user_id'],
+    );
+    if (conversationId == null || senderId == null) {
+      return false;
+    }
+
+    return ChatLocalStore.instance.applyConversationMessageEvent(
+      ownerUserId: currentUserId,
+      conversationId: conversationId,
+      senderId: senderId,
+      currentUserId: currentUserId,
+      messageType: data['mesaj_tipi']?.toString(),
+      messageText:
+          data['on_izleme']?.toString() ??
+          data['mesaj']?.toString() ??
+          message.notification?.body,
+      createdAt: DateTime.tryParse(data['created_at']?.toString() ?? ''),
+    );
   }
 
   Future<void> _syncNotificationDevice(
@@ -266,14 +375,21 @@ class _PushBootstrapState extends ConsumerState<PushBootstrap> {
   }
 
   void _requestPermissionForCurrentSession(AppAuthState? currentSession) {
-    if (currentSession?.token.trim().isNotEmpty != true) {
+    final token = currentSession?.token.trim();
+    if (token == null || token.isEmpty || _permissionRequested) {
       return;
     }
 
+    if (_permissionRequestScheduledForToken == token) {
+      return;
+    }
+
+    _permissionRequestScheduledForToken = token;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) {
         return;
       }
+      _permissionRequestScheduledForToken = null;
       unawaited(_requestNotificationPermissionIfNeeded(currentSession));
     });
   }
@@ -318,4 +434,13 @@ class _PushBootstrapState extends ConsumerState<PushBootstrap> {
 
     return widget.child;
   }
+}
+
+int? _payloadInt(Object? value) {
+  return switch (value) {
+    final int intValue => intValue,
+    final num numValue => numValue.toInt(),
+    final String stringValue => int.tryParse(stringValue.trim()),
+    _ => null,
+  };
 }

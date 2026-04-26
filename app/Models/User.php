@@ -92,6 +92,11 @@ class User extends Authenticatable
         return $this->hasMany(AiConversationState::class, 'ai_user_id');
     }
 
+    public function availabilitySchedules(): HasMany
+    {
+        return $this->hasMany(UserAvailabilitySchedule::class);
+    }
+
     public function aiMemoriesV2(): HasMany
     {
         return $this->hasMany(AiMemory::class, 'ai_user_id');

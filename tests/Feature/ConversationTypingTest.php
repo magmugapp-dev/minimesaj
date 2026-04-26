@@ -52,6 +52,40 @@ it('allows conversation participants to broadcast typing state', function () {
     });
 });
 
+it('broadcasts typing updates to conversation and participant user channels', function () {
+    $viewer = User::factory()->create(['hesap_durumu' => 'aktif']);
+    $peer = User::factory()->create(['hesap_durumu' => 'aktif']);
+
+    $match = Eslesme::query()->create([
+        'user_id' => $viewer->id,
+        'eslesen_user_id' => $peer->id,
+        'eslesme_turu' => 'otomatik',
+        'eslesme_kaynagi' => 'gercek_kullanici',
+        'durum' => 'aktif',
+        'baslatan_user_id' => $viewer->id,
+    ]);
+    $conversation = Sohbet::query()->create([
+        'eslesme_id' => $match->id,
+        'durum' => 'aktif',
+    ]);
+
+    $event = new SohbetTypingUpdated(
+        sohbetId: $conversation->id,
+        userId: $viewer->id,
+        typing: true,
+        statusText: 'Yaziyor...',
+    );
+
+    $channelNames = collect($event->broadcastOn())
+        ->map(fn ($channel) => $channel->name ?? (string) $channel)
+        ->all();
+
+    expect($channelNames)
+        ->toContain("private-sohbet.{$conversation->id}")
+        ->toContain("private-kullanici.{$viewer->id}")
+        ->toContain("private-kullanici.{$peer->id}");
+});
+
 it('rejects typing updates from users outside the conversation', function () {
     $viewer = User::factory()->create(['hesap_durumu' => 'aktif']);
     $peer = User::factory()->create(['hesap_durumu' => 'aktif']);

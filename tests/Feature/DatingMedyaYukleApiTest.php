@@ -46,6 +46,26 @@ it('uploads audio media for chat', function () {
     Storage::disk('public')->assertExists($dosyaYolu);
 });
 
+it('uploads m4a audio media reported as audio mp4 for chat', function () {
+    Storage::fake('public');
+    $kullanici = User::factory()->create();
+    Sanctum::actingAs($kullanici);
+
+    $response = $this->post('/api/dating/medya-yukle', [
+        'mesaj_tipi' => 'ses',
+        'dosya' => UploadedFile::fake()->create('voice.m4a', 1200, 'audio/mp4'),
+    ], [
+        'Accept' => 'application/json',
+    ]);
+
+    $response->assertCreated()
+        ->assertJsonPath('mesaj', 'Medya yuklendi.');
+
+    $dosyaYolu = $response->json('dosya_yolu');
+    expect($dosyaYolu)->toStartWith("mesajlar/{$kullanici->id}/ses/");
+    Storage::disk('public')->assertExists($dosyaYolu);
+});
+
 it('returns 422 for invalid type or size limit violations', function () {
     Storage::fake('public');
     $kullanici = User::factory()->create();
@@ -74,4 +94,3 @@ it('returns 401 when unauthenticated user uploads media', function () {
         'Accept' => 'application/json',
     ])->assertUnauthorized();
 });
-

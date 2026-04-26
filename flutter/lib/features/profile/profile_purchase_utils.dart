@@ -157,7 +157,11 @@ String subscriptionPeriodTitle(
   return switch (package.months) {
     1 => l10n.paywallPeriodMonth,
     3 => l10n.paywallPeriodQuarter,
-    _ => '${package.months} Ay Premium',
+    _ => AppRuntimeText.instance.t(
+      'paywallPeriodMonths',
+      '{count} Ay Premium',
+      args: {'count': package.months},
+    ),
   };
 }
 
@@ -166,20 +170,41 @@ ProfilePurchaseResultCopy premiumPurchaseAuthRequiredCopy(
 ) {
   return ProfilePurchaseResultCopy(
     tone: PaymentResultTone.failure,
-    badge: 'OTURUM GEREKLI',
-    title: 'Premium satin alimi baslatilamadi',
-    subtitle: 'Devam etmek icin once oturum acman gerekiyor.',
-    statusLabel: 'Islem tamamlanamadi',
+    badge: AppRuntimeText.instance.t(
+      'purchaseAuthRequiredBadge',
+      'OTURUM GEREKLI',
+    ),
+    title: AppRuntimeText.instance.t(
+      'premiumPurchaseStartFailedTitle',
+      'Premium satin alimi baslatilamadi',
+    ),
+    subtitle: AppRuntimeText.instance.t(
+      'purchaseAuthRequiredMessage',
+      'Devam etmek icin once oturum acman gerekiyor.',
+    ),
+    statusLabel: AppRuntimeText.instance.t(
+      'purchaseFailedStatus',
+      'Islem tamamlanamadi',
+    ),
   );
 }
 
 ProfilePurchaseResultCopy premiumPurchaseSuccessCopy(AppLocalizations l10n) {
   return ProfilePurchaseResultCopy(
     tone: PaymentResultTone.success,
-    badge: 'PREMIUM AKTIF',
-    title: 'Premium planin hazir',
-    subtitle: 'Satin alma dogrulandi ve premium erisimin hesabina tanimlandi.',
-    statusLabel: 'Premium aktif',
+    badge: AppRuntimeText.instance.t('premiumActiveBadge', 'PREMIUM AKTIF'),
+    title: AppRuntimeText.instance.t(
+      'premiumPurchaseSuccessTitle',
+      'Premium planin hazir',
+    ),
+    subtitle: AppRuntimeText.instance.t(
+      'premiumPurchaseSuccessMessage',
+      'Satin alma dogrulandi ve premium erisimin hesabina tanimlandi.',
+    ),
+    statusLabel: AppRuntimeText.instance.t(
+      'premiumActiveStatus',
+      'Premium aktif',
+    ),
   );
 }
 
@@ -189,29 +214,53 @@ ProfilePurchaseResultCopy premiumPurchaseFailureCopy(
 }) {
   return ProfilePurchaseResultCopy(
     tone: PaymentResultTone.failure,
-    badge: 'ODEME BASARISIZ',
-    title: 'Premium satin alimi tamamlanamadi',
+    badge: AppRuntimeText.instance.t('paymentFailedBadge', 'ODEME BASARISIZ'),
+    title: AppRuntimeText.instance.t(
+      'premiumPurchaseFailedTitle',
+      'Premium satin alimi tamamlanamadi',
+    ),
     subtitle: message,
-    statusLabel: 'Islem tamamlanamadi',
+    statusLabel: AppRuntimeText.instance.t(
+      'purchaseFailedStatus',
+      'Islem tamamlanamadi',
+    ),
   );
 }
 
 ProfilePurchaseResultCopy jetonPurchaseAuthRequiredCopy(AppLocalizations l10n) {
   return ProfilePurchaseResultCopy(
     tone: PaymentResultTone.failure,
-    badge: 'OTURUM GEREKLI',
-    title: 'Jeton satin alimi baslatilamadi',
-    subtitle: 'Devam etmek icin once oturum acman gerekiyor.',
-    statusLabel: 'Secilen paket hazir',
+    badge: AppRuntimeText.instance.t(
+      'purchaseAuthRequiredBadge',
+      'OTURUM GEREKLI',
+    ),
+    title: AppRuntimeText.instance.t(
+      'jetonPurchaseStartFailedTitle',
+      'Jeton satin alimi baslatilamadi',
+    ),
+    subtitle: AppRuntimeText.instance.t(
+      'purchaseAuthRequiredMessage',
+      'Devam etmek icin once oturum acman gerekiyor.',
+    ),
+    statusLabel: AppRuntimeText.instance.t(
+      'selectedPackageStatus',
+      'Secilen paket hazir',
+    ),
   );
 }
 
 ProfilePurchaseResultCopy jetonPurchaseSuccessCopy(AppLocalizations l10n) {
   return ProfilePurchaseResultCopy(
     tone: PaymentResultTone.success,
-    badge: 'ODEME BASARILI',
-    title: 'Kredi paketin hazir',
-    subtitle: 'Krediler hesabina eklendi, sohbete devam edebilirsin.',
+    badge: AppRuntimeText.instance.t('paymentSuccessBadge', 'ODEME BASARILI'),
+    title: AppRuntimeText.instance.t(
+      'jetonPurchaseSuccessTitle',
+      'Kredi paketin hazir',
+    ),
+    subtitle: AppRuntimeText.instance.t(
+      'jetonPurchaseSuccessMessage',
+      'Krediler hesabina eklendi, sohbete devam edebilirsin.',
+    ),
     statusLabel: l10n.jetonCreditsAdded,
   );
 }
@@ -222,10 +271,16 @@ ProfilePurchaseResultCopy jetonPurchaseFailureCopy(
 }) {
   return ProfilePurchaseResultCopy(
     tone: PaymentResultTone.failure,
-    badge: 'ODEME BASARISIZ',
-    title: 'Jeton satin alimi tamamlanamadi',
+    badge: AppRuntimeText.instance.t('paymentFailedBadge', 'ODEME BASARISIZ'),
+    title: AppRuntimeText.instance.t(
+      'jetonPurchaseFailedTitle',
+      'Jeton satin alimi tamamlanamadi',
+    ),
     subtitle: message,
-    statusLabel: 'Secilen paket hazir',
+    statusLabel: AppRuntimeText.instance.t(
+      'selectedPackageStatus',
+      'Secilen paket hazir',
+    ),
   );
 }
 

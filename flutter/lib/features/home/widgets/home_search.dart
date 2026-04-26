@@ -1,8 +1,7 @@
 import 'package:magmug/app_core.dart';
 import 'package:magmug/features/chat/chat_flow.dart';
-import 'package:magmug/features/home/models/chat_preview.dart';
-import 'package:magmug/features/home/providers/home_chats_provider.dart';
-import 'package:magmug/features/home/widgets/home_chat_list.dart';
+import 'package:magmug/features/chat/chat_local_store.dart';
+import 'package:magmug/features/home/widgets/home_avatar.dart';
 
 class HomeSearchBar extends StatelessWidget {
   final VoidCallback onTap;
@@ -29,15 +28,22 @@ class HomeSearchBar extends StatelessWidget {
           ],
         ),
         child: Row(
-          children: const [
-            Icon(CupertinoIcons.search, size: 20, color: AppColors.neutral600),
-            SizedBox(width: 8),
+          children: [
+            const Icon(
+              CupertinoIcons.search,
+              size: 20,
+              color: AppColors.neutral600,
+            ),
+            const SizedBox(width: 8),
             Expanded(
               child: Text(
-                'Kisi, mesaj @kullanici adi ara...',
+                AppRuntimeText.instance.t(
+                  'home.search.placeholder_short',
+                  'Profil ID veya mesaj ara...',
+                ),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: TextStyle(
+                style: const TextStyle(
                   fontFamily: AppFont.family,
                   fontWeight: FontWeight.w400,
                   fontSize: 14,
@@ -62,14 +68,8 @@ class HomeSearchScreen extends ConsumerStatefulWidget {
 class _HomeSearchScreenState extends ConsumerState<HomeSearchScreen> {
   final TextEditingController _controller = TextEditingController();
   final FocusNode _focusNode = FocusNode();
-  int _selectedFilter = 0;
-
-  static const List<String> _filters = [
-    'Hepsi',
-    'Kisiler',
-    'Mesajlar',
-    'Online',
-  ];
+  Future<_SearchPayload>? _searchFuture;
+  String _activeQuery = '';
 
   @override
   void initState() {
@@ -88,39 +88,56 @@ class _HomeSearchScreenState extends ConsumerState<HomeSearchScreen> {
     super.dispose();
   }
 
-  bool _matchesQuery(ChatPreview chat, String query) {
-    if (query.isEmpty) {
-      return true;
-    }
-    final lowerQuery = query.toLowerCase();
-    final inName = chat.name.toLowerCase().contains(lowerQuery);
-    final inMessage =
-        (chat.lastMessage ?? '').toLowerCase().contains(lowerQuery) ||
-        (chat.statusText ?? '').toLowerCase().contains(lowerQuery);
+  void _handleQueryChanged(String value) {
+    final query = value.trim();
+    setState(() {
+      _activeQuery = query;
+      _searchFuture = query.isEmpty ? null : _performSearch(query);
+    });
+  }
 
-    switch (_selectedFilter) {
-      case 1:
-        return inName;
-      case 2:
-        return inMessage;
-      case 3:
-        return chat.online && (inName || inMessage);
-      default:
-        return inName || inMessage;
+  Future<_SearchPayload> _performSearch(String query) async {
+    final session = await ref.read(appAuthProvider.future);
+    final token = session?.token;
+    final ownerUserId = session?.user?.id;
+    if (token == null || token.trim().isEmpty || ownerUserId == null) {
+      return _SearchPayload.error(
+        AppRuntimeText.instance.t(
+          'auth.error.login_required_action',
+          'Bu islemi yapmak icin once giris yapmalisin.',
+        ),
+      );
     }
+
+    if (RegExp(r'^\d+$').hasMatch(query)) {
+      final api = AppAuthApi();
+      try {
+        final profile = await api.fetchInfluencerProfile(
+          token,
+          userId: int.parse(query),
+        );
+        return _SearchPayload.influencer(profile);
+      } on ApiException catch (error) {
+        return _SearchPayload.empty(error.message);
+      } finally {
+        api.close();
+      }
+    }
+
+    final messages = await ChatLocalStore.instance.searchConversationMessages(
+      ownerUserId: ownerUserId,
+      query: query,
+    );
+    return _SearchPayload.messages(messages);
+  }
+
+  void _clear() {
+    _controller.clear();
+    _handleQueryChanged('');
   }
 
   @override
   Widget build(BuildContext context) {
-    final query = _controller.text.trim();
-    final chatsAsync = ref.watch(homeChatsProvider);
-    final sourceChats = chatsAsync.asData?.value ?? const <ChatPreview>[];
-    final isLoading = chatsAsync.isLoading;
-    final hasError = chatsAsync.hasError;
-    final filteredChats = sourceChats
-        .where((chat) => _matchesQuery(chat, query))
-        .toList(growable: false);
-
     return CupertinoPageScaffold(
       backgroundColor: AppColors.neutral100,
       child: SafeArea(
@@ -163,9 +180,11 @@ class _HomeSearchScreenState extends ConsumerState<HomeSearchScreen> {
                             child: CupertinoTextField(
                               controller: _controller,
                               focusNode: _focusNode,
-                              onChanged: (_) => setState(() {}),
-                              placeholder:
-                                  'Kisi, mesaj veya @kullanici adi ara',
+                              onChanged: _handleQueryChanged,
+                              placeholder: AppRuntimeText.instance.t(
+                                'home.search.placeholder',
+                                'Profil ID veya mesaj ara',
+                              ),
                               placeholderStyle: const TextStyle(
                                 fontFamily: AppFont.family,
                                 fontSize: 14,
@@ -183,12 +202,9 @@ class _HomeSearchScreenState extends ConsumerState<HomeSearchScreen> {
                               cursorColor: AppColors.indigo,
                             ),
                           ),
-                          if (query.isNotEmpty)
+                          if (_activeQuery.isNotEmpty)
                             PressableScale(
-                              onTap: () {
-                                _controller.clear();
-                                setState(() {});
-                              },
+                              onTap: _clear,
                               scale: 0.9,
                               child: const Icon(
                                 CupertinoIcons.clear_circled_solid,
@@ -203,217 +219,383 @@ class _HomeSearchScreenState extends ConsumerState<HomeSearchScreen> {
                 ],
               ),
             ),
-            SizedBox(
-              height: 38,
-              child: ListView.separated(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                scrollDirection: Axis.horizontal,
-                itemBuilder: (context, index) {
-                  final selected = _selectedFilter == index;
-                  return PressableScale(
-                    onTap: () => setState(() => _selectedFilter = index),
-                    scale: 0.97,
-                    child: AnimatedContainer(
-                      duration: const Duration(milliseconds: 160),
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 14,
-                        vertical: 9,
-                      ),
-                      decoration: BoxDecoration(
-                        color: selected ? AppColors.black : AppColors.white,
-                        borderRadius: BorderRadius.circular(20),
-                        border: Border.all(
-                          color: selected
-                              ? AppColors.black
-                              : const Color(0xFFE7E7EA),
-                        ),
-                      ),
-                      child: Text(
-                        _filters[index],
-                        style: TextStyle(
-                          fontFamily: AppFont.family,
-                          fontWeight: FontWeight.w700,
-                          fontSize: 12.5,
-                          color: selected ? AppColors.white : AppColors.black,
-                        ),
-                      ),
-                    ),
-                  );
-                },
-                separatorBuilder: (context, index) => const SizedBox(width: 8),
-                itemCount: _filters.length,
+            Expanded(child: _buildBody()),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildBody() {
+    final query = _activeQuery;
+    final future = _searchFuture;
+    if (query.isEmpty || future == null) {
+      return _SearchStatusState(
+        icon: CupertinoIcons.search,
+        title: AppRuntimeText.instance.t(
+          'home.search.idle.title',
+          'Aramaya basla',
+        ),
+        subtitle: AppRuntimeText.instance.t(
+          'home.search.idle.subtitle',
+          'Profil ID ile influencer profili, metin ile kendi sohbet mesajlarini ara.',
+        ),
+      );
+    }
+
+    return FutureBuilder<_SearchPayload>(
+      future: future,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState != ConnectionState.done) {
+          return const Center(child: CupertinoActivityIndicator(radius: 14));
+        }
+        if (snapshot.hasError) {
+          return _SearchStatusState(
+            icon: CupertinoIcons.exclamationmark_triangle,
+            title: AppRuntimeText.instance.t(
+              'home.search.error.title',
+              'Arama tamamlanamadi',
+            ),
+            subtitle: AppAuthErrorFormatter.messageFrom(
+              snapshot.error ??
+                  AppRuntimeText.instance.t('commonError', 'Hata'),
+            ),
+          );
+        }
+
+        final payload = snapshot.data ?? const _SearchPayload();
+        if (payload.errorMessage != null) {
+          return _SearchStatusState(
+            icon: CupertinoIcons.exclamationmark_triangle,
+            title: AppRuntimeText.instance.t(
+              'home.search.error.title',
+              'Arama tamamlanamadi',
+            ),
+            subtitle: payload.errorMessage!,
+          );
+        }
+        if (payload.emptyMessage != null) {
+          return _SearchStatusState(
+            icon: CupertinoIcons.search,
+            title: AppRuntimeText.instance.t(
+              'home.search.empty.title',
+              'Sonuc bulunamadi',
+            ),
+            subtitle: payload.emptyMessage!,
+          );
+        }
+        if (payload.isEmpty) {
+          return _SearchStatusState(
+            icon: CupertinoIcons.search,
+            title: AppRuntimeText.instance.t(
+              'home.search.empty.title',
+              'Sonuc bulunamadi',
+            ),
+            subtitle: AppRuntimeText.instance.t(
+              'home.search.empty.subtitle',
+              '"{query}" icin eslesen influencer ID veya mesaj yok.',
+              args: {'query': query},
+            ),
+          );
+        }
+
+        return _SearchResultsList(payload: payload, query: query);
+      },
+    );
+  }
+}
+
+@immutable
+class _SearchPayload {
+  final AppMatchCandidate? influencer;
+  final List<ChatLocalMessageSearchResult> messages;
+  final String? errorMessage;
+  final String? emptyMessage;
+
+  const _SearchPayload({
+    this.influencer,
+    this.messages = const <ChatLocalMessageSearchResult>[],
+    this.errorMessage,
+    this.emptyMessage,
+  });
+
+  factory _SearchPayload.influencer(AppMatchCandidate profile) {
+    return _SearchPayload(influencer: profile);
+  }
+
+  factory _SearchPayload.messages(List<ChatLocalMessageSearchResult> messages) {
+    return _SearchPayload(messages: messages);
+  }
+
+  factory _SearchPayload.empty(String message) {
+    return _SearchPayload(emptyMessage: message);
+  }
+
+  factory _SearchPayload.error(String message) {
+    return _SearchPayload(errorMessage: message);
+  }
+
+  bool get isEmpty =>
+      errorMessage == null &&
+      influencer == null &&
+      messages.isEmpty &&
+      emptyMessage == null;
+}
+
+class _SearchResultsList extends StatelessWidget {
+  final _SearchPayload payload;
+  final String query;
+
+  const _SearchResultsList({required this.payload, required this.query});
+
+  @override
+  Widget build(BuildContext context) {
+    final itemCount =
+        (payload.influencer == null ? 0 : 1) + payload.messages.length;
+
+    return ListView.separated(
+      physics: const BouncingScrollPhysics(),
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+      itemCount: itemCount + 1,
+      separatorBuilder: (context, index) => const SizedBox(height: 8),
+      itemBuilder: (context, index) {
+        if (index == 0) {
+          return Padding(
+            padding: const EdgeInsets.only(bottom: 4),
+            child: Text(
+              AppRuntimeText.instance.t(
+                'home.search.results_count',
+                '{count} sonuc bulundu',
+                args: {'count': itemCount},
+              ),
+              style: const TextStyle(
+                fontFamily: AppFont.family,
+                fontWeight: FontWeight.w700,
+                fontSize: 12.5,
+                color: AppColors.neutral600,
               ),
             ),
-            const SizedBox(height: 12),
-            Expanded(
-              child: isLoading
-                  ? const Center(child: CupertinoActivityIndicator(radius: 14))
-                  : hasError
-                  ? const _SearchStatusState(
-                      title: 'Sohbetler yuklenemedi',
-                      subtitle:
-                          'Arama sonuclarini gostermek icin sohbetlerin tekrar yuklenmesini bekliyoruz.',
-                    )
-                  : query.isEmpty
-                  ? _SearchIdleState(
-                      chats: sourceChats,
-                      onSelectRecent: (value) {
-                        _controller.text = value;
-                        _controller.selection = TextSelection.collapsed(
-                          offset: value.length,
-                        );
-                        setState(() {});
-                      },
-                    )
-                  : filteredChats.isEmpty
-                  ? _SearchEmptyState(query: query)
-                  : _SearchResultsList(chats: filteredChats, query: query),
-            ),
-          ],
+          );
+        }
+
+        final resultIndex = index - 1;
+        final influencer = payload.influencer;
+        if (influencer != null && resultIndex == 0) {
+          return _InfluencerResultRow(profile: influencer);
+        }
+
+        final messageIndex = resultIndex - (influencer == null ? 0 : 1);
+        return _MessageResultRow(
+          result: payload.messages[messageIndex],
+          query: query,
+        );
+      },
+    );
+  }
+}
+
+class _InfluencerResultRow extends StatelessWidget {
+  final AppMatchCandidate profile;
+
+  const _InfluencerResultRow({required this.profile});
+
+  @override
+  Widget build(BuildContext context) {
+    final username = profile.username.trim();
+    final handle = username.isEmpty
+        ? ''
+        : (username.startsWith('@') ? username : '@$username');
+    final peer = ChatPeer(
+      name: profile.displayName,
+      handle: handle,
+      status: profile.online
+          ? AppRuntimeText.instance.t('chat.status.online', 'Cevrimici')
+          : AppRuntimeText.instance.t('chat.status.inactive', 'Aktif degil'),
+      avatarUrl: profile.primaryImageUrl,
+      online: profile.online,
+    );
+
+    return PressableScale(
+      onTap: () => Navigator.of(context).push(
+        cupertinoRoute(
+          ChatProfileScreen(peer: peer, profileUserId: profile.id),
+        ),
+      ),
+      scale: 0.99,
+      child: _SearchResultShell(
+        leading: HomeAvatarCircle(name: profile.displayName, size: 44),
+        title: profile.displayName,
+        badge: AppRuntimeText.instance.t(
+          'home.search.result.influencer',
+          'Influencer profil sonucu',
+        ),
+        subtitle: handle.isEmpty
+            ? AppRuntimeText.instance.t(
+                'home.search.profile_id',
+                'Profil ID: {id}',
+                args: {'id': profile.id},
+              )
+            : '$handle - ${AppRuntimeText.instance.t('home.search.profile_id', 'Profil ID: {id}', args: {'id': profile.id})}',
+      ),
+    );
+  }
+}
+
+class _MessageResultRow extends StatelessWidget {
+  final ChatLocalMessageSearchResult result;
+  final String query;
+
+  const _MessageResultRow({required this.result, required this.query});
+
+  @override
+  Widget build(BuildContext context) {
+    final conversation = result.conversation;
+    final message = result.message;
+    final snippet = message.text?.trim().isNotEmpty == true
+        ? message.text!.trim()
+        : AppRuntimeText.instance.t('chat.message.open_chat', 'Sohbeti ac');
+
+    return PressableScale(
+      onTap: () => Navigator.of(context).push(
+        chatRoute(
+          ChatScreen(mode: ChatScreenMode.messages, conversation: conversation),
+        ),
+      ),
+      scale: 0.99,
+      child: _SearchResultShell(
+        leading: HomeAvatarCircle(name: conversation.peerName, size: 44),
+        title: conversation.peerName,
+        badge: AppRuntimeText.instance.t(
+          'home.search.result.message',
+          'Mesaj sonucu',
+        ),
+        subtitle: snippet,
+        footer: AppRuntimeText.instance.t(
+          'home.search.matching_phrase',
+          'Eslesen ifade: {query}',
+          args: {'query': query},
         ),
       ),
     );
   }
 }
 
-class _SearchIdleState extends StatelessWidget {
-  final List<ChatPreview> chats;
-  final ValueChanged<String> onSelectRecent;
+class _SearchResultShell extends StatelessWidget {
+  final Widget leading;
+  final String title;
+  final String badge;
+  final String subtitle;
+  final String? footer;
 
-  const _SearchIdleState({required this.chats, required this.onSelectRecent});
+  const _SearchResultShell({
+    required this.leading,
+    required this.title,
+    required this.badge,
+    required this.subtitle,
+    this.footer,
+  });
 
   @override
   Widget build(BuildContext context) {
-    final suggestions = chats.take(4).toList(growable: false);
-    final recentItems = suggestions
-        .map((chat) {
-          final username = chat.conversation?.peerUsername.trim() ?? '';
-          if (username.isNotEmpty) {
-            return username.startsWith('@') ? username : '@$username';
-          }
-          return chat.name;
-        })
-        .where((item) => item.isNotEmpty)
-        .toSet()
-        .toList(growable: false);
-
-    return ListView(
-      physics: const BouncingScrollPhysics(),
-      padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
-      children: [
-        if (recentItems.isNotEmpty) ...[
-          const Text(
-            'Son aramalar',
-            style: TextStyle(
-              fontFamily: AppFont.family,
-              fontWeight: FontWeight.w800,
-              fontSize: 15,
-              color: AppColors.black,
-            ),
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+      decoration: BoxDecoration(
+        color: AppColors.white,
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x08000000),
+            blurRadius: 8,
+            offset: Offset(0, 2),
           ),
-          const SizedBox(height: 10),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: recentItems
-                .map(
-                  (item) => PressableScale(
-                    onTap: () => onSelectRecent(item),
-                    scale: 0.97,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 14,
-                        vertical: 10,
-                      ),
-                      decoration: BoxDecoration(
-                        color: AppColors.white,
-                        borderRadius: BorderRadius.circular(20),
-                        border: Border.all(color: const Color(0xFFEAEAEA)),
-                      ),
+        ],
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          leading,
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Expanded(
                       child: Text(
-                        item,
+                        title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
                           fontFamily: AppFont.family,
-                          fontWeight: FontWeight.w600,
-                          fontSize: 12.5,
+                          fontWeight: FontWeight.w700,
+                          fontSize: 14.5,
                           color: AppColors.black,
                         ),
                       ),
                     ),
-                  ),
-                )
-                .toList(),
-          ),
-          const SizedBox(height: 22),
-        ],
-        Container(
-          padding: const EdgeInsets.all(18),
-          decoration: BoxDecoration(
-            color: AppColors.black,
-            borderRadius: BorderRadius.circular(24),
-          ),
-          child: const Row(
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Hizli bul',
-                      style: TextStyle(
-                        fontFamily: AppFont.family,
-                        fontWeight: FontWeight.w800,
-                        fontSize: 18,
-                        color: AppColors.white,
-                      ),
-                    ),
-                    SizedBox(height: 6),
-                    Text(
-                      'Aktif sohbetlerini, son mesajlari ve kullanici adlarini tek yerden ara.',
-                      style: TextStyle(
-                        fontFamily: AppFont.family,
-                        fontSize: 12.5,
-                        height: 1.45,
-                        color: Color(0xCCFFFFFF),
+                    const SizedBox(width: 8),
+                    Flexible(
+                      child: Text(
+                        badge,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        textAlign: TextAlign.right,
+                        style: const TextStyle(
+                          fontFamily: AppFont.family,
+                          fontWeight: FontWeight.w700,
+                          fontSize: 10.5,
+                          color: AppColors.brandBlue,
+                        ),
                       ),
                     ),
                   ],
                 ),
-              ),
-              SizedBox(width: 12),
-              Icon(CupertinoIcons.sparkles, size: 28, color: AppColors.white),
-            ],
-          ),
-        ),
-        if (suggestions.isNotEmpty) ...[
-          const SizedBox(height: 22),
-          const Text(
-            'Onerilen sohbetler',
-            style: TextStyle(
-              fontFamily: AppFont.family,
-              fontWeight: FontWeight.w800,
-              fontSize: 15,
-              color: AppColors.black,
-            ),
-          ),
-          const SizedBox(height: 8),
-          ...suggestions.map(
-            (chat) => Padding(
-              padding: const EdgeInsets.only(bottom: 8),
-              child: _SearchResultRow(chat: chat, query: ''),
+                const SizedBox(height: 4),
+                Text(
+                  subtitle,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontFamily: AppFont.family,
+                    fontSize: 12.5,
+                    height: 1.4,
+                    color: AppColors.neutral600,
+                  ),
+                ),
+                if (footer != null) ...[
+                  const SizedBox(height: 8),
+                  Text(
+                    footer!,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontFamily: AppFont.family,
+                      fontWeight: FontWeight.w700,
+                      fontSize: 11,
+                      color: AppColors.brandBlue,
+                    ),
+                  ),
+                ],
+              ],
             ),
           ),
         ],
-      ],
+      ),
     );
   }
 }
 
 class _SearchStatusState extends StatelessWidget {
+  final IconData icon;
   final String title;
   final String subtitle;
 
-  const _SearchStatusState({required this.title, required this.subtitle});
+  const _SearchStatusState({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -438,11 +620,7 @@ class _SearchStatusState extends StatelessWidget {
                 ],
               ),
               alignment: Alignment.center,
-              child: const Icon(
-                CupertinoIcons.chat_bubble_2,
-                size: 34,
-                color: AppColors.gray,
-              ),
+              child: Icon(icon, size: 34, color: AppColors.gray),
             ),
             const SizedBox(height: 18),
             Text(
@@ -464,218 +642,6 @@ class _SearchStatusState extends StatelessWidget {
                 fontSize: 13,
                 height: 1.5,
                 color: AppColors.neutral600,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _SearchEmptyState extends StatelessWidget {
-  final String query;
-
-  const _SearchEmptyState({required this.query});
-
-  @override
-  Widget build(BuildContext context) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 28),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Container(
-              width: 84,
-              height: 84,
-              decoration: BoxDecoration(
-                color: AppColors.white,
-                shape: BoxShape.circle,
-                boxShadow: const [
-                  BoxShadow(
-                    color: Color(0x0C000000),
-                    blurRadius: 16,
-                    offset: Offset(0, 6),
-                  ),
-                ],
-              ),
-              alignment: Alignment.center,
-              child: const Icon(
-                CupertinoIcons.search,
-                size: 34,
-                color: AppColors.gray,
-              ),
-            ),
-            const SizedBox(height: 18),
-            const Text(
-              'Sonuc bulunamadi',
-              style: TextStyle(
-                fontFamily: AppFont.family,
-                fontWeight: FontWeight.w800,
-                fontSize: 18,
-                color: AppColors.black,
-              ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              '"$query" icin eslesen kisi ya da mesaj yok. Farkli bir isim, mesaj parcasi veya @kullanici adi deneyin.',
-              textAlign: TextAlign.center,
-              style: const TextStyle(
-                fontFamily: AppFont.family,
-                fontSize: 13,
-                height: 1.5,
-                color: AppColors.neutral600,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _SearchResultsList extends StatelessWidget {
-  final List<ChatPreview> chats;
-  final String query;
-
-  const _SearchResultsList({required this.chats, required this.query});
-
-  @override
-  Widget build(BuildContext context) {
-    return ListView.separated(
-      physics: const BouncingScrollPhysics(),
-      padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
-      itemCount: chats.length + 1,
-      separatorBuilder: (context, index) => const SizedBox(height: 8),
-      itemBuilder: (context, index) {
-        if (index == 0) {
-          return Padding(
-            padding: const EdgeInsets.only(bottom: 4),
-            child: Text(
-              '${chats.length} sonuc bulundu',
-              style: const TextStyle(
-                fontFamily: AppFont.family,
-                fontWeight: FontWeight.w700,
-                fontSize: 12.5,
-                color: AppColors.neutral600,
-              ),
-            ),
-          );
-        }
-        return _SearchResultRow(chat: chats[index - 1], query: query);
-      },
-    );
-  }
-}
-
-class _SearchResultRow extends StatelessWidget {
-  final ChatPreview chat;
-  final String query;
-
-  const _SearchResultRow({required this.chat, required this.query});
-
-  @override
-  Widget build(BuildContext context) {
-    final snippet = (chat.lastMessage?.trim().isNotEmpty == true)
-        ? chat.lastMessage!
-        : (chat.statusText?.trim().isNotEmpty == true)
-        ? chat.statusText!
-        : 'Sohbeti ac';
-
-    return PressableScale(
-      onTap: () => Navigator.of(context).push(
-        cupertinoRoute(
-          ChatScreen(
-            mode: ChatScreenMode.messages,
-            conversation: chat.conversation,
-          ),
-        ),
-      ),
-      scale: 0.99,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
-        decoration: BoxDecoration(
-          color: AppColors.white,
-          borderRadius: BorderRadius.circular(20),
-          boxShadow: const [
-            BoxShadow(
-              color: Color(0x08000000),
-              blurRadius: 8,
-              offset: Offset(0, 2),
-            ),
-          ],
-        ),
-        child: Row(
-          children: [
-            HomeChatAvatar(chat: chat),
-            const SizedBox(width: 14),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          chat.name,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            fontFamily: AppFont.family,
-                            fontWeight: FontWeight.w700,
-                            fontSize: 14.5,
-                            color: AppColors.black,
-                          ),
-                        ),
-                      ),
-                      if (chat.online)
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 8,
-                            vertical: 4,
-                          ),
-                          decoration: BoxDecoration(
-                            color: const Color(0x1422C55E),
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          child: const Text(
-                            'Aktif',
-                            style: TextStyle(
-                              fontFamily: AppFont.family,
-                              fontWeight: FontWeight.w700,
-                              fontSize: 10.5,
-                              color: AppColors.onlineGreen,
-                            ),
-                          ),
-                        ),
-                    ],
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    snippet,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      fontFamily: AppFont.family,
-                      fontSize: 12.5,
-                      height: 1.4,
-                      color: AppColors.neutral600,
-                    ),
-                  ),
-                  if (query.isNotEmpty) ...[
-                    const SizedBox(height: 8),
-                    Text(
-                      'Eslesen ifade: $query',
-                      style: const TextStyle(
-                        fontFamily: AppFont.family,
-                        fontWeight: FontWeight.w700,
-                        fontSize: 11,
-                        color: AppColors.brandBlue,
-                      ),
-                    ),
-                  ],
-                ],
               ),
             ),
           ],

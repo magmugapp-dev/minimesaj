@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:magmug/app_core.dart';
+import 'package:magmug/features/chat/chat_local_store.dart';
 import 'package:magmug/features/chat/chat_flow.dart';
 import 'package:magmug/features/match/match_flow.dart';
 import 'package:magmug/features/notifications/notifications_flow.dart';
@@ -19,27 +20,43 @@ Future<void> handlePendingPushPayload(
       return;
     }
 
-    final api = AppAuthApi();
     try {
-      final conversations = await api.fetchConversations(
-        authToken,
-        currentUserId: currentUserId,
+      var conversation = await ChatLocalStore.instance.getConversationPreview(
+        conversationId,
+        ownerUserId: currentUserId,
       );
-      final conversation = conversations
-          .where((item) => item.id == conversationId)
-          .firstOrNull;
+      if (conversation == null) {
+        await AppCacheSyncCoordinator.instance.reconcile(
+          token: authToken,
+          ownerUserId: currentUserId,
+          force: true,
+        );
+        conversation = await ChatLocalStore.instance.getConversationPreview(
+          conversationId,
+          ownerUserId: currentUserId,
+        );
+      }
+      if (conversation == null) {
+        final bootstrap = await AppBootstrapCoordinator.instance.bootstrap(
+          authToken,
+        );
+        if (bootstrap.user.id != currentUserId) {
+          return;
+        }
+        conversation = bootstrap.conversations
+            .where((item) => item.id == conversationId)
+            .firstOrNull;
+      }
       if (!context.mounted || conversation == null) {
         return;
       }
 
       await Navigator.of(context, rootNavigator: true).push(
-        cupertinoRoute(
+        chatRoute(
           ChatScreen(mode: ChatScreenMode.messages, conversation: conversation),
         ),
       );
-    } finally {
-      api.close();
-    }
+    } catch (_) {}
     return;
   }
 

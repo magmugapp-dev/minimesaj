@@ -1,14 +1,17 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:math' as math;
 
 import 'package:magmug/l10n/app_localizations.dart';
 import 'package:magmug/app_core.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:in_app_purchase/in_app_purchase.dart';
+import 'package:magmug/features/ads/admob_ads.dart';
 import 'package:magmug/features/blocked_users/domain/entities/blocked_user.dart';
 import 'package:magmug/features/blocked_users/presentation/providers/blocked_users_providers.dart';
 import 'package:magmug/features/match/match_flow.dart';
 import 'package:magmug/features/onboarding/onboarding_flow.dart';
+import 'package:magmug/features/payment/payment_result_flow.dart';
 import 'package:magmug/features/payment/store_purchase_service.dart';
 import 'package:magmug/features/profile/profile_photo_utils.dart';
 import 'package:magmug/features/profile/profile_purchase_utils.dart';
@@ -29,26 +32,31 @@ import 'package:magmug/features/profile/widgets/profile_support_widgets.dart';
 class NotificationPrefs {
   final bool notificationsEnabled;
   final bool vibrationEnabled;
+  final bool messageSoundsEnabled;
 
   const NotificationPrefs({
     this.notificationsEnabled = true,
     this.vibrationEnabled = true,
+    this.messageSoundsEnabled = true,
   });
 
   factory NotificationPrefs.fromUser(AppUser? user) {
     return NotificationPrefs(
       notificationsEnabled: user?.notificationsEnabled ?? true,
       vibrationEnabled: user?.vibrationEnabled ?? true,
+      messageSoundsEnabled: user?.messageSoundsEnabled ?? true,
     );
   }
 
   NotificationPrefs copyWith({
     bool? notificationsEnabled,
     bool? vibrationEnabled,
+    bool? messageSoundsEnabled,
   }) {
     return NotificationPrefs(
       notificationsEnabled: notificationsEnabled ?? this.notificationsEnabled,
       vibrationEnabled: vibrationEnabled ?? this.vibrationEnabled,
+      messageSoundsEnabled: messageSoundsEnabled ?? this.messageSoundsEnabled,
     );
   }
 }
@@ -65,9 +73,21 @@ class ProfileScreen extends ConsumerWidget {
         ref.watch(matchProvider.select((s) => s.gemBalance));
     final blockedUsersAsync = ref.watch(blockedUsersProvider);
     final publicSettings = ref.watch(appPublicSettingsProvider).asData?.value;
+    final appContent = ref.watch(appContentProvider).asData?.value;
     final appLanguage =
         ref.watch(appLanguageProvider).asData?.value ??
         AppPreferencesStorage.fallbackLanguage();
+    final displayedLanguage =
+        appContent?.languages
+            .where((language) => language.isActive)
+            .map(AppLanguage.fromContent)
+            .firstWhere(
+              (language) =>
+                  language.code == appContent.selectedLanguageCode ||
+                  language.code == appLanguage.code,
+              orElse: () => appLanguage,
+            ) ??
+        appLanguage;
     final blockedUsersCount = blockedUsersAsync.when(
       data: (users) => '${users.length}',
       loading: () => null,
@@ -147,7 +167,17 @@ class ProfileScreen extends ConsumerWidget {
                       ProfileSettingsTile(
                         icon: CupertinoIcons.chat_bubble_2_fill,
                         label: l10n.profileContactUs,
-                        trailingText: publicSettings?.contactChannelLabel,
+                        trailingText: publicSettings == null
+                            ? null
+                            : (publicSettings.supportEmail != null
+                                  ? AppRuntimeText.instance.t(
+                                      'profileContactChannelEmail',
+                                      'E-posta',
+                                    )
+                                  : AppRuntimeText.instance.t(
+                                      'profileContactChannelSupport',
+                                      'Destek',
+                                    )),
                         onTap: () => openSheet(const HelpSheet()),
                       ),
                     ],
@@ -168,7 +198,7 @@ class ProfileScreen extends ConsumerWidget {
                       ProfileSettingsTile(
                         icon: CupertinoIcons.globe,
                         label: l10n.profileLanguage,
-                        trailingText: appLanguage.label,
+                        trailingText: displayedLanguage.label,
                         showDivider: true,
                         onTap: () => openSheet(const LanguageSheet()),
                       ),
@@ -242,10 +272,17 @@ class ProfileScreen extends ConsumerWidget {
                     ],
                   ),
                   const SizedBox(height: 8),
-                  const Center(
+                  Center(
                     child: Text(
-                      'magmug v1.0.0',
-                      style: TextStyle(
+                      AppRuntimeText.instance.t(
+                        'profileAppVersion',
+                        '{appName} v{version}',
+                        args: {
+                          'appName': publicSettings?.appName ?? 'magmug',
+                          'version': publicSettings?.appVersion ?? '1.0.0',
+                        },
+                      ),
+                      style: const TextStyle(
                         fontFamily: AppFont.family,
                         fontSize: 11,
                         color: Color(0xFFCCCCCC),
@@ -392,8 +429,10 @@ class _ProfilePhotoManagerSheetState
           if (uploadBytes > profileMaxSafeUploadBytes) {
             if (mounted) {
               setState(() {
-                _notice =
-                    'Video boyutu hala yuksek. Daha kisa bir video secip tekrar dene.';
+                _notice = AppRuntimeText.instance.t(
+                  'profile.media.error.video_still_large',
+                  'Video boyutu hala yuksek. Daha kisa bir video secip tekrar dene.',
+                );
               });
             }
             debugPrint(
@@ -624,15 +663,31 @@ class PrivacyPolicyScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
 
-    return ProfilePolicyScaffold(
-      title: l10n.privacyTitle,
-      sections: [
+    return _RemotePolicyScreen(
+      kind: AppLegalTextKind.privacy,
+      fallbackTitle: l10n.privacyTitle,
+      fallbackSections: [
         (heading: l10n.privacyHeading1, body: l10n.privacyBody1),
         (heading: l10n.privacyHeading2, body: l10n.privacyBody2),
         (heading: l10n.privacyHeading3, body: l10n.privacyBody3),
         (heading: l10n.privacyHeading4, body: l10n.privacyBody4),
         (heading: l10n.privacyHeading5, body: l10n.privacyBody5),
       ],
+    );
+  }
+}
+
+class KvkkScreen extends StatelessWidget {
+  const KvkkScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
+
+    return _RemotePolicyScreen(
+      kind: AppLegalTextKind.kvkk,
+      fallbackTitle: l10n.profileKvkk,
+      fallbackSections: const [],
     );
   }
 }
@@ -644,15 +699,55 @@ class TermsOfUseScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
 
-    return ProfilePolicyScaffold(
-      title: l10n.termsTitle,
-      sections: [
+    return _RemotePolicyScreen(
+      kind: AppLegalTextKind.terms,
+      fallbackTitle: l10n.termsTitle,
+      fallbackSections: [
         (heading: l10n.termsHeading1, body: l10n.termsBody1),
         (heading: l10n.termsHeading2, body: l10n.termsBody2),
         (heading: l10n.termsHeading3, body: l10n.termsBody3),
         (heading: l10n.termsHeading4, body: l10n.termsBody4),
         (heading: l10n.termsHeading5, body: l10n.termsBody5),
       ],
+    );
+  }
+}
+
+class _RemotePolicyScreen extends ConsumerWidget {
+  final AppLegalTextKind kind;
+  final String fallbackTitle;
+  final List<({String heading, String body})> fallbackSections;
+
+  const _RemotePolicyScreen({
+    required this.kind,
+    required this.fallbackTitle,
+    required this.fallbackSections,
+  });
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final legalTexts = ref.watch(appLegalTextsProvider).asData?.value;
+    final legalText = legalTexts?.byKind(kind);
+    final content = legalText?.content.trim();
+    final sections = content != null && content.isNotEmpty
+        ? [(heading: '', body: content)]
+        : (fallbackSections.isNotEmpty
+              ? fallbackSections
+              : [
+                  (
+                    heading: '',
+                    body: AppRuntimeText.instance.t(
+                      'legalContentUnavailable',
+                      'Icerik su anda goruntulenemiyor.',
+                    ),
+                  ),
+                ]);
+
+    return ProfilePolicyScaffold(
+      title: legalText?.title.trim().isNotEmpty == true
+          ? legalText!.title
+          : fallbackTitle,
+      sections: sections,
     );
   }
 }
@@ -1145,14 +1240,28 @@ class _LanguageSheetState extends ConsumerState<LanguageSheet> {
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
     final persistedLanguage = ref.watch(appLanguageProvider).asData?.value;
+    final content = ref.watch(appContentProvider).asData?.value;
+    final availableLanguages =
+        content?.languages
+            .where((language) => language.isActive)
+            .map(AppLanguage.fromContent)
+            .toList(growable: false) ??
+        AppLanguage.values;
+    final resolvedPersistedLanguage = availableLanguages.firstWhere(
+      (language) => language.code == persistedLanguage?.code,
+      orElse: () => availableLanguages.firstWhere(
+        (language) => language.code == content?.selectedLanguageCode,
+        orElse: () => availableLanguages.first,
+      ),
+    );
     final selectedLanguage = _hasChanges
         ? _selected
-        : (persistedLanguage ?? _selected);
+        : resolvedPersistedLanguage;
 
     return ProfileAdaptiveBottomSheet(
       child: ProfileLanguageSheetView(
         title: l10n.languageSheetTitle,
-        languages: AppLanguage.values,
+        languages: availableLanguages,
         selectedLanguage: selectedLanguage,
         onSelect: (language) {
           setState(() {
@@ -1247,7 +1356,8 @@ class _NotificationPrefsSheetState
     final serverPrefs = NotificationPrefs.fromUser(user);
     final hasChanges =
         _prefs.notificationsEnabled != serverPrefs.notificationsEnabled ||
-        _prefs.vibrationEnabled != serverPrefs.vibrationEnabled;
+        _prefs.vibrationEnabled != serverPrefs.vibrationEnabled ||
+        _prefs.messageSoundsEnabled != serverPrefs.messageSoundsEnabled;
 
     return ProfileAdaptiveBottomSheet(
       child: ProfileNotificationPrefsSheetView(
@@ -1269,6 +1379,22 @@ class _NotificationPrefsSheetState
           setState(() {
             _prefs = _prefs.copyWith(
               vibrationEnabled: !_prefs.vibrationEnabled,
+            );
+          });
+        },
+        messageSoundsTitle: AppRuntimeText.instance.t(
+          'notificationsMessageSounds',
+          'Mesaj sesleri',
+        ),
+        messageSoundsDescription: AppRuntimeText.instance.t(
+          'notificationsMessageSoundsDescription',
+          'Mesaj gonderme ve alma seslerini oynat.',
+        ),
+        messageSoundsEnabled: _prefs.messageSoundsEnabled,
+        onMessageSoundsChanged: (_) {
+          setState(() {
+            _prefs = _prefs.copyWith(
+              messageSoundsEnabled: !_prefs.messageSoundsEnabled,
             );
           });
         },
@@ -1300,6 +1426,7 @@ class _NotificationPrefsSheetState
           .updateNotificationPreferences(
             notificationsEnabled: _prefs.notificationsEnabled,
             vibrationEnabled: _prefs.vibrationEnabled,
+            messageSoundsEnabled: _prefs.messageSoundsEnabled,
           );
       if (!context.mounted) {
         return;
@@ -1463,8 +1590,14 @@ class _PaywallScreenState extends ConsumerState<PaywallScreen> {
       isLoading: packagesAsync.isLoading && packages.isEmpty,
       hasError: packagesAsync.hasError && packages.isEmpty,
       isEmpty: packages.isEmpty,
-      loadingErrorMessage: 'Premium planlari su anda yuklenemiyor.',
-      emptyMessage: 'Su anda aktif premium plani bulunmuyor.',
+      loadingErrorMessage: AppRuntimeText.instance.t(
+        'premiumPlansLoadFailed',
+        'Premium planlari su anda yuklenemiyor.',
+      ),
+      emptyMessage: AppRuntimeText.instance.t(
+        'premiumPlansEmpty',
+        'Su anda aktif premium plani bulunmuyor.',
+      ),
       packages: packages,
       selectedIndex: selectedIndex,
       onSelectPackage: (index) => setState(() => _selected = index),
@@ -1492,7 +1625,10 @@ class JetonPurchaseSheet extends ConsumerStatefulWidget {
 class _JetonPurchaseSheetState extends ConsumerState<JetonPurchaseSheet> {
   int _selected = 1;
   final StorePurchaseService _purchaseService = StorePurchaseService();
+  final AdMobRewardedAdService _rewardedAdService =
+      const AdMobRewardedAdService();
   bool _isPurchasing = false;
+  bool _isWatchingRewardAd = false;
 
   Future<void> _purchaseCredits(AppCreditPackage selectedPackage) async {
     final authState = ref.read(appAuthProvider).asData?.value;
@@ -1550,10 +1686,248 @@ class _JetonPurchaseSheetState extends ConsumerState<JetonPurchaseSheet> {
     );
   }
 
+  Future<void> _watchRewardedAd(
+    AppAdMobSettings ads,
+    AppRewardAdStatus status,
+  ) async {
+    final authState = ref.read(appAuthProvider).asData?.value;
+    final token = authState?.token;
+    final platform = currentMobileStorePlatform();
+    final adUnitId = ads.rewardedUnitIdFor(platform);
+    final l10n = AppLocalizations.of(context)!;
+
+    if (token == null || token.trim().isEmpty) {
+      await _showRewardResult(
+        tone: PaymentResultTone.failure,
+        badge: AppRuntimeText.instance.t(
+          'rewardAdAuthRequiredBadge',
+          'OTURUM GEREKLI',
+        ),
+        title: AppRuntimeText.instance.t(
+          'rewardAdStartFailedTitle',
+          'Reklam odulu baslatilamadi',
+        ),
+        subtitle: AppRuntimeText.instance.t(
+          'rewardAdAuthRequiredMessage',
+          'Devam etmek icin once oturum acman gerekiyor.',
+        ),
+        amountLabel: AppRuntimeText.instance.t(
+          'rewardAdAmountLabel',
+          '+{points} Kredi',
+          args: {'points': status.rewardPoints},
+        ),
+        l10n: l10n,
+      );
+      return;
+    }
+
+    if (platform == null || adUnitId == null || adUnitId.trim().isEmpty) {
+      await _showRewardResult(
+        tone: PaymentResultTone.failure,
+        badge: AppRuntimeText.instance.t(
+          'rewardAdUnavailableBadge',
+          'REKLAM HAZIR DEGIL',
+        ),
+        title: AppRuntimeText.instance.t(
+          'rewardAdUnavailableTitle',
+          'Reklam su anda kullanilamiyor',
+        ),
+        subtitle: AppRuntimeText.instance.t(
+          'rewardAdUnavailableMessage',
+          'Bu cihaz icin reklam birimi henuz hazir degil.',
+        ),
+        amountLabel: AppRuntimeText.instance.t(
+          'rewardAdAmountLabel',
+          '+{points} Kredi',
+          args: {'points': status.rewardPoints},
+        ),
+        l10n: l10n,
+      );
+      return;
+    }
+
+    setState(() => _isWatchingRewardAd = true);
+
+    try {
+      final adResult = await _rewardedAdService.showRewardedAd(
+        adUnitId: adUnitId,
+      );
+
+      if (!mounted) {
+        return;
+      }
+
+      if (!adResult.earnedReward) {
+        setState(() => _isWatchingRewardAd = false);
+        await _showRewardResult(
+          tone: PaymentResultTone.pending,
+          badge: AppRuntimeText.instance.t(
+            'rewardAdIncompleteBadge',
+            'TAMAMLANMADI',
+          ),
+          title: AppRuntimeText.instance.t(
+            'rewardAdIncompleteTitle',
+            'Reklam tamamlanmadi',
+          ),
+          subtitle:
+              adResult.errorMessage ??
+              AppRuntimeText.instance.t(
+                'rewardAdIncompleteMessage',
+                'Odul kazanmak icin reklami tamamlaman gerekiyor.',
+              ),
+          amountLabel: AppRuntimeText.instance.t(
+            'rewardAdAmountLabel',
+            '+{points} Kredi',
+            args: {'points': status.rewardPoints},
+          ),
+          l10n: l10n,
+        );
+        return;
+      }
+
+      final api = AppAuthApi();
+      late final AppRewardAdClaimResult claim;
+      try {
+        claim = await api.claimRewardedAd(
+          token,
+          platform: platform,
+          adUnitId: adUnitId,
+          eventCode: _rewardEventCode(),
+        );
+      } finally {
+        api.close();
+      }
+
+      await ref.read(appAuthProvider.notifier).refreshCurrentUser();
+      final ownerUserId = ref.read(appAuthProvider).asData?.value?.user?.id;
+      if (ownerUserId != null) {
+        AppRepository.instance.invalidateRewardAdStatus(ownerUserId);
+      }
+      ref.invalidate(appRewardAdStatusProvider);
+
+      if (!mounted) {
+        return;
+      }
+
+      setState(() => _isWatchingRewardAd = false);
+      await _showRewardResult(
+        tone: PaymentResultTone.success,
+        badge: AppRuntimeText.instance.t(
+          'rewardAdSuccessBadge',
+          'REKLAM ODULU',
+        ),
+        title: AppRuntimeText.instance.t(
+          'rewardAdSuccessTitle',
+          'Kredi odulun hazir',
+        ),
+        subtitle: claim.message,
+        amountLabel: AppRuntimeText.instance.t(
+          'rewardAdAmountLabel',
+          '+{points} Kredi',
+          args: {'points': claim.rewardPoints},
+        ),
+        l10n: l10n,
+      );
+    } on ApiException catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() => _isWatchingRewardAd = false);
+      await _showRewardResult(
+        tone: PaymentResultTone.failure,
+        badge: AppRuntimeText.instance.t(
+          'rewardAdClaimFailedBadge',
+          'ODUL VERILEMEDI',
+        ),
+        title: AppRuntimeText.instance.t(
+          'rewardAdClaimFailedTitle',
+          'Reklam odulu tamamlanamadi',
+        ),
+        subtitle: error.message,
+        amountLabel: AppRuntimeText.instance.t(
+          'rewardAdAmountLabel',
+          '+{points} Kredi',
+          args: {'points': status.rewardPoints},
+        ),
+        l10n: l10n,
+      );
+    } catch (_) {
+      if (!mounted) {
+        return;
+      }
+      setState(() => _isWatchingRewardAd = false);
+      await _showRewardResult(
+        tone: PaymentResultTone.failure,
+        badge: AppRuntimeText.instance.t(
+          'rewardAdClaimFailedBadge',
+          'ODUL VERILEMEDI',
+        ),
+        title: AppRuntimeText.instance.t(
+          'rewardAdClaimFailedTitle',
+          'Reklam odulu tamamlanamadi',
+        ),
+        subtitle: AppRuntimeText.instance.t(
+          'commonUnexpectedErrorRetry',
+          'Beklenmeyen bir hata olustu. Biraz sonra tekrar dene.',
+        ),
+        amountLabel: AppRuntimeText.instance.t(
+          'rewardAdAmountLabel',
+          '+{points} Kredi',
+          args: {'points': status.rewardPoints},
+        ),
+        l10n: l10n,
+      );
+    }
+  }
+
+  Future<void> _showRewardResult({
+    required PaymentResultTone tone,
+    required String badge,
+    required String title,
+    required String subtitle,
+    required String amountLabel,
+    required AppLocalizations l10n,
+  }) async {
+    await showCupertinoModalPopup<void>(
+      context: context,
+      builder: (_) => PaymentResultSheet(
+        tone: tone,
+        badge: badge,
+        title: title,
+        subtitle: subtitle,
+        productLabel: AppRuntimeText.instance.t(
+          'rewardAdProductLabel',
+          'Reklam izleme',
+        ),
+        amountLabel: amountLabel,
+        statusLabel: AppRuntimeText.instance.t(
+          'rewardAdStatusLabel',
+          'Kredi odulu',
+        ),
+        primaryLabel: l10n.commonDone,
+      ),
+    );
+  }
+
+  String _rewardEventCode() {
+    final random = math.Random.secure().nextInt(1 << 32);
+    return 'reward-${DateTime.now().microsecondsSinceEpoch}-$random';
+  }
+
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
     final packagesAsync = ref.watch(appCreditPackagesProvider);
+    final publicSettings = ref.watch(appPublicSettingsProvider).asData?.value;
+    final rewardStatusAsync = ref.watch(appRewardAdStatusProvider);
+    final rewardStatus = rewardStatusAsync.asData?.value;
+    final ads = publicSettings?.ads ?? const AppAdMobSettings();
+    final rewardAdUnitId = ads.rewardedUnitIdFor(currentMobileStorePlatform());
+    final rewardButtonEnabled =
+        !_isPurchasing &&
+        !_isWatchingRewardAd &&
+        rewardStatus?.canWatch == true &&
+        rewardAdUnitId != null;
     final packages = packagesAsync.asData?.value ?? const <AppCreditPackage>[];
     final selectedIndex = resolveRecommendedSelectionIndex(
       packages,
@@ -1569,16 +1943,61 @@ class _JetonPurchaseSheetState extends ConsumerState<JetonPurchaseSheet> {
       packages: packages,
       selectedIndex: selectedIndex,
       onSelectPackage: (index) => setState(() => _selected = index),
-      loadingErrorMessage: 'Kredi paketleri su anda yuklenemiyor.',
-      emptyMessage: 'Su anda satin alinabilir kredi paketi bulunmuyor.',
+      loadingErrorMessage: AppRuntimeText.instance.t(
+        'creditPackagesLoadFailed',
+        'Kredi paketleri su anda yuklenemiyor.',
+      ),
+      emptyMessage: AppRuntimeText.instance.t(
+        'creditPackagesEmpty',
+        'Su anda satin alinabilir kredi paketi bulunmuyor.',
+      ),
       primaryActionLabel: _isPurchasing
-          ? 'Satin alma isleniyor...'
+          ? AppRuntimeText.instance.t(
+              'purchaseProcessing',
+              'Satin alma isleniyor...',
+            )
           : selectedPackage == null
-          ? 'Paket bulunamadi'
+          ? AppRuntimeText.instance.t('packageNotFound', 'Paket bulunamadi')
           : l10n.jetonBuyWith(selectedPackage.displayPrice),
       onPrimaryAction: _isPurchasing || selectedPackage == null
           ? null
           : () => _purchaseCredits(selectedPackage),
+      rewardActionLabel: _isWatchingRewardAd
+          ? AppRuntimeText.instance.t(
+              'rewardAdPreparing',
+              'Reklam hazirlaniyor...',
+            )
+          : rewardStatusAsync.isLoading
+          ? AppRuntimeText.instance.t(
+              'rewardAdLoading',
+              'Reklam odulu yukleniyor...',
+            )
+          : rewardStatus?.canWatch == true
+          ? AppRuntimeText.instance.t(
+              'rewardAdWatchAction',
+              'Reklam izle +{points} Kredi',
+              args: {'points': rewardStatus!.rewardPoints},
+            )
+          : AppRuntimeText.instance.t(
+              'rewardAdDailyLimitReached',
+              'Bugunku reklam hakki doldu',
+            ),
+      rewardActionSubtitle: rewardStatus == null
+          ? AppRuntimeText.instance.t(
+              'rewardAdSubtitle',
+              'Kredi kazanmak icin kisa bir reklam izleyebilirsin.',
+            )
+          : AppRuntimeText.instance.t(
+              'rewardAdRemainingRights',
+              'Kalan hak: {remaining}/{limit}',
+              args: {
+                'remaining': rewardStatus.remainingRights,
+                'limit': rewardStatus.dailyLimit,
+              },
+            ),
+      onRewardAction: rewardButtonEnabled && rewardStatus != null
+          ? () => _watchRewardedAd(ads, rewardStatus)
+          : null,
       infoText: l10n.jetonInstantCreditInfo,
     );
   }

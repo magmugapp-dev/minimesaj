@@ -1,11 +1,8 @@
 import 'dart:async';
 
-import 'package:flutter/foundation.dart';
 import 'package:magmug/app_core.dart';
 import 'package:magmug/features/chat/chat_local_store.dart';
 import 'package:magmug/features/chat/chat_realtime.dart';
-import 'package:magmug/features/home/models/chat_preview.dart';
-import 'package:magmug/features/home/providers/home_chats_provider.dart';
 
 class ConversationRealtimeBootstrap extends ConsumerStatefulWidget {
   final Widget child;
@@ -19,96 +16,195 @@ class ConversationRealtimeBootstrap extends ConsumerStatefulWidget {
 
 class _ConversationRealtimeBootstrapState
     extends ConsumerState<ConversationRealtimeBootstrap> {
-  final Map<int, ChatRealtimeSubscription> _subscriptions =
-      <int, ChatRealtimeSubscription>{};
-  Set<int> _subscribedConversationIds = <int>{};
+  ChatRealtimeSubscription? _subscription;
+  Future<void>? _subscriptionSyncInFlight;
+  String? _desiredToken;
+  int? _desiredUserId;
   String? _subscribedToken;
   int? _currentUserId;
+  DateTime? _subscriptionRetryAfter;
+  Timer? _subscriptionRetryTimer;
+  int _eventSequence = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) {
+        return;
+      }
+      unawaited(
+        _syncSubscription(session: ref.read(appAuthProvider).asData?.value),
+      );
+    });
+  }
 
   @override
   void dispose() {
-    for (final subscription in _subscriptions.values) {
+    final subscription = _subscription;
+    if (subscription != null) {
       unawaited(subscription.dispose());
     }
-    _subscriptions.clear();
+    _subscription = null;
+    _subscriptionSyncInFlight = null;
+    _desiredToken = null;
+    _desiredUserId = null;
+    _subscriptionRetryAfter = null;
+    _subscriptionRetryTimer?.cancel();
+    _subscriptionRetryTimer = null;
     super.dispose();
   }
 
-  Future<void> _syncSubscriptions({
-    required AppAuthState? session,
-    required List<ChatPreview> chats,
-  }) async {
-    final token = session?.token;
-    final currentUserId = session?.user?.id;
+  Future<void> _syncSubscription({required AppAuthState? session}) async {
+    final sessionToken = session?.token.trim();
+    final token = sessionToken == null || sessionToken.isEmpty
+        ? null
+        : sessionToken;
+    final userId = session?.user?.id;
 
-    if (token == null || token.trim().isEmpty || currentUserId == null) {
-      if (_subscriptions.isEmpty) {
+    if (_desiredToken != token || _desiredUserId != userId) {
+      _subscriptionRetryAfter = null;
+      _subscriptionRetryTimer?.cancel();
+      _subscriptionRetryTimer = null;
+    }
+
+    _desiredToken = token;
+    _desiredUserId = userId;
+
+    final existing = _subscriptionSyncInFlight;
+    if (existing != null) {
+      return existing;
+    }
+
+    final future = _drainSubscriptionSync();
+    _subscriptionSyncInFlight = future;
+    try {
+      await future;
+    } finally {
+      if (identical(_subscriptionSyncInFlight, future)) {
+        _subscriptionSyncInFlight = null;
+      }
+    }
+  }
+
+  Future<void> _drainSubscriptionSync() async {
+    while (mounted) {
+      final token = _desiredToken;
+      final currentUserId = _desiredUserId;
+      final hasValidTarget =
+          token != null && token.trim().isNotEmpty && currentUserId != null;
+
+      if (!hasValidTarget) {
+        if (_subscription == null &&
+            _subscribedToken == null &&
+            _currentUserId == null) {
+          return;
+        }
+        await _disposeCurrentSubscription();
+        if (_desiredToken == token && _desiredUserId == currentUserId) {
+          return;
+        }
+        continue;
+      }
+
+      if (_subscribedToken == token && _currentUserId == currentUserId) {
         return;
       }
 
-      for (final subscription in _subscriptions.values) {
-        await subscription.dispose();
-      }
-      _subscriptions.clear();
-      _subscribedConversationIds = <int>{};
-      _subscribedToken = null;
-      _currentUserId = null;
-      return;
-    }
-
-    final nextConversationIds = chats
-        .map((chat) => chat.conversation?.id)
-        .whereType<int>()
-        .toSet();
-
-    final authContextChanged =
-        _subscribedToken != token || _currentUserId != currentUserId;
-    if (authContextChanged && _subscriptions.isNotEmpty) {
-      for (final subscription in _subscriptions.values) {
-        await subscription.dispose();
-      }
-      _subscriptions.clear();
-      _subscribedConversationIds = <int>{};
-    }
-
-    if (_subscribedToken == token &&
-        _currentUserId == currentUserId &&
-        setEquals(_subscribedConversationIds, nextConversationIds)) {
-      return;
-    }
-
-    final removedConversationIds = _subscribedConversationIds.difference(
-      nextConversationIds,
-    );
-    for (final conversationId in removedConversationIds) {
-      final subscription = _subscriptions.remove(conversationId);
-      await subscription?.dispose();
-    }
-
-    _subscribedToken = token;
-    _currentUserId = currentUserId;
-    _subscribedConversationIds = nextConversationIds;
-
-    final newConversationIds = nextConversationIds.difference(
-      _subscriptions.keys.toSet(),
-    );
-    for (final conversationId in newConversationIds) {
-      try {
-        final subscription = await ChatRealtimeService.instance
-            .subscribeToConversation(
-              token: token,
-              conversationId: conversationId,
-              onEvent: _handleRealtimeEvent,
-            );
-        if (subscription != null) {
-          _subscriptions[conversationId] = subscription;
+      final retryAfter = _subscriptionRetryAfter;
+      if (retryAfter != null) {
+        if (DateTime.now().isBefore(retryAfter)) {
+          return;
         }
-      } catch (error) {
-        debugPrint(
-          'Conversation realtime subscribe error for $conversationId: $error',
-        );
+        _subscriptionRetryAfter = null;
+      }
+
+      await _replaceSubscription(token: token, userId: currentUserId);
+      if (_desiredToken == token && _desiredUserId == currentUserId) {
+        return;
       }
     }
+  }
+
+  Future<void> _replaceSubscription({
+    required String token,
+    required int userId,
+  }) async {
+    await _disposeCurrentSubscription();
+
+    try {
+      final subscription = await ChatRealtimeService.instance.subscribeToUser(
+        token: token,
+        userId: userId,
+        onEvent: _handleRealtimeEvent,
+      );
+      if (subscription == null &&
+          mounted &&
+          _desiredToken == token &&
+          _desiredUserId == userId) {
+        _subscribedToken = token;
+        _currentUserId = userId;
+        _subscriptionRetryAfter = null;
+        _subscriptionRetryTimer?.cancel();
+        _subscriptionRetryTimer = null;
+        return;
+      }
+      if (!mounted ||
+          _desiredToken != token ||
+          _desiredUserId != userId ||
+          subscription == null) {
+        await subscription?.dispose();
+        return;
+      }
+
+      _subscription = subscription;
+      _subscribedToken = token;
+      _currentUserId = userId;
+      _subscriptionRetryAfter = null;
+      _subscriptionRetryTimer?.cancel();
+      _subscriptionRetryTimer = null;
+    } catch (error) {
+      if (_desiredToken == token && _desiredUserId == userId) {
+        _subscription = null;
+        _subscribedToken = null;
+        _currentUserId = null;
+        if (_looksLikeAuthRateLimit(error)) {
+          final retryAfter = DateTime.now().add(const Duration(seconds: 30));
+          _subscriptionRetryAfter = retryAfter;
+          _scheduleSubscriptionRetry(retryAfter, token: token, userId: userId);
+        }
+      }
+      debugPrint('User realtime subscribe error: $error');
+    }
+  }
+
+  void _scheduleSubscriptionRetry(
+    DateTime retryAfter, {
+    required String token,
+    required int userId,
+  }) {
+    _subscriptionRetryTimer?.cancel();
+    final delay = retryAfter.difference(DateTime.now());
+    _subscriptionRetryTimer = Timer(
+      delay.isNegative ? Duration.zero : delay,
+      () {
+        if (!mounted || _desiredToken != token || _desiredUserId != userId) {
+          return;
+        }
+        _subscriptionRetryAfter = null;
+        unawaited(
+          _syncSubscription(session: ref.read(appAuthProvider).asData?.value),
+        );
+      },
+    );
+  }
+
+  Future<void> _disposeCurrentSubscription() async {
+    final subscription = _subscription;
+    _subscription = null;
+    _subscribedToken = null;
+    _currentUserId = null;
+    await subscription?.dispose();
   }
 
   void _handleRealtimeEvent(ChatRealtimeEvent event) {
@@ -136,6 +232,7 @@ class _ConversationRealtimeBootstrapState
         );
         await store.updateConversationPreviewRuntimeStatus(
           event.conversationId,
+          ownerUserId: currentUserId,
           aiStatus: typing ? 'typing' : null,
           aiStatusText: typing ? (statusText ?? 'Yaziyor...') : null,
           aiPlannedAt: null,
@@ -144,6 +241,7 @@ class _ConversationRealtimeBootstrapState
       case ChatRealtimeEventType.aiStatus:
         await store.updateConversationPreviewRuntimeStatus(
           event.conversationId,
+          ownerUserId: currentUserId,
           aiStatus: _nullableString(event.payload['status']?.toString()),
           aiStatusText: _nullableString(
             event.payload['status_text']?.toString(),
@@ -154,21 +252,62 @@ class _ConversationRealtimeBootstrapState
         );
         break;
       case ChatRealtimeEventType.messageSent:
-        final senderId = _payloadInt(event.payload['gonderen_user_id']);
+        var localPatchApplied = false;
+        final message = AppAuthApi.conversationMessageFromJson(event.payload);
+        if (message != null && message.conversationId == event.conversationId) {
+          localPatchApplied = await store.applyRealtimeMessageEvent(
+            ownerUserId: currentUserId,
+            currentUserId: currentUserId,
+            message: message,
+          );
+        }
+
+        final senderId =
+            message?.senderId ?? _payloadInt(event.payload['gonderen_user_id']);
         if (senderId == null) {
           return;
         }
+        if (senderId != currentUserId) {
+          final messageSoundsEnabled =
+              ref.read(appAuthProvider).asData?.value?.user
+                  ?.messageSoundsEnabled ??
+              true;
+          unawaited(
+            AppMessageSoundService.instance.playReceive(
+              enabled: messageSoundsEnabled,
+            ),
+          );
+        }
 
-        await store.applyConversationMessageEvent(
-          conversationId: event.conversationId,
-          senderId: senderId,
-          currentUserId: currentUserId,
-          messageType: event.payload['mesaj_tipi']?.toString(),
-          messageText: event.payload['mesaj_metni']?.toString(),
-          createdAt: DateTime.tryParse(
-            event.payload['created_at']?.toString() ?? '',
-          ),
-        );
+        if (!localPatchApplied) {
+          localPatchApplied = await store.applyConversationMessageEvent(
+            ownerUserId: currentUserId,
+            conversationId: event.conversationId,
+            senderId: senderId,
+            currentUserId: currentUserId,
+            messageType: event.payload['mesaj_tipi']?.toString(),
+            messageText: event.payload['mesaj_metni']?.toString(),
+            createdAt: DateTime.tryParse(
+              event.payload['created_at']?.toString() ?? '',
+            ),
+          );
+        }
+        if (!localPatchApplied) {
+          final token = _desiredToken;
+          if (token != null) {
+            AppCacheSyncCoordinator.instance.scheduleDebounced(
+              token: token,
+              ownerUserId: currentUserId,
+              force: true,
+              onComplete: (didSync) {
+                if (!mounted || !didSync) {
+                  return;
+                }
+                ref.read(conversationFeedRefreshProvider.notifier).state++;
+              },
+            );
+          }
+        }
         break;
       case ChatRealtimeEventType.messagesRead:
         final readerUserId = _payloadInt(event.payload['okuyan_user_id']);
@@ -178,6 +317,7 @@ class _ConversationRealtimeBootstrapState
 
         await store.applyConversationReadEvent(
           event.conversationId,
+          ownerUserId: currentUserId,
           readerUserId: readerUserId,
           currentUserId: currentUserId,
         );
@@ -188,19 +328,21 @@ class _ConversationRealtimeBootstrapState
       return;
     }
 
-    ref.read(conversationFeedRefreshProvider.notifier).state++;
+    ref.read(chatRealtimeEventBusProvider.notifier).state =
+        ChatRealtimeEventSignal(sequence: ++_eventSequence, event: event);
+
+    if (ChatRealtimeEventRefreshDeduper.instance.shouldRefresh(event)) {
+      ref.read(conversationFeedRefreshProvider.notifier).state++;
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    final session = ref.watch(appAuthProvider).asData?.value;
-    final chats = ref.watch(homeChatsProvider).asData?.value ?? const [];
-
-    WidgetsBinding.instance.addPostFrameCallback((_) {
+    ref.listen<AsyncValue<AppAuthState?>>(appAuthProvider, (previous, next) {
       if (!mounted) {
         return;
       }
-      unawaited(_syncSubscriptions(session: session, chats: chats));
+      unawaited(_syncSubscription(session: next.asData?.value));
     });
 
     return widget.child;
@@ -232,4 +374,12 @@ String? _nullableString(String? value) {
     return null;
   }
   return normalized;
+}
+
+bool _looksLikeAuthRateLimit(Object error) {
+  final text = error.toString().toLowerCase();
+  return text.contains('429') ||
+      text.contains('too many requests') ||
+      text.contains('authenticationexception') ||
+      text.contains('authentication failed');
 }

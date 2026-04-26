@@ -3,7 +3,6 @@
 namespace App\Events;
 
 use App\Models\Sohbet;
-use App\Models\User;
 use Illuminate\Broadcasting\InteractsWithSockets;
 use Illuminate\Broadcasting\PrivateChannel;
 use Illuminate\Contracts\Broadcasting\ShouldBroadcastNow;
@@ -22,8 +21,11 @@ class MesajlarOkundu implements ShouldBroadcastNow
 
     public function broadcastOn(): array
     {
+        $eslesme = $this->sohbet->eslesme ?? $this->sohbet->loadMissing('eslesme')->eslesme;
+
         return [
             new PrivateChannel("sohbet.{$this->sohbet->id}"),
+            ...$this->userChannels($eslesme?->user_id, $eslesme?->eslesen_user_id),
         ];
     }
 
@@ -39,5 +41,15 @@ class MesajlarOkundu implements ShouldBroadcastNow
     public function broadcastAs(): string
     {
         return 'mesajlar.okundu';
+    }
+
+    private function userChannels(mixed ...$userIds): array
+    {
+        return collect($userIds)
+            ->filter()
+            ->unique()
+            ->map(fn ($userId) => new PrivateChannel("kullanici.{$userId}"))
+            ->values()
+            ->all();
     }
 }

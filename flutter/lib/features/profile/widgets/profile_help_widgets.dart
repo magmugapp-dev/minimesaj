@@ -2,7 +2,6 @@ import 'package:magmug/app_core.dart';
 import 'package:magmug/l10n/app_localizations.dart';
 import 'package:magmug/features/profile/widgets/profile_settings_widgets.dart';
 import 'package:magmug/features/profile/widgets/profile_support_widgets.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 class HelpSheet extends ConsumerStatefulWidget {
   const HelpSheet({super.key});
@@ -12,7 +11,7 @@ class HelpSheet extends ConsumerStatefulWidget {
 }
 
 class _HelpSheetState extends ConsumerState<HelpSheet> {
-  bool _expanded = true;
+  bool _expanded = false;
   bool _isLaunching = false;
   String? _notice;
   late final TextEditingController _messageController;
@@ -94,66 +93,30 @@ class _HelpSheetState extends ConsumerState<HelpSheet> {
     }
   }
 
-  Future<void> _launchWhatsApp(AppPublicSettings? settings) async {
-    final l10n = AppLocalizations.of(context)!;
-    if (_isLaunching) {
-      return;
-    }
-
-    final link = settings?.supportWhatsAppUrl;
-    if (link == null || link.isEmpty) {
-      setState(() {
-        _notice = l10n.helpWhatsAppUnavailable;
-      });
-      return;
-    }
-
-    await _launchExternal(
-      Uri.parse(link),
-      failureMessage: l10n.helpWhatsAppLaunchFailed,
-    );
-  }
-
-  Future<void> _launchExternal(
-    Uri uri, {
-    required String failureMessage,
-  }) async {
-    final l10n = AppLocalizations.of(context)!;
-    setState(() {
-      _isLaunching = true;
-      _notice = null;
-    });
-
-    try {
-      final launched = await launchUrl(
-        uri,
-        mode: LaunchMode.externalApplication,
-      );
-      if (!launched) {
-        throw ApiException(l10n.helpExternalLaunchFailed);
-      }
-      if (!mounted) {
-        return;
-      }
-      Navigator.of(context).maybePop();
-    } catch (_) {
-      if (!mounted) {
-        return;
-      }
-      setState(() {
-        _notice = failureMessage;
-      });
-    } finally {
-      if (mounted) {
-        setState(() => _isLaunching = false);
-      }
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
-    final supportSettings = ref.watch(appPublicSettingsProvider).asData?.value;
+    final appContent = ref.watch(appContentProvider).asData?.value;
+    final faqItems = appContent?.faqs ?? const <AppContentFaqItem>[];
+    final fallbackFaqItems = <AppContentFaqItem>[
+      AppContentFaqItem(
+        id: 1,
+        question: l10n.helpFaqQuestion1,
+        answer: l10n.helpFaqAnswer1,
+      ),
+      AppContentFaqItem(
+        id: 2,
+        question: l10n.helpFaqQuestion2,
+        answer: l10n.helpFaqAnswer2,
+      ),
+      AppContentFaqItem(
+        id: 3,
+        question: l10n.helpFaqQuestion3,
+        answer: l10n.helpFaqAnswer3,
+      ),
+    ];
+    final visibleFaqItems = faqItems.isEmpty ? fallbackFaqItems : faqItems;
+    final bottomInset = MediaQuery.viewInsetsOf(context).bottom;
 
     return Align(
       alignment: Alignment.bottomCenter,
@@ -167,11 +130,12 @@ class _HelpSheetState extends ConsumerState<HelpSheet> {
           top: false,
           child: SingleChildScrollView(
             physics: const BouncingScrollPhysics(),
+            reverse: true,
             padding: EdgeInsets.fromLTRB(
               20,
               12,
               20,
-              20 + MediaQuery.paddingOf(context).bottom,
+              20 + MediaQuery.paddingOf(context).bottom + bottomInset,
             ),
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -225,20 +189,14 @@ class _HelpSheetState extends ConsumerState<HelpSheet> {
                   firstChild: const SizedBox.shrink(),
                   secondChild: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      ProfileFaqItem(
-                        question: l10n.helpFaqQuestion1,
-                        answer: l10n.helpFaqAnswer1,
-                      ),
-                      ProfileFaqItem(
-                        question: l10n.helpFaqQuestion2,
-                        answer: l10n.helpFaqAnswer2,
-                      ),
-                      ProfileFaqItem(
-                        question: l10n.helpFaqQuestion3,
-                        answer: l10n.helpFaqAnswer3,
-                      ),
-                    ],
+                    children: visibleFaqItems
+                        .map(
+                          (item) => ProfileFaqItem(
+                            question: item.question,
+                            answer: item.answer,
+                          ),
+                        )
+                        .toList(growable: false),
                   ),
                   crossFadeState: _expanded
                       ? CrossFadeState.showSecond
@@ -300,51 +258,6 @@ class _HelpSheetState extends ConsumerState<HelpSheet> {
                 GradientButton(
                   label: _isLaunching ? l10n.helpSending : l10n.helpSend,
                   onTap: _isLaunching ? null : _sendSupportRequest,
-                ),
-                const SizedBox(height: 12),
-                Container(
-                  height: 1,
-                  color: const Color(0xFFF0F0F0),
-                  margin: const EdgeInsets.only(bottom: 12),
-                ),
-                PressableScale(
-                  onTap: _isLaunching
-                      ? null
-                      : () => _launchWhatsApp(supportSettings),
-                  scale: 0.99,
-                  child: Row(
-                    children: [
-                      Container(
-                        width: 24,
-                        height: 24,
-                        decoration: const BoxDecoration(
-                          color: Color(0xFF25D366),
-                          shape: BoxShape.circle,
-                        ),
-                        alignment: Alignment.center,
-                        child: const Icon(
-                          CupertinoIcons.chat_bubble_fill,
-                          size: 13,
-                          color: AppColors.white,
-                        ),
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Text(
-                          supportSettings?.supportWhatsApp?.trim().isNotEmpty ==
-                                  true
-                              ? l10n.helpWhatsAppContact
-                              : l10n.helpWhatsAppComingSoon,
-                          style: const TextStyle(
-                            fontFamily: AppFont.family,
-                            fontWeight: FontWeight.w600,
-                            fontSize: 14,
-                            color: AppColors.black,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
                 ),
               ],
             ),

@@ -1,4 +1,5 @@
 import 'package:magmug/app_core.dart';
+import 'package:magmug/features/home/models/chat_preview.dart';
 import 'package:magmug/features/home/providers/home_chats_provider.dart';
 import 'package:magmug/features/home/providers/home_discover_profiles_provider.dart';
 import 'package:magmug/features/home/widgets/home_chat_list.dart';
@@ -32,8 +33,7 @@ class HomeScreen extends ConsumerWidget {
         bottom: false,
         child: LayoutBuilder(
           builder: (context, constraints) {
-            final bannerInset =
-                MediaQuery.paddingOf(context).bottom + 8;
+            final bannerInset = MediaQuery.paddingOf(context).bottom + 8;
 
             return Stack(
               children: [
@@ -74,20 +74,29 @@ class HomeScreen extends ConsumerWidget {
   }
 }
 
-class _HomeContent extends ConsumerWidget {
+class _HomeContent extends ConsumerStatefulWidget {
   final HomeMode mode;
   final double bottomInset;
 
-  const _HomeContent({
-    required this.mode,
-    this.bottomInset = 0,
-  });
+  const _HomeContent({required this.mode, this.bottomInset = 0});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final showBanner = mode == HomeMode.listWithBanner;
-    final showList = mode != HomeMode.empty;
+  ConsumerState<_HomeContent> createState() => _HomeContentState();
+}
+
+class _HomeContentState extends ConsumerState<_HomeContent> {
+  List<ChatPreview>? _lastChats;
+
+  @override
+  Widget build(BuildContext context) {
+    final showBanner = widget.mode == HomeMode.listWithBanner;
+    final showList = widget.mode != HomeMode.empty;
     final chatsAsync = ref.watch(homeChatsProvider);
+    final loadedChats = chatsAsync.asData?.value;
+    if (loadedChats != null) {
+      _lastChats = loadedChats;
+    }
+    final visibleChats = loadedChats ?? _lastChats;
 
     void openSearch() {
       Navigator.of(context).push(cupertinoRoute(const HomeSearchScreen()));
@@ -97,7 +106,7 @@ class _HomeContent extends ConsumerWidget {
       duration: const Duration(milliseconds: 280),
       switchInCurve: Curves.easeOutCubic,
       child: Column(
-        key: ValueKey(mode),
+        key: ValueKey(widget.mode),
         children: [
           if (showBanner) ...[
             const SizedBox(height: 8),
@@ -109,18 +118,26 @@ class _HomeContent extends ConsumerWidget {
           const SizedBox(height: 12),
           Expanded(
             child: !showList
-                ? HomeEmptyChatState(bottomInset: bottomInset)
+                ? HomeEmptyChatState(bottomInset: widget.bottomInset)
+                : visibleChats != null
+                ? (visibleChats.isEmpty
+                      ? HomeEmptyChatState(bottomInset: widget.bottomInset)
+                      : HomeChatList(
+                          chats: visibleChats,
+                          bottomInset: widget.bottomInset,
+                        ))
                 : chatsAsync.when(
                     data: (chats) => chats.isEmpty
-                        ? HomeEmptyChatState(bottomInset: bottomInset)
+                        ? HomeEmptyChatState(bottomInset: widget.bottomInset)
                         : HomeChatList(
                             chats: chats,
-                            bottomInset: bottomInset,
+                            bottomInset: widget.bottomInset,
                           ),
                     loading: () => const Center(
                       child: CupertinoActivityIndicator(radius: 14),
                     ),
-                    error: (_, _) => HomeEmptyChatState(bottomInset: bottomInset),
+                    error: (_, _) =>
+                        HomeEmptyChatState(bottomInset: widget.bottomInset),
                   ),
           ),
         ],

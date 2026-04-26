@@ -3,7 +3,7 @@ import 'package:magmug/features/blocked_users/domain/entities/blocked_user.dart'
 import 'package:magmug/features/profile/widgets/profile_settings_widgets.dart';
 import 'package:magmug/l10n/app_localizations.dart';
 
-class ProfileFaqItem extends StatelessWidget {
+class ProfileFaqItem extends StatefulWidget {
   final String question;
   final String answer;
 
@@ -14,30 +14,68 @@ class ProfileFaqItem extends StatelessWidget {
   });
 
   @override
+  State<ProfileFaqItem> createState() => _ProfileFaqItemState();
+}
+
+class _ProfileFaqItemState extends State<ProfileFaqItem> {
+  bool _expanded = false;
+
+  @override
   Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 14),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            question,
-            style: const TextStyle(
-              fontFamily: AppFont.family,
-              fontWeight: FontWeight.w700,
-              fontSize: 13.5,
-              color: AppColors.black,
+          PressableScale(
+            onTap: () => setState(() => _expanded = !_expanded),
+            scale: 0.99,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 4),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      widget.question,
+                      style: const TextStyle(
+                        fontFamily: AppFont.family,
+                        fontWeight: FontWeight.w700,
+                        fontSize: 13.5,
+                        color: AppColors.black,
+                      ),
+                    ),
+                  ),
+                  AnimatedRotation(
+                    turns: _expanded ? 0.5 : 0,
+                    duration: const Duration(milliseconds: 180),
+                    child: const Icon(
+                      CupertinoIcons.chevron_down,
+                      size: 14,
+                      color: Color(0xFF666666),
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
-          const SizedBox(height: 4),
-          Text(
-            answer,
-            style: const TextStyle(
-              fontFamily: AppFont.family,
-              fontSize: 13,
-              height: 1.4,
-              color: Color(0xFF555555),
+          AnimatedCrossFade(
+            duration: const Duration(milliseconds: 180),
+            firstChild: const SizedBox.shrink(),
+            secondChild: Padding(
+              padding: const EdgeInsets.only(top: 4, right: 22),
+              child: Text(
+                widget.answer,
+                style: const TextStyle(
+                  fontFamily: AppFont.family,
+                  fontSize: 13,
+                  height: 1.4,
+                  color: Color(0xFF555555),
+                ),
+              ),
             ),
+            crossFadeState: _expanded
+                ? CrossFadeState.showSecond
+                : CrossFadeState.showFirst,
           ),
         ],
       ),
@@ -61,14 +99,13 @@ class ProfileBlockedUserRow extends StatelessWidget {
 
     Widget avatar = AvatarCircle(name: user.displayName, size: 44);
     if (user.profileImageUrl != null && user.profileImageUrl!.isNotEmpty) {
-      avatar = Image.network(
-        user.profileImageUrl!,
+      avatar = CachedAppImage(
+        imageUrl: user.profileImageUrl,
         width: 44,
         height: 44,
-        fit: BoxFit.cover,
-        gaplessPlayback: true,
-        errorBuilder: (_, _, _) =>
-            AvatarCircle(name: user.displayName, size: 44),
+        cacheWidth: 88,
+        cacheHeight: 88,
+        errorBuilder: (_) => AvatarCircle(name: user.displayName, size: 44),
       );
     }
 

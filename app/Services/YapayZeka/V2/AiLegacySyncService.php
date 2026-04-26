@@ -8,6 +8,7 @@ use App\Services\YapayZeka\GeminiSaglayici;
 use App\Services\YapayZeka\V2\Data\AiGenerationResult;
 use App\Services\YapayZeka\V2\Data\AiTurnContext;
 use Carbon\CarbonInterface;
+use Illuminate\Support\Facades\DB;
 use Throwable;
 
 class AiLegacySyncService
@@ -56,6 +57,7 @@ class AiLegacySyncService
     {
         $values = [
             'durum' => 'istek_gonderildi',
+            'deneme_sayisi' => DB::raw('COALESCE(deneme_sayisi, 0) + 1'),
             'istek_baslatildi_at' => now(),
             'tamamlandi_at' => null,
             'hata_mesaji' => null,

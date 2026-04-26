@@ -1,6 +1,7 @@
 import 'dart:ui' show ImageFilter;
 
 import 'package:magmug/app_core.dart';
+import 'package:magmug/features/chat/chat_local_store.dart';
 import 'package:magmug/features/chat/chat_flow.dart';
 import 'package:magmug/features/match/match_flow.dart';
 import 'package:magmug/features/profile/profile_flow.dart';
@@ -38,216 +39,22 @@ class NotificationItem {
   });
 }
 
-final appNotificationsProvider =
-    FutureProvider.autoDispose<List<AppNotification>>((ref) async {
-      ref.watch(notificationsFeedRefreshProvider);
-      final session = await ref.watch(appAuthProvider.future);
-      final token = session?.token;
-      if (token == null || token.trim().isEmpty) {
-        return const [];
-      }
-
-      final api = AppAuthApi();
-      try {
-        return await api.fetchNotifications(token);
-      } finally {
-        api.close();
-      }
-    });
-
-// ------ Promo cards -----------------------------------------------------------
-
-class _GemPromoCard extends StatelessWidget {
-  const _GemPromoCard();
-
-  @override
-  Widget build(BuildContext context) {
-    return PressableScale(
-      onTap: () {
-        showCupertinoModalPopup<void>(
-          context: context,
-          builder: (_) => const JetonPurchaseSheet(),
-        );
-      },
-      scale: 0.99,
-      child: Container(
-        padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
-        decoration: BoxDecoration(
-          color: AppColors.black,
-          borderRadius: BorderRadius.circular(20),
-          boxShadow: const [
-            BoxShadow(
-              color: Color(0x1F000000),
-              blurRadius: 16,
-              offset: Offset(0, 4),
-            ),
-          ],
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Image.asset(
-                  'assets/images/icon_diamond.png',
-                  width: 14,
-                  height: 14,
-                ),
-                const SizedBox(width: 6),
-                const Text(
-                  'OZEL FIRSAT',
-                  style: TextStyle(
-                    fontFamily: AppFont.family,
-                    fontWeight: FontWeight.w700,
-                    fontSize: 10.5,
-                    color: Color(0xFFE8B84E),
-                    letterSpacing: 1.2,
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 6),
-            const Text(
-              'Bugun 50 tas al, 20 tas hediye kazan!',
-              style: TextStyle(
-                fontFamily: AppFont.family,
-                fontWeight: FontWeight.w800,
-                fontSize: 15,
-                color: AppColors.white,
-                height: 1.25,
-              ),
-            ),
-            const SizedBox(height: 4),
-            const Text(
-              'Sinirli sure ile gecerli',
-              style: TextStyle(
-                fontFamily: AppFont.family,
-                fontSize: 12,
-                color: Color(0xFFBABABA),
-              ),
-            ),
-            const SizedBox(height: 12),
-            Container(
-              constraints: const BoxConstraints(minHeight: 32),
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
-              decoration: BoxDecoration(
-                color: AppColors.white.withValues(alpha: 0.12),
-                borderRadius: BorderRadius.circular(20),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: const [
-                  Text(
-                    'Satin Al',
-                    style: TextStyle(
-                      fontFamily: AppFont.family,
-                      fontWeight: FontWeight.w700,
-                      fontSize: 13,
-                      color: AppColors.white,
-                    ),
-                  ),
-                  SizedBox(width: 6),
-                  Icon(
-                    CupertinoIcons.chevron_right,
-                    size: 14,
-                    color: AppColors.white,
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
+final appNotificationsProvider = FutureProvider<List<AppNotification>>((
+  ref,
+) async {
+  ref.watch(notificationsFeedRefreshProvider);
+  final session = await ref.watch(appAuthProvider.future);
+  final token = session?.token;
+  final ownerUserId = session?.user?.id;
+  if (token == null || token.trim().isEmpty || ownerUserId == null) {
+    return const [];
   }
-}
 
-class _PremiumPromoCard extends StatelessWidget {
-  const _PremiumPromoCard();
-
-  @override
-  Widget build(BuildContext context) {
-    return PressableScale(
-      onTap: () {
-        Navigator.of(context).push(cupertinoRoute(const PaywallScreen()));
-      },
-      scale: 0.99,
-      child: Container(
-        padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(20),
-          gradient: const LinearGradient(
-            begin: Alignment.centerLeft,
-            end: Alignment.centerRight,
-            colors: [Color(0xFFFF9EC4), Color(0xFFB194F9)],
-          ),
-          boxShadow: const [
-            BoxShadow(
-              color: Color(0x29B194F9),
-              blurRadius: 16,
-              offset: Offset(0, 6),
-            ),
-          ],
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              'PREMIUM',
-              style: TextStyle(
-                fontFamily: AppFont.family,
-                fontWeight: FontWeight.w700,
-                fontSize: 10.5,
-                color: Color(0xFFFFE6F0),
-                letterSpacing: 1.2,
-              ),
-            ),
-            const SizedBox(height: 6),
-            const Text(
-              'Sinirsiz mesaj ve ozel ozellikler seni bekliyor',
-              style: TextStyle(
-                fontFamily: AppFont.family,
-                fontWeight: FontWeight.w800,
-                fontSize: 15,
-                color: AppColors.white,
-                height: 1.25,
-              ),
-            ),
-            const SizedBox(height: 12),
-            Container(
-              constraints: const BoxConstraints(minHeight: 32),
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
-              decoration: BoxDecoration(
-                color: AppColors.white.withValues(alpha: 0.22),
-                borderRadius: BorderRadius.circular(20),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: const [
-                  Text(
-                    'Kesfet',
-                    style: TextStyle(
-                      fontFamily: AppFont.family,
-                      fontWeight: FontWeight.w700,
-                      fontSize: 13,
-                      color: AppColors.white,
-                    ),
-                  ),
-                  SizedBox(width: 6),
-                  Icon(
-                    CupertinoIcons.chevron_right,
-                    size: 14,
-                    color: AppColors.white,
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
+  return AppRepository.instance.notifications(
+    token: token,
+    ownerUserId: ownerUserId,
+  );
+});
 
 // ------ Notification icon badge ----------------------------------------------
 
@@ -417,11 +224,12 @@ class _NotifAvatar extends StatelessWidget {
     Widget avatar;
     if (item.avatarUrl != null && item.avatarUrl!.trim().isNotEmpty) {
       avatar = ClipOval(
-        child: Image.network(
-          item.avatarUrl!,
+        child: CachedAppImage(
+          imageUrl: item.avatarUrl,
           width: 40,
           height: 40,
-          fit: BoxFit.cover,
+          cacheWidth: 80,
+          cacheHeight: 80,
         ),
       );
     } else if (item.avatarAsset != null) {
@@ -540,7 +348,10 @@ class _NotificationsTopBar extends StatelessWidget {
               const SizedBox(width: 14),
               Expanded(
                 child: Text(
-                  'Bildirimler',
+                  AppRuntimeText.instance.t(
+                    'notifications.title',
+                    'Bildirimler',
+                  ),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
@@ -557,11 +368,17 @@ class _NotificationsTopBar extends StatelessWidget {
                 PressableScale(
                   onTap: onMarkAllRead ?? () {},
                   scale: 0.94,
-                  child: const Padding(
-                    padding: EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 4,
+                      vertical: 8,
+                    ),
                     child: Text(
-                      'Tumunu oku',
-                      style: TextStyle(
+                      AppRuntimeText.instance.t(
+                        'notifications.mark_all_read',
+                        'Tumunu oku',
+                      ),
+                      style: const TextStyle(
                         fontFamily: AppFont.family,
                         fontWeight: FontWeight.w700,
                         fontSize: 13,
@@ -638,6 +455,10 @@ class NotificationsScreen extends ConsumerWidget {
     final api = AppAuthApi();
     try {
       await api.markAllNotificationsRead(token);
+      final ownerUserId = session?.user?.id;
+      if (ownerUserId != null) {
+        AppRepository.instance.invalidateNotifications(ownerUserId);
+      }
       ref.read(notificationsFeedRefreshProvider.notifier).state++;
     } catch (error) {
       if (!context.mounted) {
@@ -646,12 +467,12 @@ class NotificationsScreen extends ConsumerWidget {
       showCupertinoDialog<void>(
         context: context,
         builder: (context) => CupertinoAlertDialog(
-          title: const Text('Hata'),
+          title: Text(AppRuntimeText.instance.t('commonError', 'Hata')),
           content: Text(AppAuthErrorFormatter.messageFrom(error)),
           actions: [
             CupertinoDialogAction(
               onPressed: () => Navigator.of(context).pop(),
-              child: const Text('Tamam'),
+              child: Text(AppRuntimeText.instance.t('commonOk', 'Tamam')),
             ),
           ],
         ),
@@ -687,9 +508,12 @@ class _NotifEmptyBody extends StatelessWidget {
                   fit: BoxFit.contain,
                 ),
                 SizedBox(height: compact ? 16 : 20),
-                const Text(
-                  'Henuz bildirim yok',
-                  style: TextStyle(
+                Text(
+                  AppRuntimeText.instance.t(
+                    'notifications.empty.title',
+                    'Henuz bildirim yok',
+                  ),
+                  style: const TextStyle(
                     fontFamily: AppFont.family,
                     fontWeight: FontWeight.w700,
                     fontSize: 16,
@@ -697,12 +521,15 @@ class _NotifEmptyBody extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(height: 8),
-                const Padding(
-                  padding: EdgeInsets.symmetric(horizontal: 32),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 32),
                   child: Text(
-                    "Birinin ID'sini yada ismini aratarak sohbete basla veya\nKesfet'ten yeni kisilerle esles",
+                    AppRuntimeText.instance.t(
+                      'notifications.empty.subtitle',
+                      'Bildirimlerin burada gorunecek.',
+                    ),
                     textAlign: TextAlign.center,
-                    style: TextStyle(
+                    style: const TextStyle(
                       fontFamily: AppFont.family,
                       fontSize: 13,
                       height: 1.4,
@@ -728,87 +555,35 @@ class _NotifListBody extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     return notificationsAsync.when(
       data: (notifications) {
-        if (notifications.isEmpty) {
+        final today = notifications
+            .where((notification) => _isToday(notification.createdAt))
+            .map(_itemFromNotification)
+            .toList();
+
+        if (today.isEmpty) {
           return const _NotifEmptyBody();
-        }
-
-        final today = <NotificationItem>[];
-        final yesterday = <NotificationItem>[];
-        final thisWeek = <NotificationItem>[];
-        final earlier = <NotificationItem>[];
-
-        for (final notification in notifications) {
-          final item = _itemFromNotification(notification);
-          final bucket = _bucketLabel(notification.createdAt);
-          switch (bucket) {
-            case 'BUGUN':
-              today.add(item);
-            case 'DUN':
-              yesterday.add(item);
-            case 'BU HAFTA':
-              thisWeek.add(item);
-            default:
-              earlier.add(item);
-          }
         }
 
         return ListView(
           physics: const BouncingScrollPhysics(),
           padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
           children: [
-            if (today.isNotEmpty) ...[
-              const _NotifSectionHeader(label: 'BUGUN'),
-              const _GemPromoCard(),
-              ...today.map(
-                (item) => Padding(
-                  padding: const EdgeInsets.only(top: 8),
-                  child: _NotificationCard(
-                    item: item,
-                    onTap: () => _openNotification(context, ref, item),
-                  ),
+            _NotifSectionHeader(
+              label: AppRuntimeText.instance.t(
+                'notifications.section.today',
+                'BUGUN',
+              ),
+            ),
+            ...today.map(
+              (item) => Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: _NotificationCard(
+                  item: item,
+                  onTap: () => _openNotification(context, ref, item),
                 ),
               ),
-              const SizedBox(height: 20),
-            ],
-            if (yesterday.isNotEmpty) ...[
-              const _NotifSectionHeader(label: 'DUN'),
-              const _PremiumPromoCard(),
-              ...yesterday.map(
-                (item) => Padding(
-                  padding: const EdgeInsets.only(top: 8),
-                  child: _NotificationCard(
-                    item: item,
-                    onTap: () => _openNotification(context, ref, item),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 20),
-            ],
-            if (thisWeek.isNotEmpty) ...[
-              const _NotifSectionHeader(label: 'BU HAFTA'),
-              ...thisWeek.map(
-                (item) => Padding(
-                  padding: const EdgeInsets.only(bottom: 8),
-                  child: _NotificationCard(
-                    item: item,
-                    onTap: () => _openNotification(context, ref, item),
-                  ),
-                ),
-              ),
-            ],
-            if (earlier.isNotEmpty) ...[
-              const SizedBox(height: 12),
-              const _NotifSectionHeader(label: 'DAHA ONCE'),
-              ...earlier.map(
-                (item) => Padding(
-                  padding: const EdgeInsets.only(bottom: 8),
-                  child: _NotificationCard(
-                    item: item,
-                    onTap: () => _openNotification(context, ref, item),
-                  ),
-                ),
-              ),
-            ],
+            ),
+            const SizedBox(height: 20),
           ],
         );
       },
@@ -838,8 +613,13 @@ class _NotifListBody extends ConsumerWidget {
 
     return NotificationItem(
       id: notification.id,
-      title: notification.title,
-      subtitle: message.isEmpty ? 'Yeni bildirim' : message,
+      title: _notificationTitle(notification, type),
+      subtitle: message.isEmpty
+          ? AppRuntimeText.instance.t(
+              'notifications.fallback_message',
+              'Yeni bildirim',
+            )
+          : message,
       time: _formatNotificationTime(notification.createdAt),
       icon: switch (type) {
         'yeni_mesaj' => NotificationIconKind.chat,
@@ -858,46 +638,64 @@ class _NotifListBody extends ConsumerWidget {
     );
   }
 
-  String _bucketLabel(DateTime? dateTime) {
+  String _notificationTitle(AppNotification notification, String? type) {
+    final runtime = AppRuntimeText.instance;
+    return switch (type) {
+      'yeni_eslesme' => runtime.t(
+        'notifications.type.new_match',
+        'Yeni eslesme',
+      ),
+      'yeni_mesaj' => runtime.t('notifications.type.new_message', 'Yeni mesaj'),
+      'hediye' ||
+      'hediye_alindi' => runtime.t('notifications.type.gift', 'Yeni hediye'),
+      'bonus' => runtime.t('notifications.type.bonus', 'Bonus'),
+      'sure_doldu' => runtime.t('notifications.type.expired', 'Sure doldu'),
+      'guvenlik' => runtime.t('notifications.type.security', 'Guvenlik'),
+      _ =>
+        notification.title.trim().isNotEmpty
+            ? notification.title.trim()
+            : runtime.t('notifications.type.default', 'Bildirim'),
+    };
+  }
+
+  bool _isToday(DateTime? dateTime) {
     if (dateTime == null) {
-      return 'DAHA ONCE';
+      return false;
     }
 
     final now = DateTime.now();
     final target = DateTime(dateTime.year, dateTime.month, dateTime.day);
     final today = DateTime(now.year, now.month, now.day);
-    final dayDifference = today.difference(target).inDays;
-
-    if (dayDifference <= 0) {
-      return 'BUGUN';
-    }
-    if (dayDifference == 1) {
-      return 'DUN';
-    }
-    if (dayDifference < 7) {
-      return 'BU HAFTA';
-    }
-    return 'DAHA ONCE';
+    return target == today;
   }
 
   String _formatNotificationTime(DateTime? dateTime) {
+    final runtime = AppRuntimeText.instance;
     if (dateTime == null) {
-      return 'Az once';
+      return runtime.t('notifications.time.just_now', 'Az once');
     }
 
     final now = DateTime.now();
     final difference = now.difference(dateTime);
     if (difference.inMinutes < 1) {
-      return 'Simdi';
+      return runtime.t('notifications.time.now', 'Simdi');
     }
     if (difference.inMinutes < 60) {
-      return '${difference.inMinutes} dk once';
+      return runtime.t(
+        'notifications.time.minutes_ago',
+        '{count} dk once',
+        args: {'count': difference.inMinutes},
+      );
     }
     if (difference.inHours < 24 &&
         now.day == dateTime.day &&
         now.month == dateTime.month &&
         now.year == dateTime.year) {
-      return '${difference.inHours} sa once';
+      return runtime.t(
+        'notifications.time.hours_ago',
+        '{count} sa once',
+        args: {'count': difference.inHours},
+      );
     }
 
     final yesterday = now.subtract(const Duration(days: 1));
@@ -906,10 +704,18 @@ class _NotifListBody extends ConsumerWidget {
     if (yesterday.day == dateTime.day &&
         yesterday.month == dateTime.month &&
         yesterday.year == dateTime.year) {
-      return 'Dun, $hour:$minute';
+      return runtime.t(
+        'notifications.time.yesterday_at',
+        'Dun, {time}',
+        args: {'time': '$hour:$minute'},
+      );
     }
     if (difference.inDays < 7) {
-      return '${difference.inDays} gun once';
+      return runtime.t(
+        'notifications.time.days_ago',
+        '{count} gun once',
+        args: {'count': difference.inDays},
+      );
     }
 
     final day = dateTime.day.toString().padLeft(2, '0');
@@ -938,6 +744,7 @@ class _NotifListBody extends ConsumerWidget {
     try {
       if (!notification.isRead) {
         await api.markNotificationRead(token, notification.id);
+        AppRepository.instance.invalidateNotifications(currentUserId);
         ref.read(notificationsFeedRefreshProvider.notifier).state++;
       }
 
@@ -948,15 +755,33 @@ class _NotifListBody extends ConsumerWidget {
           return;
         }
 
-        final conversations = await api.fetchConversations(
-          token,
-          currentUserId: currentUserId,
+        var conversation = await ChatLocalStore.instance.getConversationPreview(
+          conversationId,
+          ownerUserId: currentUserId,
         );
-        AppConversationPreview? conversation;
-        for (final item in conversations) {
-          if (item.id == conversationId) {
-            conversation = item;
-            break;
+        if (conversation == null) {
+          await AppCacheSyncCoordinator.instance.reconcile(
+            token: token,
+            ownerUserId: currentUserId,
+            force: true,
+          );
+          conversation = await ChatLocalStore.instance.getConversationPreview(
+            conversationId,
+            ownerUserId: currentUserId,
+          );
+        }
+        if (conversation == null) {
+          final bootstrap = await AppBootstrapCoordinator.instance.bootstrap(
+            token,
+          );
+          if (bootstrap.user.id != currentUserId) {
+            return;
+          }
+          for (final item in bootstrap.conversations) {
+            if (item.id == conversationId) {
+              conversation = item;
+              break;
+            }
           }
         }
         if (!context.mounted || conversation == null) {
@@ -964,7 +789,7 @@ class _NotifListBody extends ConsumerWidget {
         }
 
         await Navigator.of(context).push(
-          cupertinoRoute(
+          chatRoute(
             ChatScreen(
               mode: ChatScreenMode.messages,
               conversation: conversation,
@@ -1011,12 +836,12 @@ class _NotifListBody extends ConsumerWidget {
       showCupertinoDialog<void>(
         context: context,
         builder: (context) => CupertinoAlertDialog(
-          title: const Text('Hata'),
+          title: Text(AppRuntimeText.instance.t('commonError', 'Hata')),
           content: Text(AppAuthErrorFormatter.messageFrom(error)),
           actions: [
             CupertinoDialogAction(
               onPressed: () => Navigator.of(context).pop(),
-              child: const Text('Tamam'),
+              child: Text(AppRuntimeText.instance.t('commonOk', 'Tamam')),
             ),
           ],
         ),

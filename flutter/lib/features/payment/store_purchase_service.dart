@@ -14,6 +14,10 @@ enum StorePurchaseProgress {
 
 enum StorePurchaseStatus { success, cancelled, failure }
 
+String _purchaseText(String key, String fallback) {
+  return AppRuntimeText.instance.t(key, fallback);
+}
+
 @immutable
 class StorePurchaseResult {
   final StorePurchaseStatus status;
@@ -40,28 +44,35 @@ class StorePurchaseService {
   }) async {
     final platform = currentMobileStorePlatform();
     if (platform == null) {
-      return const StorePurchaseResult(
+      return StorePurchaseResult(
         status: StorePurchaseStatus.failure,
-        message:
-            'Bu cihazda App Store veya Play Store satin alma desteklenmiyor.',
+        message: _purchaseText(
+          'payment.store.error.unsupported_device',
+          'Bu cihazda App Store veya Play Store satin alma desteklenmiyor.',
+        ),
       );
     }
 
     final normalizedProductCode = productCode.trim();
     if (normalizedProductCode.isEmpty) {
-      return const StorePurchaseResult(
+      return StorePurchaseResult(
         status: StorePurchaseStatus.failure,
-        message: 'Panelde secili paket icin magaza urun kodu eksik.',
+        message: _purchaseText(
+          'payment.store.error.missing_product_code',
+          'Panelde secili paket icin magaza urun kodu eksik.',
+        ),
       );
     }
 
     onProgress?.call(StorePurchaseProgress.checkingStore);
     final isAvailable = await _inAppPurchase.isAvailable();
     if (!isAvailable) {
-      return const StorePurchaseResult(
+      return StorePurchaseResult(
         status: StorePurchaseStatus.failure,
-        message:
-            'Magaza servisine baglanilamadi. Lutfen daha sonra tekrar deneyin.',
+        message: _purchaseText(
+          'payment.store.error.unavailable',
+          'Magaza servisine baglanilamadi. Lutfen daha sonra tekrar deneyin.',
+        ),
       );
     }
 
@@ -75,16 +86,21 @@ class StorePurchaseService {
         status: StorePurchaseStatus.failure,
         message:
             productResponse.error?.message ??
-            'Magaza urun bilgisi okunamadi. Panel urun kodlarini kontrol edin.',
+            _purchaseText(
+              'payment.store.error.product_details_failed',
+              'Magaza urun bilgisi okunamadi. Panel urun kodlarini kontrol edin.',
+            ),
       );
     }
 
     if (productResponse.notFoundIDs.contains(normalizedProductCode) ||
         productResponse.productDetails.isEmpty) {
-      return const StorePurchaseResult(
+      return StorePurchaseResult(
         status: StorePurchaseStatus.failure,
-        message:
-            'Secilen paket App Store veya Play Store tarafinda bulunamadi. Panel urun kodlarini kontrol edin.',
+        message: _purchaseText(
+          'payment.store.error.product_not_found',
+          'Secilen paket App Store veya Play Store tarafinda bulunamadi. Panel urun kodlarini kontrol edin.',
+        ),
       );
     }
 
@@ -133,9 +149,12 @@ class StorePurchaseService {
                   await _inAppPurchase.completePurchase(purchase);
                 }
                 await finish(
-                  const StorePurchaseResult(
+                  StorePurchaseResult(
                     status: StorePurchaseStatus.success,
-                    message: 'Odeme dogrulandi.',
+                    message: _purchaseText(
+                      'payment.store.success.verified',
+                      'Odeme dogrulandi.',
+                    ),
                   ),
                 );
               } catch (error) {
@@ -159,15 +178,21 @@ class StorePurchaseService {
                   status: StorePurchaseStatus.failure,
                   message:
                       purchase.error?.message ??
-                      'Magaza satin alma islemi basarisiz oldu.',
+                      _purchaseText(
+                        'payment.store.error.purchase_failed',
+                        'Magaza satin alma islemi basarisiz oldu.',
+                      ),
                 ),
               );
               break;
             case PurchaseStatus.canceled:
               await finish(
-                const StorePurchaseResult(
+                StorePurchaseResult(
                   status: StorePurchaseStatus.cancelled,
-                  message: 'Satin alma islemi iptal edildi.',
+                  message: _purchaseText(
+                    'payment.store.cancelled',
+                    'Satin alma islemi iptal edildi.',
+                  ),
                 ),
               );
               break;
@@ -195,17 +220,23 @@ class StorePurchaseService {
           : await _inAppPurchase.buyNonConsumable(purchaseParam: purchaseParam);
 
       if (!started) {
-        return const StorePurchaseResult(
+        return StorePurchaseResult(
           status: StorePurchaseStatus.failure,
-          message: 'Magaza satin alma akisi baslatilamadi.',
+          message: _purchaseText(
+            'payment.store.error.flow_not_started',
+            'Magaza satin alma akisi baslatilamadi.',
+          ),
         );
       }
 
       return await completer.future.timeout(
         const Duration(minutes: 2),
-        onTimeout: () => const StorePurchaseResult(
+        onTimeout: () => StorePurchaseResult(
           status: StorePurchaseStatus.failure,
-          message: 'Magaza yaniti zaman asimina ugradi. Lutfen tekrar deneyin.',
+          message: _purchaseText(
+            'payment.store.error.timeout',
+            'Magaza yaniti zaman asimina ugradi. Lutfen tekrar deneyin.',
+          ),
         ),
       );
     } finally {

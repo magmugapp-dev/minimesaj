@@ -1,5 +1,3 @@
-import 'dart:io';
-
 import 'package:magmug/app_core.dart';
 import 'package:magmug/features/chat/chat_flow.dart';
 import 'package:magmug/features/home/models/chat_preview.dart';
@@ -17,10 +15,7 @@ class HomeAdBanner extends StatelessWidget {
 class HomeEmptyChatState extends StatelessWidget {
   final double bottomInset;
 
-  const HomeEmptyChatState({
-    super.key,
-    this.bottomInset = 0,
-  });
+  const HomeEmptyChatState({super.key, this.bottomInset = 0});
 
   @override
   Widget build(BuildContext context) {
@@ -78,11 +73,7 @@ class HomeChatList extends StatelessWidget {
   final List<ChatPreview> chats;
   final double bottomInset;
 
-  const HomeChatList({
-    super.key,
-    required this.chats,
-    this.bottomInset = 0,
-  });
+  const HomeChatList({super.key, required this.chats, this.bottomInset = 0});
 
   @override
   Widget build(BuildContext context) {
@@ -115,25 +106,15 @@ class HomeChatAvatar extends StatelessWidget {
         child: Stack(
           children: [
             ClipOval(
-              child: avatarUrl.startsWith('http')
-                  ? Image.network(
-                      avatarUrl,
-                      width: 52,
-                      height: 52,
-                      fit: BoxFit.cover,
-                      gaplessPlayback: true,
-                    )
-                  : Image.file(
-                      File(avatarUrl),
-                      width: 52,
-                      height: 52,
-                      fit: BoxFit.cover,
-                      errorBuilder: (_, _, _) => HomeAvatarCircle(
-                        name: chat.name,
-                        online: false,
-                        size: 52,
-                      ),
-                    ),
+              child: CachedAppImage(
+                imageUrl: avatarUrl,
+                width: 52,
+                height: 52,
+                cacheWidth: 104,
+                cacheHeight: 104,
+                errorBuilder: (_) =>
+                    HomeAvatarCircle(name: chat.name, online: false, size: 52),
+              ),
             ),
             if (chat.online)
               Positioned(
@@ -166,14 +147,16 @@ class _ChatRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return PressableScale(
-      onTap: () => Navigator.of(context).push(
-        cupertinoRoute(
-          ChatScreen(
-            mode: ChatScreenMode.messages,
-            conversation: chat.conversation,
+      onTap: () {
+        Navigator.of(context).push(
+          chatRoute(
+            ChatScreen(
+              mode: ChatScreenMode.messages,
+              conversation: chat.conversation,
+            ),
           ),
-        ),
-      ),
+        );
+      },
       scale: 0.99,
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: 6),

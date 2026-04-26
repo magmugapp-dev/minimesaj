@@ -11,6 +11,9 @@ class ReklamOdulu extends Model
 
     protected $fillable = [
         'user_id',
+        'olay_kodu',
+        'reklam_platformu',
+        'reklam_birim_kodu',
         'reklam_tipi',
         'odul_tipi',
         'odul_miktari',

@@ -1,7 +1,11 @@
+import 'dart:async';
+
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter/services.dart';
+import 'package:google_mobile_ads/google_mobile_ads.dart';
 import 'package:magmug/l10n/app_localizations.dart';
 
 import 'package:magmug/app_bootstrap.dart';
@@ -20,6 +24,11 @@ Future<void> main() async {
       options: DefaultFirebaseOptions.currentPlatform,
     );
     FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
+  }
+  if (!kIsWeb &&
+      (defaultTargetPlatform == TargetPlatform.android ||
+          defaultTargetPlatform == TargetPlatform.iOS)) {
+    unawaited(MobileAds.instance.initialize());
   }
   SystemChrome.setPreferredOrientations(const [DeviceOrientation.portraitUp]);
   SystemChrome.setSystemUIOverlayStyle(
@@ -40,11 +49,18 @@ class MagmugApp extends ConsumerWidget {
     final appLanguage =
         ref.watch(appLanguageProvider).asData?.value ??
         AppPreferencesStorage.fallbackLanguage();
+    ref.watch(appContentProvider);
+    final appLocale =
+        AppLocalizations.supportedLocales.any(
+          (locale) => locale.languageCode == appLanguage.locale.languageCode,
+        )
+        ? appLanguage.locale
+        : const Locale('en');
 
     return CupertinoApp(
-      title: 'Magmug',
+      title: AppRuntimeText.instance.t('app.name', 'Magmug'),
       debugShowCheckedModeBanner: false,
-      locale: appLanguage.locale,
+      locale: appLocale,
       localizationsDelegates: [
         AppLocalizations.delegate,
         GlobalCupertinoLocalizations.delegate,

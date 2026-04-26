@@ -25,13 +25,23 @@ Future<OnboardingSocialCredential> getOnboardingSocialCredential({
     case SocialAuthProvider.google:
       final account = await googleSignIn.signIn();
       if (account == null) {
-        throw const ApiException('Google girisi iptal edildi.');
+        throw ApiException(
+          AppRuntimeText.instance.t(
+            'googleSignInCanceled',
+            'Google girisi iptal edildi.',
+          ),
+        );
       }
 
       final authentication = await account.authentication;
       final idToken = authentication.idToken;
       if (idToken == null || idToken.trim().isEmpty) {
-        throw const ApiException('Google kimlik jetonu alinamadi.');
+        throw ApiException(
+          AppRuntimeText.instance.t(
+            'googleTokenMissing',
+            'Google kimlik jetonu alinamadi.',
+          ),
+        );
       }
 
       return (
@@ -43,7 +53,12 @@ Future<OnboardingSocialCredential> getOnboardingSocialCredential({
       );
     case SocialAuthProvider.apple:
       if (!await SignInWithApple.isAvailable()) {
-        throw const ApiException('Bu cihazda Apple ile giris kullanilamiyor.');
+        throw ApiException(
+          AppRuntimeText.instance.t(
+            'appleSignInUnavailable',
+            'Bu cihazda Apple ile giris kullanilamiyor.',
+          ),
+        );
       }
 
       final credential = await SignInWithApple.getAppleIDCredential(
@@ -54,7 +69,12 @@ Future<OnboardingSocialCredential> getOnboardingSocialCredential({
       );
 
       if (credential.authorizationCode.trim().isEmpty) {
-        throw const ApiException('Apple yetki kodu alinamadi.');
+        throw ApiException(
+          AppRuntimeText.instance.t(
+            'appleAuthorizationCodeMissing',
+            'Apple yetki kodu alinamadi.',
+          ),
+        );
       }
 
       final displayName = [credential.givenName, credential.familyName]

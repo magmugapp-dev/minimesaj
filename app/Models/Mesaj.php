@@ -25,6 +25,7 @@ class Mesaj extends Model
         'herkesten_silindi_mi',
         'ai_tarafindan_uretildi_mi',
         'cevaplanan_mesaj_id',
+        'client_message_id',
     ];
 
     protected function casts(): array

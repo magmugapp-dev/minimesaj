@@ -17,7 +17,9 @@ class GeminiSaglayici implements AiSaglayiciInterface
     public const MODEL_ADI = GeminiModelPolicy::AUTO_QUALITY;
     private const GECICI_HATA_KODLARI = [429, 500, 503];
     private const RESPONSE_MIME_TYPE = 'application/json';
-    private const STREAM_TIMEOUT_SANIYE = 90;
+    private const STREAM_TIMEOUT_SANIYE = 35;
+    private const CONNECT_TIMEOUT_SANIYE = 6;
+    private const PHP_EXECUTION_BUFFER_SANIYE = 30;
 
     public function tamamla(array $mesajlar, array $parametreler = []): array
     {
@@ -30,6 +32,23 @@ class GeminiSaglayici implements AiSaglayiciInterface
         array $parametreler = [],
         ?callable $parcaCallback = null
     ): array {
+        $streamTimeoutSeconds = $this->timeoutSaniyesi(
+            $parametreler,
+            'stream_timeout_seconds',
+            self::STREAM_TIMEOUT_SANIYE,
+            3,
+            self::STREAM_TIMEOUT_SANIYE
+        );
+        $connectTimeoutSeconds = $this->timeoutSaniyesi(
+            $parametreler,
+            'connect_timeout_seconds',
+            self::CONNECT_TIMEOUT_SANIYE,
+            1,
+            self::CONNECT_TIMEOUT_SANIYE
+        );
+
+        $this->extendPhpExecutionLimit($streamTimeoutSeconds + self::PHP_EXECUTION_BUFFER_SANIYE);
+
         $configuredModel = GeminiModelPolicy::normalizeConfiguredModel($parametreler['model_adi'] ?? null);
         $apiKey = Ayar::where('anahtar', 'gemini_api_key')->value('deger');
 
@@ -51,14 +70,12 @@ class GeminiSaglayici implements AiSaglayiciInterface
 
         $responseMimeType = $parametreler['response_mime_type'] ?? self::RESPONSE_MIME_TYPE;
         $responseSchema = $parametreler['response_json_schema'] ?? $this->yapilandirilmisYanitSemasi();
+        $requestedThinkingBudget = $parametreler['thinking_budget'] ?? null;
 
         $generationConfig = [
             'temperature' => $parametreler['temperature'] ?? 0.9,
             'topP' => $parametreler['top_p'] ?? 0.95,
             'maxOutputTokens' => $parametreler['max_output_tokens'] ?? 1024,
-            'thinkingConfig' => [
-                'thinkingBudget' => $parametreler['thinking_budget'] ?? 0,
-            ],
         ];
 
         if ($responseMimeType) {
@@ -81,7 +98,17 @@ class GeminiSaglayici implements AiSaglayiciInterface
             ];
         }
 
-        return $this->modelIleStreamDene($configuredModel, $apiKey, $govde, $parcaCallback);
+        return $this->modelIleStreamDene(
+            $configuredModel,
+            $apiKey,
+            $govde,
+            $parcaCallback,
+            $requestedThinkingBudget,
+            is_array($parametreler['model_chain'] ?? null) ? $parametreler['model_chain'] : null,
+            is_array($parametreler['per_model_attempt_budgets'] ?? null) ? $parametreler['per_model_attempt_budgets'] : null,
+            $streamTimeoutSeconds,
+            $connectTimeoutSeconds
+        );
     }
 
     public function saglayiciAdi(): string
@@ -89,14 +116,40 @@ class GeminiSaglayici implements AiSaglayiciInterface
         return 'gemini';
     }
 
+    private function timeoutSaniyesi(
+        array $parametreler,
+        string $anahtar,
+        int $varsayilan,
+        int $minimum,
+        int $maksimum
+    ): int {
+        $deger = $parametreler[$anahtar] ?? $varsayilan;
+
+        if (!is_numeric($deger)) {
+            return $varsayilan;
+        }
+
+        return max($minimum, min($maksimum, (int) $deger));
+    }
+
     private function modelIleStreamDene(
         string $configuredModel,
         string $apiKey,
         array $govde,
-        ?callable $parcaCallback = null
+        ?callable $parcaCallback = null,
+        mixed $requestedThinkingBudget = null,
+        ?array $explicitModelChain = null,
+        ?array $explicitAttemptBudgets = null,
+        int $streamTimeoutSeconds = self::STREAM_TIMEOUT_SANIYE,
+        int $connectTimeoutSeconds = self::CONNECT_TIMEOUT_SANIYE
     ): array {
-        $models = GeminiModelPolicy::concreteModelChain($configuredModel);
-        $perModelBudgets = GeminiModelPolicy::perModelAttemptBudgets($configuredModel);
+        $models = $this->modelZinciriniOlustur($configuredModel, $explicitModelChain);
+        $perModelBudgets = $this->denemeButceleriniOlustur(
+            $configuredModel,
+            $models,
+            $explicitModelChain !== null,
+            $explicitAttemptBudgets
+        );
         $maxAttempts = array_sum($perModelBudgets);
         $attemptedModels = [];
         $attemptsPerModel = array_fill(0, count($models), 0);
@@ -119,6 +172,9 @@ class GeminiSaglayici implements AiSaglayiciInterface
                     $configuredModel,
                     $attemptIndex,
                     $attemptedModels,
+                    $requestedThinkingBudget,
+                    $streamTimeoutSeconds,
+                    $connectTimeoutSeconds,
                 );
 
                 if (count(array_unique($attemptedModels)) > 1 || $configuredModel !== $model) {
@@ -186,7 +242,6 @@ class GeminiSaglayici implements AiSaglayiciInterface
                         $decision['status_code'],
                         $lastError->getMessage(),
                     );
-                    $this->uygunsaBekle($this->yenidenDenemeBeklemeSuresi($attemptIndex));
                     $currentModelIndex++;
 
                     continue;
@@ -209,6 +264,47 @@ class GeminiSaglayici implements AiSaglayiciInterface
         );
     }
 
+    private function modelZinciriniOlustur(string $configuredModel, ?array $explicitModelChain): array
+    {
+        if ($explicitModelChain !== null) {
+            $models = collect($explicitModelChain)
+                ->filter(fn (mixed $model): bool => is_string($model))
+                ->map(fn (string $model): string => trim($model))
+                ->filter(fn (string $model): bool => $model !== ''
+                    && str_starts_with($model, 'gemini-')
+                    && !GeminiModelPolicy::isPolicyToken($model))
+                ->unique()
+                ->values()
+                ->all();
+
+            if ($models !== []) {
+                return $models;
+            }
+        }
+
+        return GeminiModelPolicy::concreteModelChain($configuredModel);
+    }
+
+    private function denemeButceleriniOlustur(
+        string $configuredModel,
+        array $models,
+        bool $explicitModelChainVar,
+        ?array $explicitAttemptBudgets
+    ): array {
+        if ($explicitAttemptBudgets !== null) {
+            return array_map(
+                fn (int $index): int => max(1, min(3, (int) ($explicitAttemptBudgets[$index] ?? 1))),
+                array_keys($models)
+            );
+        }
+
+        if ($explicitModelChainVar) {
+            return array_fill(0, count($models), 1);
+        }
+
+        return GeminiModelPolicy::perModelAttemptBudgets($configuredModel);
+    }
+
     private function tekModelIleStreamDene(
         string $model,
         string $apiKey,
@@ -216,20 +312,38 @@ class GeminiSaglayici implements AiSaglayiciInterface
         ?callable $parcaCallback,
         string $configuredModel,
         int $attemptIndex,
-        array $attemptedModels
+        array $attemptedModels,
+        mixed $requestedThinkingBudget = null,
+        int $streamTimeoutSeconds = self::STREAM_TIMEOUT_SANIYE,
+        int $connectTimeoutSeconds = self::CONNECT_TIMEOUT_SANIYE
     ): array {
+        if (GeminiModelPolicy::isPolicyToken($model)) {
+            Log::channel('ai')->warning('Gemini policy anahtari outbound model olarak yakalandi ve concrete modele cevrildi.', [
+                'configured_model' => $configuredModel,
+                'attempted_model' => $model,
+                'attempt_index' => $attemptIndex,
+                'attempted_models' => $attemptedModels,
+            ]);
+
+            $model = GeminiModelPolicy::firstConcreteModel($configuredModel);
+        }
+
+        $govde = $this->govdeyiModelIcinHazirla($govde, $model, $requestedThinkingBudget);
         $url = "https://generativelanguage.googleapis.com/v1beta/models/{$model}:streamGenerateContent?alt=sse&key={$apiKey}";
 
         try {
+            $this->extendPhpExecutionLimit($streamTimeoutSeconds + self::PHP_EXECUTION_BUFFER_SANIYE);
+
             $yanit = Http::withHeaders([
                 'Content-Type' => 'application/json',
                 'Accept' => 'text/event-stream',
             ])
                 ->withOptions([
                     'stream' => true,
-                    'read_timeout' => self::STREAM_TIMEOUT_SANIYE,
+                    'connect_timeout' => $connectTimeoutSeconds,
+                    'read_timeout' => $streamTimeoutSeconds,
                 ])
-                ->timeout(self::STREAM_TIMEOUT_SANIYE)
+                ->timeout($streamTimeoutSeconds)
                 ->send('POST', $url, [
                     'json' => $govde,
                 ])
@@ -252,6 +366,8 @@ class GeminiSaglayici implements AiSaglayiciInterface
                         'attempt_index' => $attemptIndex,
                         'attempted_models' => $attemptedModels,
                         'error_kind' => 'empty_response',
+                        'stream_timeout_seconds' => $streamTimeoutSeconds,
+                        'connect_timeout_seconds' => $connectTimeoutSeconds,
                     ]
                 );
             }
@@ -279,13 +395,15 @@ class GeminiSaglayici implements AiSaglayiciInterface
                     'attempt_index' => $attemptIndex,
                     'attempted_models' => $attemptedModels,
                     'error_kind' => 'http_request_failed',
+                    'stream_timeout_seconds' => $streamTimeoutSeconds,
+                    'connect_timeout_seconds' => $connectTimeoutSeconds,
                     'response_body' => $this->normalizeResponseBody((string) $e->response?->body()),
                 ],
                 $e
             );
         } catch (ConnectionException $e) {
             throw new AiSaglayiciHatasi(
-                'Gemini baglanti hatasi: ' . Str::limit($e->getMessage(), 240),
+                'Gemini baglanti hatasi: ' . Str::limit($this->redactSensitiveText($e->getMessage()), 240),
                 'gemini',
                 $model,
                 true,
@@ -295,6 +413,8 @@ class GeminiSaglayici implements AiSaglayiciInterface
                     'attempt_index' => $attemptIndex,
                     'attempted_models' => $attemptedModels,
                     'error_kind' => 'connection_exception',
+                    'stream_timeout_seconds' => $streamTimeoutSeconds,
+                    'connect_timeout_seconds' => $connectTimeoutSeconds,
                 ],
                 $e
             );
@@ -303,10 +423,12 @@ class GeminiSaglayici implements AiSaglayiciInterface
                 'configured_model' => $configuredModel,
                 'attempt_index' => $attemptIndex,
                 'attempted_models' => $attemptedModels,
+                'stream_timeout_seconds' => $streamTimeoutSeconds,
+                'connect_timeout_seconds' => $connectTimeoutSeconds,
             ]);
         } catch (\Throwable $e) {
             throw new AiSaglayiciHatasi(
-                'Gemini stream istegi beklenmeyen sekilde basarisiz oldu: ' . Str::limit($e->getMessage(), 240),
+                'Gemini stream istegi beklenmeyen sekilde basarisiz oldu: ' . Str::limit($this->redactSensitiveText($e->getMessage()), 240),
                 'gemini',
                 $model,
                 true,
@@ -316,6 +438,8 @@ class GeminiSaglayici implements AiSaglayiciInterface
                     'attempt_index' => $attemptIndex,
                     'attempted_models' => $attemptedModels,
                     'error_kind' => 'unexpected_exception',
+                    'stream_timeout_seconds' => $streamTimeoutSeconds,
+                    'connect_timeout_seconds' => $connectTimeoutSeconds,
                 ],
                 $e
             );
@@ -340,6 +464,24 @@ class GeminiSaglayici implements AiSaglayiciInterface
         }
 
         return $contents;
+    }
+
+    private function govdeyiModelIcinHazirla(
+        array $govde,
+        string $model,
+        mixed $requestedThinkingBudget = null
+    ): array {
+        unset($govde['generationConfig']['thinkingConfig']);
+
+        $thinkingBudget = GeminiModelPolicy::thinkingBudgetForModel($model, $requestedThinkingBudget);
+
+        if ($thinkingBudget !== null) {
+            $govde['generationConfig']['thinkingConfig'] = [
+                'thinkingBudget' => $thinkingBudget,
+            ];
+        }
+
+        return $govde;
     }
 
     private function streamYanitiAyikla(
@@ -554,7 +696,7 @@ class GeminiSaglayici implements AiSaglayiciInterface
         $govde = trim((string) $e->response?->body());
         $govde = preg_replace('/\s+/', ' ', $govde ?? '');
 
-        return trim("Gemini istegi basarisiz ({$durumKodu}). " . Str::limit($govde, 240));
+        return trim("Gemini istegi basarisiz ({$durumKodu}). " . Str::limit($this->redactSensitiveText($govde), 240));
     }
 
     private function geciciHataBekletVeLogla(
@@ -717,11 +859,33 @@ class GeminiSaglayici implements AiSaglayiciInterface
         sleep($seconds);
     }
 
+    private function extendPhpExecutionLimit(int $seconds): void
+    {
+        if (app()->runningInConsole()) {
+            return;
+        }
+
+        if (function_exists('ini_set')) {
+            @ini_set('max_execution_time', (string) $seconds);
+        }
+
+        if (function_exists('set_time_limit')) {
+            @set_time_limit($seconds);
+        }
+    }
+
     private function normalizeResponseBody(string $body): string
     {
         $body = preg_replace('/\s+/', ' ', trim($body)) ?? trim($body);
 
-        return $body;
+        return $this->redactSensitiveText($body);
+    }
+
+    private function redactSensitiveText(string $text): string
+    {
+        $text = preg_replace('/([?&]key=)[^&\s]+/i', '$1[REDACTED]', $text) ?? $text;
+
+        return preg_replace('/AIza[0-9A-Za-z_\-]{20,}/', '[REDACTED_GEMINI_KEY]', $text) ?? $text;
     }
 
     private function nihaiHatayiOlustur(

@@ -22,6 +22,7 @@ class AppUser {
   final int? freeMatchesLeft;
   final bool? notificationsEnabled;
   final bool? vibrationEnabled;
+  final bool? messageSoundsEnabled;
   final String? languageCode;
   final String? matchGenderFilterCode;
   final String? matchAgeFilterCode;
@@ -40,6 +41,7 @@ class AppUser {
     this.freeMatchesLeft,
     this.notificationsEnabled,
     this.vibrationEnabled,
+    this.messageSoundsEnabled,
     this.languageCode,
     this.matchGenderFilterCode,
     this.matchAgeFilterCode,
@@ -64,6 +66,7 @@ class AppUser {
     int? freeMatchesLeft,
     bool? notificationsEnabled,
     bool? vibrationEnabled,
+    bool? messageSoundsEnabled,
     String? languageCode,
     String? matchGenderFilterCode,
     String? matchAgeFilterCode,
@@ -82,6 +85,8 @@ class AppUser {
       freeMatchesLeft: freeMatchesLeft ?? this.freeMatchesLeft,
       notificationsEnabled: notificationsEnabled ?? this.notificationsEnabled,
       vibrationEnabled: vibrationEnabled ?? this.vibrationEnabled,
+      messageSoundsEnabled:
+          messageSoundsEnabled ?? this.messageSoundsEnabled,
       languageCode: languageCode ?? this.languageCode,
       matchGenderFilterCode:
           matchGenderFilterCode ?? this.matchGenderFilterCode,
@@ -104,6 +109,7 @@ class AppUser {
       'gunluk_ucretsiz_hak': freeMatchesLeft,
       'bildirimler_acik_mi': notificationsEnabled,
       'titresim_acik_mi': vibrationEnabled,
+      'ses_acik_mi': messageSoundsEnabled,
       'dil': languageCode,
       'eslesme_cinsiyet_filtresi': matchGenderFilterCode,
       'eslesme_yas_filtresi': matchAgeFilterCode,
@@ -125,6 +131,7 @@ class AppUser {
       freeMatchesLeft: (json['gunluk_ucretsiz_hak'] as num?)?.toInt(),
       notificationsEnabled: json['bildirimler_acik_mi'] as bool?,
       vibrationEnabled: json['titresim_acik_mi'] as bool?,
+      messageSoundsEnabled: json['ses_acik_mi'] as bool?,
       languageCode: _nullableString(json['dil']?.toString()),
       matchGenderFilterCode: _nullableString(
         json['eslesme_cinsiyet_filtresi']?.toString(),

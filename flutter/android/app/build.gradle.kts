@@ -8,6 +8,10 @@ plugins {
     id("dev.flutter.flutter-gradle-plugin")
 }
 
+val admobAndroidAppId = (project.findProperty("ADMOB_ANDROID_APP_ID") as String?)
+    ?: System.getenv("ADMOB_ANDROID_APP_ID")
+    ?: "ca-app-pub-3940256099942544~3347511713"
+
 android {
     namespace = "com.magmug.magmug"
     compileSdk = flutter.compileSdkVersion
@@ -31,6 +35,7 @@ android {
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+        manifestPlaceholders["admobApplicationId"] = admobAndroidAppId
     }
 
     buildTypes {

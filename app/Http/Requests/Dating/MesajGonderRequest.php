@@ -20,6 +20,7 @@ class MesajGonderRequest extends FormRequest
             'dosya_suresi' => 'nullable|integer',
             'dosya_boyutu' => 'nullable|integer',
             'cevaplanan_mesaj_id' => 'nullable|exists:mesajlar,id',
+            'client_message_id' => 'nullable|string|max:96',
         ];
     }
 }

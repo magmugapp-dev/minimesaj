@@ -12,10 +12,19 @@ Future<void> showOnboardingApiErrorModal(
   if (error is AppUpdateRequiredException) {
     await _showOnboardingAuthErrorModal(
       context,
-      title: 'Guncelleme gerekli',
+      title: AppRuntimeText.instance.t(
+        'updateRequiredTitle',
+        'Guncelleme gerekli',
+      ),
       message: message,
-      dismissLabel: 'Daha sonra',
-      actionLabel: 'Play Store\'u ac',
+      dismissLabel: AppRuntimeText.instance.t(
+        'updateLaterAction',
+        'Daha sonra',
+      ),
+      actionLabel: AppRuntimeText.instance.t(
+        'openPlayStoreAction',
+        'Play Store\'u ac',
+      ),
       onAction: () => _launchOnboardingUpdateUrl(context, error.updateUrl),
     );
     return;
@@ -48,14 +57,22 @@ Future<void> _launchOnboardingUpdateUrl(
   await showCupertinoDialog<void>(
     context: context,
     builder: (dialogContext) => CupertinoAlertDialog(
-      title: const Text('Magaza baglantisi acilamadi'),
-      content: const Text(
-        'Play Store baglantisi su anda acilamiyor. Biraz sonra tekrar deneyebilirsin.',
+      title: Text(
+        AppRuntimeText.instance.t(
+          'storeLinkOpenFailedTitle',
+          'Magaza baglantisi acilamadi',
+        ),
+      ),
+      content: Text(
+        AppRuntimeText.instance.t(
+          'storeLinkOpenFailedMessage',
+          'Play Store baglantisi su anda acilamiyor. Biraz sonra tekrar deneyebilirsin.',
+        ),
       ),
       actions: [
         CupertinoDialogAction(
           onPressed: () => Navigator.of(dialogContext).pop(),
-          child: const Text('Tamam'),
+          child: Text(AppRuntimeText.instance.t('commonOk', 'Tamam')),
         ),
       ],
     ),
@@ -66,7 +83,7 @@ Future<void> _showOnboardingAuthErrorModal(
   BuildContext context, {
   required String title,
   required String message,
-  String dismissLabel = 'Tamam',
+  String? dismissLabel,
   String? actionLabel,
   Future<void> Function()? onAction,
 }) async {
@@ -78,7 +95,9 @@ Future<void> _showOnboardingAuthErrorModal(
       actions: [
         CupertinoDialogAction(
           onPressed: () => Navigator.of(dialogContext).pop(),
-          child: Text(dismissLabel),
+          child: Text(
+            dismissLabel ?? AppRuntimeText.instance.t('commonOk', 'Tamam'),
+          ),
         ),
         if (actionLabel != null && onAction != null)
           CupertinoDialogAction(

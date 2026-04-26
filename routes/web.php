@@ -4,6 +4,7 @@ use App\Http\Controllers\Admin\AiController;
 use App\Http\Controllers\Admin\AiStudioController;
 use App\Http\Controllers\Admin\AbonelikPaketiController;
 use App\Http\Controllers\Admin\AyarController;
+use App\Http\Controllers\Admin\DilMetinController;
 use App\Http\Controllers\Admin\EngelController;
 use App\Http\Controllers\Admin\EslesmeController;
 use App\Http\Controllers\Admin\FinansalController;
@@ -55,6 +56,7 @@ Route::prefix('admin')->group(function () {
         Route::get('ai/{kullanici}', [AiStudioController::class, 'show'])->name('admin.ai.goster');
         Route::get('ai/{kullanici}/duzenle', [AiStudioController::class, 'edit'])->name('admin.ai.duzenle');
         Route::put('ai/{kullanici}', [AiStudioController::class, 'update'])->name('admin.ai.guncelle');
+        Route::delete('ai/{kullanici}', [AiStudioController::class, 'destroy'])->name('admin.ai.sil');
 
         // Moderasyon — Şikayetler
         Route::get('moderasyon/sikayetler', [SikayetController::class, 'index'])->name('admin.moderasyon.sikayetler');
@@ -115,12 +117,77 @@ Route::prefix('admin')->group(function () {
         Route::get('influencer', [InfluencerController::class, 'index'])->name('admin.influencer.index');
         Route::get('influencer/ekle', [InfluencerController::class, 'ekle'])->name('admin.influencer.ekle');
         Route::post('influencer/ekle', [InfluencerController::class, 'kaydet'])->name('admin.influencer.kaydet');
+        Route::get('influencer/json-ekle', [InfluencerController::class, 'jsonEkle'])->name('admin.influencer.json-ekle');
+        Route::post('influencer/json-ekle', [InfluencerController::class, 'jsonKaydet'])->name('admin.influencer.json-kaydet');
         Route::get('influencer/{kullanici}', [InfluencerController::class, 'goster'])->name('admin.influencer.goster');
         Route::get('influencer/{kullanici}/duzenle', [InfluencerController::class, 'duzenle'])->name('admin.influencer.duzenle');
         Route::put('influencer/{kullanici}', [InfluencerController::class, 'guncelle'])->name('admin.influencer.guncelle');
+        Route::delete('influencer/{kullanici}', [InfluencerController::class, 'destroy'])->name('admin.influencer.sil');
 
         // İstatistik
         Route::get('istatistik', [IstatistikController::class, 'index'])->name('admin.istatistik.index');
+
+        // Dil ve Metin Yonetimi
+        Route::get('dil-metin', [DilMetinController::class, 'index'])->name('admin.dil-metin.index');
+        Route::prefix('dil-metin/api')->name('admin.dil-metin.api.')->group(function (): void {
+            Route::get('meta', [DilMetinController::class, 'apiMeta'])->name('meta');
+
+            Route::get('keyler', [DilMetinController::class, 'apiTranslationKeysIndex'])->name('keys.index');
+            Route::post('keyler', [DilMetinController::class, 'apiTranslationKeyStore'])->name('keys.store');
+            Route::get('keyler/{translationKey}', [DilMetinController::class, 'apiTranslationKeyShow'])->name('keys.show');
+            Route::put('keyler/{translationKey}', [DilMetinController::class, 'apiTranslationKeyUpdate'])->name('keys.update');
+            Route::put('keyler/{translationKey}/ceviriler', [DilMetinController::class, 'apiTranslationsUpdate'])->name('keys.translations.update');
+            Route::delete('keyler/{translationKey}', [DilMetinController::class, 'apiTranslationKeyDestroy'])->name('keys.destroy');
+            Route::patch('keyler/{translationKey}/geri-al', [DilMetinController::class, 'apiTranslationKeyRestore'])->name('keys.restore');
+            Route::delete('keyler/{translationKey}/kalici-sil', [DilMetinController::class, 'apiTranslationKeyForceDestroy'])->name('keys.force-destroy');
+
+            Route::get('diller', [DilMetinController::class, 'apiLanguagesIndex'])->name('languages.index');
+            Route::post('diller', [DilMetinController::class, 'apiLanguageStore'])->name('languages.store');
+            Route::get('diller/{language}', [DilMetinController::class, 'apiLanguageShow'])->name('languages.show');
+            Route::put('diller/{language}', [DilMetinController::class, 'apiLanguageUpdate'])->name('languages.update');
+            Route::patch('diller/{language}/varsayilan', [DilMetinController::class, 'apiLanguageMakeDefault'])->name('languages.default');
+            Route::delete('diller/{language}', [DilMetinController::class, 'apiLanguageDestroy'])->name('languages.destroy');
+            Route::patch('diller/{language}/geri-al', [DilMetinController::class, 'apiLanguageRestore'])->name('languages.restore');
+            Route::delete('diller/{language}/kalici-sil', [DilMetinController::class, 'apiLanguageForceDestroy'])->name('languages.force-destroy');
+
+            Route::get('yasal-metinler', [DilMetinController::class, 'apiLegalDocumentsIndex'])->name('legal.index');
+            Route::post('yasal-metinler', [DilMetinController::class, 'apiLegalDocumentStore'])->name('legal.store');
+            Route::get('yasal-metinler/{legalDocument}', [DilMetinController::class, 'apiLegalDocumentShow'])->name('legal.show');
+            Route::put('yasal-metinler/{legalDocument}', [DilMetinController::class, 'apiLegalDocumentUpdate'])->name('legal.update');
+            Route::delete('yasal-metinler/{legalDocument}', [DilMetinController::class, 'apiLegalDocumentDestroy'])->name('legal.destroy');
+            Route::patch('yasal-metinler/{legalDocument}/geri-al', [DilMetinController::class, 'apiLegalDocumentRestore'])->name('legal.restore');
+            Route::delete('yasal-metinler/{legalDocument}/kalici-sil', [DilMetinController::class, 'apiLegalDocumentForceDestroy'])->name('legal.force-destroy');
+
+            Route::get('faq', [DilMetinController::class, 'apiFaqItemsIndex'])->name('faq.index');
+            Route::post('faq', [DilMetinController::class, 'apiFaqItemStore'])->name('faq.store');
+            Route::get('faq/{faqItem}', [DilMetinController::class, 'apiFaqItemShow'])->name('faq.show');
+            Route::put('faq/{faqItem}', [DilMetinController::class, 'apiFaqItemUpdate'])->name('faq.update');
+            Route::delete('faq/{faqItem}', [DilMetinController::class, 'apiFaqItemDestroy'])->name('faq.destroy');
+            Route::patch('faq/{faqItem}/geri-al', [DilMetinController::class, 'apiFaqItemRestore'])->name('faq.restore');
+            Route::delete('faq/{faqItem}/kalici-sil', [DilMetinController::class, 'apiFaqItemForceDestroy'])->name('faq.force-destroy');
+        });
+        Route::post('dil-metin/diller', [DilMetinController::class, 'storeLanguage'])->name('admin.dil-metin.languages.store');
+        Route::put('dil-metin/diller/{language}', [DilMetinController::class, 'updateLanguage'])->name('admin.dil-metin.languages.update');
+        Route::patch('dil-metin/diller/{language}/varsayilan', [DilMetinController::class, 'makeDefaultLanguage'])->name('admin.dil-metin.languages.default');
+        Route::delete('dil-metin/diller/{language}', [DilMetinController::class, 'destroyLanguage'])->name('admin.dil-metin.languages.destroy');
+        Route::patch('dil-metin/diller/{language}/geri-al', [DilMetinController::class, 'restoreLanguage'])->name('admin.dil-metin.languages.restore');
+        Route::delete('dil-metin/diller/{language}/kalici-sil', [DilMetinController::class, 'forceDestroyLanguage'])->name('admin.dil-metin.languages.force-destroy');
+        Route::post('dil-metin/keyler', [DilMetinController::class, 'storeTranslationKey'])->name('admin.dil-metin.keys.store');
+        Route::patch('dil-metin/keyler/toplu-arsivle', [DilMetinController::class, 'bulkArchiveTranslationKeys'])->name('admin.dil-metin.keys.bulk-archive');
+        Route::put('dil-metin/keyler/{translationKey}', [DilMetinController::class, 'updateTranslationKey'])->name('admin.dil-metin.keys.update');
+        Route::delete('dil-metin/keyler/{translationKey}', [DilMetinController::class, 'destroyTranslationKey'])->name('admin.dil-metin.keys.destroy');
+        Route::patch('dil-metin/keyler/{translationKey}/geri-al', [DilMetinController::class, 'restoreTranslationKey'])->name('admin.dil-metin.keys.restore');
+        Route::delete('dil-metin/keyler/{translationKey}/kalici-sil', [DilMetinController::class, 'forceDestroyTranslationKey'])->name('admin.dil-metin.keys.force-destroy');
+        Route::put('dil-metin/keyler/{translationKey}/ceviri', [DilMetinController::class, 'updateTranslation'])->name('admin.dil-metin.translations.update');
+        Route::put('dil-metin/yasal-metin', [DilMetinController::class, 'updateLegalDocument'])->name('admin.dil-metin.legal.update');
+        Route::delete('dil-metin/yasal-metin/{legalDocument}', [DilMetinController::class, 'destroyLegalDocument'])->name('admin.dil-metin.legal.destroy');
+        Route::patch('dil-metin/yasal-metin/{legalDocument}/geri-al', [DilMetinController::class, 'restoreLegalDocument'])->name('admin.dil-metin.legal.restore');
+        Route::delete('dil-metin/yasal-metin/{legalDocument}/kalici-sil', [DilMetinController::class, 'forceDestroyLegalDocument'])->name('admin.dil-metin.legal.force-destroy');
+        Route::post('dil-metin/faq', [DilMetinController::class, 'storeFaq'])->name('admin.dil-metin.faq.store');
+        Route::put('dil-metin/faq/{faqItem}', [DilMetinController::class, 'updateFaq'])->name('admin.dil-metin.faq.update');
+        Route::delete('dil-metin/faq/{faqItem}', [DilMetinController::class, 'destroyFaq'])->name('admin.dil-metin.faq.destroy');
+        Route::patch('dil-metin/faq/{faqItem}/geri-al', [DilMetinController::class, 'restoreFaq'])->name('admin.dil-metin.faq.restore');
+        Route::delete('dil-metin/faq/{faqItem}/kalici-sil', [DilMetinController::class, 'forceDestroyFaq'])->name('admin.dil-metin.faq.force-destroy');
 
         // Ayarlar
         Route::get('ayarlar', [AyarController::class, 'index'])->name('admin.ayarlar');

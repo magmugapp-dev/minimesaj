@@ -50,6 +50,20 @@ class MesajServisi
             }
 
             $karsiTaraf = User::find($karsiTarafId);
+            $clientMessageId = trim((string) ($veri['client_message_id'] ?? ''));
+
+            if ($clientMessageId !== '') {
+                $mevcutMesaj = Mesaj::query()
+                    ->where('sohbet_id', $sohbet->id)
+                    ->where('gonderen_user_id', $gonderen->id)
+                    ->where('client_message_id', $clientMessageId)
+                    ->first();
+
+                if ($mevcutMesaj) {
+                    return $mevcutMesaj;
+                }
+            }
+
             $language = $this->messageLanguageFor($gonderen);
 
             $mesaj = Mesaj::create([
@@ -63,6 +77,7 @@ class MesajServisi
                 'dosya_suresi' => $veri['dosya_suresi'] ?? null,
                 'dosya_boyutu' => $veri['dosya_boyutu'] ?? null,
                 'cevaplanan_mesaj_id' => $veri['cevaplanan_mesaj_id'] ?? null,
+                'client_message_id' => $clientMessageId !== '' ? $clientMessageId : null,
             ]);
 
             $sohbet->update([

@@ -35,7 +35,8 @@ it('renders the redesigned ai studio pages for an admin', function () {
         ->assertSeeText('Konusma Tonu')
         ->assertSeeText('Utangac ama sicak')
         ->assertSeeText('Cevap Ritmi')
-        ->assertSeeText('Yavas ama derinlikli');
+        ->assertSeeText('Yavas ama derinlikli')
+        ->assertSeeText('Aktif / Pasif Saatler');
 
     $this->actingAs($admin)
         ->get(route('admin.ai.goster', $aiUser))
@@ -48,7 +49,8 @@ it('renders the redesigned ai studio pages for an admin', function () {
         ->assertOk()
         ->assertSeeText('Davranis Sliderlari')
         ->assertSeeText('Kimlik ve Hesap')
-        ->assertSeeText('Kisisel Kurallar');
+        ->assertSeeText('Kisisel Kurallar')
+        ->assertSeeText('Aktif / Pasif Saatler');
 
     $this->actingAs($admin)
         ->get(route('admin.ai.states'))

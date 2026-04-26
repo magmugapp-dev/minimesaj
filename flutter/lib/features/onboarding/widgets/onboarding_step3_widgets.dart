@@ -46,10 +46,13 @@ class OnboardingStep3View extends StatelessWidget {
                         child: CircleBackButton(onTap: onBack),
                       ),
                       const SizedBox(height: 20),
-                      const Text(
-                        'Bir fotografini\nekle',
+                      Text(
+                        AppRuntimeText.instance.t(
+                          'onboarding.photo.title',
+                          'Bir fotografini\nekle',
+                        ),
                         textAlign: TextAlign.center,
-                        style: TextStyle(
+                        style: const TextStyle(
                           fontFamily: AppFont.family,
                           fontWeight: FontWeight.w800,
                           fontSize: 27.3,
@@ -59,10 +62,13 @@ class OnboardingStep3View extends StatelessWidget {
                         ),
                       ),
                       const SizedBox(height: 10),
-                      const Text(
-                        'Yuzunun net gorunduugu bir fotograf sec',
+                      Text(
+                        AppRuntimeText.instance.t(
+                          'onboarding.photo.subtitle',
+                          'Yuzunun net gorundugu bir fotograf sec',
+                        ),
                         textAlign: TextAlign.center,
-                        style: TextStyle(
+                        style: const TextStyle(
                           fontFamily: AppFont.family,
                           fontSize: 14,
                           color: AppColors.gray,
@@ -77,12 +83,23 @@ class OnboardingStep3View extends StatelessWidget {
                       ),
                       const SizedBox(height: 24),
                       GradientButton(
-                        label: submitting ? 'Kaydediliyor...' : 'Devam Et',
+                        label: submitting
+                            ? AppRuntimeText.instance.t(
+                                'commonSaving',
+                                'Kaydediliyor...',
+                              )
+                            : AppRuntimeText.instance.t(
+                                'commonContinue',
+                                'Devam Et',
+                              ),
                         onTap: submitting ? null : onContinue,
                       ),
                       const SizedBox(height: 12),
                       SecondaryButton(
-                        label: 'Bunu Atla',
+                        label: AppRuntimeText.instance.t(
+                          'onboarding.photo.skip',
+                          'Bunu Atla',
+                        ),
                         onTap: submitting ? null : onSkip,
                       ),
                       const SizedBox(height: 12),

@@ -34,6 +34,10 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
+        if ($this->app->runningInConsole()) {
+            $this->disableConsoleExecutionLimit();
+        }
+
         View::composer('admin.layout.ana', function ($view) {
             $adminNavbarGunlukBakiye = Odeme::query()
                 ->where('durum', 'basarili')
@@ -42,5 +46,16 @@ class AppServiceProvider extends ServiceProvider
 
             $view->with('adminNavbarGunlukBakiye', $adminNavbarGunlukBakiye);
         });
+    }
+
+    private function disableConsoleExecutionLimit(): void
+    {
+        if (function_exists('ini_set')) {
+            @ini_set('max_execution_time', '0');
+        }
+
+        if (function_exists('set_time_limit')) {
+            @set_time_limit(0);
+        }
     }
 }

@@ -4,6 +4,12 @@ class AppApi {
   AppApi._();
 
   static const String publicSettingsPath = '/api/uygulama/ayarlar';
+  static const String legalTextsPath = '/api/uygulama/yasal-metinler';
+  static const String appContentPath = '/api/app-content';
+  static const String mobileConfigPath = '/api/mobile/config';
+  static const String mobileBootstrapPath = '/api/mobile/bootstrap';
+  static const String mobileSyncPath = '/api/mobile/sync';
+  static const String mobileUploadsPath = '/api/mobile/uploads';
   static const String discoverPath = '/api/dating/kesfet';
   static const String matchCenterPath = '/api/dating/eslesme-merkezi';
   static const String matchPreferencesPath = '/api/dating/eslesme-tercihleri';
@@ -30,11 +36,16 @@ class AppApi {
   static const String paymentPackagesPath = '/api/odeme/paketler';
   static const String subscriptionPackagesPath = '/api/odeme/abonelik-paketler';
   static const String verifyPaymentPath = '/api/odeme/dogrula';
+  static const String rewardAdStatusPath = '/api/odeme/reklam-odul/durum';
+  static const String claimRewardAdPath = '/api/odeme/reklam-odul';
   static const String giftListPath = '/api/hediyeler';
   static const String sendGiftPath = '/api/hediye/gonder';
 
   static String datingChatMessagesPath(int conversationId) =>
       '/api/dating/sohbetler/$conversationId/mesajlar';
+
+  static String mobileConversationMessagesPath(int conversationId) =>
+      '/api/mobile/conversations/$conversationId/messages';
 
   static String datingChatMessageTranslationPath(
     int conversationId,
@@ -51,6 +62,9 @@ class AppApi {
 
   static String datingPeerProfilePath(int userId) =>
       '/api/dating/profil/$userId';
+
+  static String influencerProfilePath(int userId) =>
+      '/api/dating/influencer-profile/$userId';
 
   static String muteUserPath(int userId) => '/api/dating/sessize-al/$userId';
 

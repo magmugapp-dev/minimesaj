@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\Ayar;
 use App\Services\AyarServisi;
 use App\Services\Odeme\MobilOdemeAyarServisi;
 use Illuminate\Support\Facades\Storage;
@@ -54,6 +55,7 @@ class UygulamaAyarController extends Controller
                         'kullanilabilir' => $appStoreDurumu['aktif'] && $appStoreDurumu['hazir'],
                     ],
                 ],
+                'reklamlar' => $this->reklamAyarlari(),
                 'logo_guncelleme_zamani' => $logoVarMi
                     ? Storage::disk('public')->lastModified($logoYolu)
                     : null,
@@ -91,6 +93,36 @@ class UygulamaAyarController extends Controller
         ]);
     }
 
+    public function yasalMetinler()
+    {
+        $metinler = [
+            'gizlilik_politikasi' => $this->yasalMetinPayload(
+                'gizlilik_politikasi',
+                'Gizlilik Politikasi'
+            ),
+            'kvkk_aydinlatma_metni' => $this->yasalMetinPayload(
+                'kvkk_aydinlatma_metni',
+                'KVKK Aydinlatma Metni'
+            ),
+            'kullanim_kosullari' => $this->yasalMetinPayload(
+                'kullanim_kosullari',
+                'Kullanim Kosullari'
+            ),
+        ];
+        $version = sha1(json_encode($metinler, JSON_UNESCAPED_UNICODE));
+
+        return response()
+            ->json([
+                'durum' => true,
+                'veri' => [
+                    'version' => $version,
+                    'metinler' => $metinler,
+                ],
+            ])
+            ->setEtag($version)
+            ->header('Cache-Control', 'public, max-age=300');
+    }
+
     private function nullableString(string $anahtar): ?string
     {
         $deger = $this->ayarServisi->al($anahtar);
@@ -102,5 +134,37 @@ class UygulamaAyarController extends Controller
         $metin = trim((string) $deger);
 
         return $metin === '' ? null : $metin;
+    }
+
+    private function reklamAyarlari(): array
+    {
+        return [
+            'aktif_mi' => (bool) $this->ayarServisi->al('admob_aktif_mi', false),
+            'test_modu' => (bool) $this->ayarServisi->al('admob_test_modu', true),
+            'odul_puani' => max(0, (int) $this->ayarServisi->al('reklam_odulu', 15)),
+            'gunluk_odul_limiti' => max(0, (int) $this->ayarServisi->al('reklam_gunluk_odul_limiti', 10)),
+            'android' => [
+                'app_id' => $this->nullableString('admob_android_app_id'),
+                'rewarded_unit_id' => $this->nullableString('admob_android_rewarded_unit_id'),
+                'match_native_unit_id' => $this->nullableString('admob_android_match_native_unit_id'),
+            ],
+            'ios' => [
+                'app_id' => $this->nullableString('admob_ios_app_id'),
+                'rewarded_unit_id' => $this->nullableString('admob_ios_rewarded_unit_id'),
+                'match_native_unit_id' => $this->nullableString('admob_ios_match_native_unit_id'),
+            ],
+        ];
+    }
+
+    private function yasalMetinPayload(string $anahtar, string $baslik): array
+    {
+        $ayar = Ayar::query()->where('anahtar', $anahtar)->first();
+
+        return [
+            'anahtar' => $anahtar,
+            'baslik' => $baslik,
+            'icerik' => (string) ($ayar?->deger ?? ''),
+            'guncellendi_at' => $ayar?->updated_at?->toISOString(),
+        ];
     }
 }

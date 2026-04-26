@@ -7,10 +7,15 @@ use App\Http\Resources\KullaniciResource;
 use App\Models\Engelleme;
 use App\Models\Eslesme;
 use App\Models\User;
+use App\Services\Users\UserOnlineStatusService;
 use Illuminate\Http\Request;
 
 class KesfetController extends Controller
 {
+    public function __construct(
+        private UserOnlineStatusService $userOnlineStatusService,
+    ) {}
+
     public function index(Request $request)
     {
         $user = $request->user();
@@ -42,12 +47,18 @@ class KesfetController extends Controller
             ->unique()
             ->values();
 
+        $this->syncAiCandidates($haricTutulanlar);
+
         $adaySorgusu = User::query()
             ->whereIn('hesap_tipi', ['user', 'ai'])
             ->where('hesap_durumu', 'aktif')
             ->where('cevrim_ici_mi', true)
             ->whereNotIn('id', $haricTutulanlar)
-            ->with('fotograflar')
+            ->with([
+                'fotograflar',
+                'aiAyar:id,user_id,aktif_mi,saat_dilimi,uyku_baslangic,uyku_bitis,hafta_sonu_uyku_baslangic,hafta_sonu_uyku_bitis',
+                'availabilitySchedules:id,user_id,recurrence_type,specific_date,day_of_week,starts_at,ends_at,status',
+            ])
             ->orderByRaw("CASE WHEN hesap_tipi = 'user' THEN 0 ELSE 1 END")
             ->orderByDesc('cevrim_ici_mi')
             ->inRandomOrder();
@@ -69,5 +80,20 @@ class KesfetController extends Controller
         $adaylar = $adaySorgusu->paginate($sayfaBasina);
 
         return KullaniciResource::collection($adaylar);
+    }
+
+    private function syncAiCandidates($excludedIds): void
+    {
+        $aiUsers = User::query()
+            ->where('hesap_tipi', 'ai')
+            ->where('hesap_durumu', 'aktif')
+            ->whereNotIn('id', $excludedIds)
+            ->with([
+                'aiAyar:id,user_id,aktif_mi,saat_dilimi,uyku_baslangic,uyku_bitis,hafta_sonu_uyku_baslangic,hafta_sonu_uyku_bitis',
+                'availabilitySchedules:id,user_id,recurrence_type,specific_date,day_of_week,starts_at,ends_at,status',
+            ])
+            ->get(['id', 'hesap_tipi', 'hesap_durumu', 'cevrim_ici_mi', 'son_gorulme_tarihi']);
+
+        $this->userOnlineStatusService->syncCollection($aiUsers);
     }
 }

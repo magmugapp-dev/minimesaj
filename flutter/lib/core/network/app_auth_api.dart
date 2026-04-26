@@ -9,6 +9,8 @@ import 'package:http/io_client.dart';
 import 'package:http_parser/http_parser.dart';
 import 'package:magmug/core/chat/chat_text_sanitizer.dart';
 import 'package:magmug/core/config/app_config.dart';
+import 'package:magmug/core/i18n/app_runtime_text.dart';
+import 'package:magmug/core/models/app_content_models.dart';
 import 'package:magmug/core/models/auth_models.dart';
 import 'package:magmug/core/models/communication_models.dart';
 import 'package:magmug/core/models/match_models.dart';
@@ -18,6 +20,67 @@ import 'package:magmug/core/models/user_models.dart';
 import 'package:magmug/core/network/app_api.dart';
 
 typedef UploadProgressCallback = void Function(double progress);
+
+@immutable
+class AppMobileBootstrap {
+  final String? syncToken;
+  final AppUser user;
+  final AppPublicSettings publicSettings;
+  final AppMatchCenterSummary matchSummary;
+  final List<AppConversationPreview> conversations;
+  final List<AppMatchCandidate> discoverProfiles;
+  final int unreadNotificationCount;
+
+  const AppMobileBootstrap({
+    required this.syncToken,
+    required this.user,
+    required this.publicSettings,
+    required this.matchSummary,
+    required this.conversations,
+    required this.discoverProfiles,
+    required this.unreadNotificationCount,
+  });
+}
+
+@immutable
+class AppMobileSyncResult {
+  final String? syncToken;
+  final bool hasMore;
+  final AppUser? user;
+  final AppMatchCenterSummary? matchSummary;
+  final List<AppConversationPreview> conversations;
+  final List<AppConversationMessage> messages;
+  final List<AppNotification> notifications;
+  final int unreadNotificationCount;
+
+  const AppMobileSyncResult({
+    required this.syncToken,
+    this.hasMore = false,
+    this.user,
+    this.matchSummary,
+    this.conversations = const [],
+    this.messages = const [],
+    this.notifications = const [],
+    this.unreadNotificationCount = 0,
+  });
+}
+
+@immutable
+class AppMobileUploadResult {
+  final String? clientUploadId;
+  final String filePath;
+  final String? fileUrl;
+  final String? mimeType;
+  final int? size;
+
+  const AppMobileUploadResult({
+    required this.clientUploadId,
+    required this.filePath,
+    this.fileUrl,
+    this.mimeType,
+    this.size,
+  });
+}
 
 class _ProgressMultipartRequest extends http.MultipartRequest {
   _ProgressMultipartRequest(super.method, super.url, {this.onProgress});
@@ -58,6 +121,18 @@ MediaType? _mediaTypeFromFilePath(String filePath) {
   if (normalized.endsWith('.heif')) {
     return MediaType('image', 'heif');
   }
+  if (normalized.endsWith('.m4a')) {
+    return MediaType('audio', 'mp4');
+  }
+  if (normalized.endsWith('.aac')) {
+    return MediaType('audio', 'aac');
+  }
+  if (normalized.endsWith('.mp3')) {
+    return MediaType('audio', 'mpeg');
+  }
+  if (normalized.endsWith('.wav')) {
+    return MediaType('audio', 'wav');
+  }
   if (normalized.endsWith('.mp4')) {
     return MediaType('video', 'mp4');
   }
@@ -91,7 +166,9 @@ class AppAuthApi {
   Future<bool> checkUsernameAvailability(String username) async {
     final normalized = username.trim().replaceFirst(RegExp(r'^@+'), '');
     if (normalized.isEmpty) {
-      throw const ApiException('Kullanici adi bos birakilamaz.');
+      throw ApiException(
+        _text('apiErrorUsernameRequired', 'Kullanici adi bos birakilamaz.'),
+      );
     }
 
     final uri = AppApi.uri(
@@ -169,11 +246,21 @@ class AppAuthApi {
     OnboardData data,
   ) async {
     if (!data.hasSocialSession) {
-      throw const ApiException('Sosyal oturum bilgisi bulunamadi.');
+      throw ApiException(
+        _text(
+          'apiErrorSocialSessionMissing',
+          'Sosyal oturum bilgisi bulunamadi.',
+        ),
+      );
     }
 
     if (!data.step1Valid || data.gender == null) {
-      throw const ApiException('Onboarding alanlari tamamlanmadi.');
+      throw ApiException(
+        _text(
+          'apiErrorOnboardingIncomplete',
+          'Onboarding alanlari tamamlanmadi.',
+        ),
+      );
     }
 
     final request = http.MultipartRequest(
@@ -221,7 +308,9 @@ class AppAuthApi {
 
     final payload = _decodeJsonMap(response);
     if (response.statusCode == 401 || response.statusCode == 403) {
-      throw const UnauthorizedApiException('Oturum suresi doldu.');
+      throw UnauthorizedApiException(
+        _text('apiErrorSessionExpired', 'Oturum suresi doldu.'),
+      );
     }
     if (response.statusCode >= 400) {
       throw ApiException(_extractErrorMessage(payload));
@@ -245,6 +334,133 @@ class AppAuthApi {
     return AppPublicSettings.fromJson(data);
   }
 
+  Future<AppPublicSettings> fetchMobileConfig() async {
+    final response = await _client.get(
+      AppApi.uri(AppApi.mobileConfigPath),
+      headers: const {'Accept': 'application/json'},
+    );
+
+    final payload = _decodeJsonMap(response);
+    if (response.statusCode >= 400) {
+      throw ApiException(_extractErrorMessage(payload));
+    }
+
+    final settings = _asMap(payload['public_settings']) ?? payload;
+    return AppPublicSettings.fromJson(settings);
+  }
+
+  Future<AppMobileBootstrap> fetchMobileBootstrap(String token) async {
+    final response = await _client.get(
+      AppApi.uri(AppApi.mobileBootstrapPath),
+      headers: {'Accept': 'application/json', 'Authorization': 'Bearer $token'},
+    );
+
+    final payload = _decodeJsonMap(response);
+    if (response.statusCode == 401 || response.statusCode == 403) {
+      throw UnauthorizedApiException(
+        _text('apiErrorSessionExpired', 'Oturum suresi doldu.'),
+      );
+    }
+    if (response.statusCode >= 400) {
+      throw ApiException(_extractErrorMessage(payload));
+    }
+
+    final user = _extractUser(payload['user']);
+    if (user == null) {
+      throw ApiException(
+        _text(
+          'apiErrorMobileBootstrapUserUnreadable',
+          'Mobil baslangic kullanici yaniti okunamadi.',
+        ),
+      );
+    }
+    final currentUserId = user.id;
+
+    return AppMobileBootstrap(
+      syncToken: _nullableString(payload['sync_token']?.toString()),
+      user: user,
+      publicSettings: AppPublicSettings.fromJson(
+        _asMap(payload['public_settings']) ?? const <String, dynamic>{},
+      ),
+      matchSummary: AppMatchCenterSummary.fromJson(
+        _asMap(payload['match_summary']) ?? const <String, dynamic>{},
+      ),
+      conversations: _mapsFromValue(payload['conversations'])
+          .map(
+            (item) => _conversationFromJson(item, currentUserId: currentUserId),
+          )
+          .whereType<AppConversationPreview>()
+          .toList(),
+      discoverProfiles: _mapsFromValue(payload['discover_profiles'])
+          .map(AppMatchCandidate.fromJson)
+          .where((candidate) => candidate.id > 0)
+          .toList(),
+      unreadNotificationCount:
+          (_asMap(payload['notifications'])?['unread_count'] as num?)
+              ?.toInt() ??
+          0,
+    );
+  }
+
+  Future<AppMobileSyncResult> syncMobile(
+    String token, {
+    String? syncToken,
+  }) async {
+    final response = await _client.post(
+      AppApi.uri(AppApi.mobileSyncPath),
+      headers: {
+        'Accept': 'application/json',
+        'Authorization': 'Bearer $token',
+        'Content-Type': 'application/json',
+      },
+      body: jsonEncode({
+        if (syncToken != null && syncToken.trim().isNotEmpty)
+          'sync_token': syncToken.trim(),
+      }),
+    );
+
+    final payload = _decodeJsonMap(response);
+    if (response.statusCode == 401 || response.statusCode == 403) {
+      throw UnauthorizedApiException(
+        _text('apiErrorSessionExpired', 'Oturum suresi doldu.'),
+      );
+    }
+    if (response.statusCode >= 400) {
+      throw ApiException(_extractErrorMessage(payload));
+    }
+
+    final user = _extractUser(payload['user']);
+    final currentUserId = user?.id;
+    final notificationPayload = _asMap(payload['notifications']);
+
+    return AppMobileSyncResult(
+      syncToken: _nullableString(payload['sync_token']?.toString()),
+      hasMore: _boolFromValue(payload['has_more']),
+      user: user,
+      matchSummary: AppMatchCenterSummary.fromJson(
+        _asMap(payload['match_summary']) ?? const <String, dynamic>{},
+      ),
+      conversations: currentUserId == null
+          ? const <AppConversationPreview>[]
+          : _mapsFromValue(payload['conversations'])
+                .map(
+                  (item) =>
+                      _conversationFromJson(item, currentUserId: currentUserId),
+                )
+                .whereType<AppConversationPreview>()
+                .toList(),
+      messages: _mapsFromValue(payload['messages'])
+          .map(_conversationMessageFromJson)
+          .whereType<AppConversationMessage>()
+          .toList(),
+      notifications: _mapsFromValue(
+        notificationPayload?['items'],
+      ).map(_notificationFromJson).whereType<AppNotification>().toList(),
+      unreadNotificationCount:
+          (notificationPayload?['unread_count'] as num?)?.toInt() ?? 0,
+    );
+  }
+
   Future<List<AppCreditPackage>> fetchCreditPackages(
     String token, {
     String? platform,
@@ -262,7 +478,9 @@ class AppAuthApi {
 
     final payload = _decodeJsonMap(response);
     if (response.statusCode == 401 || response.statusCode == 403) {
-      throw const UnauthorizedApiException('Oturum suresi doldu.');
+      throw UnauthorizedApiException(
+        _text('apiErrorSessionExpired', 'Oturum suresi doldu.'),
+      );
     }
     if (response.statusCode >= 400) {
       throw ApiException(_extractErrorMessage(payload));
@@ -293,7 +511,9 @@ class AppAuthApi {
 
     final payload = _decodeJsonMap(response);
     if (response.statusCode == 401 || response.statusCode == 403) {
-      throw const UnauthorizedApiException('Oturum suresi doldu.');
+      throw UnauthorizedApiException(
+        _text('apiErrorSessionExpired', 'Oturum suresi doldu.'),
+      );
     }
     if (response.statusCode >= 400) {
       throw ApiException(_extractErrorMessage(payload));
@@ -315,7 +535,9 @@ class AppAuthApi {
 
     final payload = _decodeJsonMap(response);
     if (response.statusCode == 401 || response.statusCode == 403) {
-      throw const UnauthorizedApiException('Oturum suresi doldu.');
+      throw UnauthorizedApiException(
+        _text('apiErrorSessionExpired', 'Oturum suresi doldu.'),
+      );
     }
     if (response.statusCode >= 400) {
       throw ApiException(_extractErrorMessage(payload));
@@ -360,11 +582,101 @@ class AppAuthApi {
 
     final payload = _decodeJsonMap(response);
     if (response.statusCode == 401 || response.statusCode == 403) {
-      throw const UnauthorizedApiException('Oturum suresi doldu.');
+      throw UnauthorizedApiException(
+        _text('apiErrorSessionExpired', 'Oturum suresi doldu.'),
+      );
     }
     if (response.statusCode >= 400) {
       throw ApiException(_extractErrorMessage(payload));
     }
+  }
+
+  Future<AppLegalTexts> fetchLegalTexts() async {
+    final response = await _client.get(
+      AppApi.uri(AppApi.legalTextsPath),
+      headers: const {'Accept': 'application/json'},
+    );
+
+    final payload = _decodeJsonMap(response);
+    if (response.statusCode >= 400) {
+      throw ApiException(_extractErrorMessage(payload));
+    }
+
+    final data = _asMap(payload['veri']) ?? _asMap(payload['data']) ?? payload;
+    return AppLegalTexts.fromJson(data);
+  }
+
+  Future<AppContent> fetchAppContent(String languageCode) async {
+    final uri = AppApi.uri(AppApi.appContentPath).replace(
+      queryParameters: {
+        if (languageCode.trim().isNotEmpty) 'lang': languageCode.trim(),
+      },
+    );
+    final response = await _client.get(
+      uri,
+      headers: const {'Accept': 'application/json'},
+    );
+
+    final payload = _decodeJsonMap(response);
+    if (response.statusCode >= 400) {
+      throw ApiException(_extractErrorMessage(payload));
+    }
+
+    return AppContent.fromJson(payload);
+  }
+
+  Future<AppRewardAdStatus> fetchRewardAdStatus(String token) async {
+    final response = await _client.get(
+      AppApi.uri(AppApi.rewardAdStatusPath),
+      headers: {'Accept': 'application/json', 'Authorization': 'Bearer $token'},
+    );
+
+    final payload = _decodeJsonMap(response);
+    if (response.statusCode == 401 || response.statusCode == 403) {
+      throw UnauthorizedApiException(
+        _text('apiErrorSessionExpired', 'Oturum suresi doldu.'),
+      );
+    }
+    if (response.statusCode >= 400) {
+      throw ApiException(_extractErrorMessage(payload));
+    }
+
+    return AppRewardAdStatus.fromJson(payload);
+  }
+
+  Future<AppRewardAdClaimResult> claimRewardedAd(
+    String token, {
+    required String platform,
+    required String adUnitId,
+    required String eventCode,
+    String adType = 'rewarded',
+  }) async {
+    final response = await _client.post(
+      AppApi.uri(AppApi.claimRewardAdPath),
+      headers: {
+        'Accept': 'application/json',
+        'Authorization': 'Bearer $token',
+        'Content-Type': 'application/json',
+      },
+      body: jsonEncode({
+        'reklam_platformu': platform,
+        'reklam_birim_kodu': adUnitId,
+        'olay_kodu': eventCode,
+        'reklam_tipi': adType,
+      }),
+    );
+
+    final payload = _decodeJsonMap(response);
+    if (response.statusCode == 401 || response.statusCode == 403) {
+      throw UnauthorizedApiException(
+        _text('apiErrorSessionExpired', 'Oturum suresi doldu.'),
+      );
+    }
+    if (response.statusCode >= 400) {
+      throw ApiException(_extractErrorMessage(payload));
+    }
+
+    return AppRewardAdClaimResult.fromJson(payload);
   }
 
   Future<AppMatchCenterSummary> fetchMatchCenter(String token) async {
@@ -375,7 +687,9 @@ class AppAuthApi {
 
     final payload = _decodeJsonMap(response);
     if (response.statusCode == 401 || response.statusCode == 403) {
-      throw const UnauthorizedApiException('Oturum suresi doldu.');
+      throw UnauthorizedApiException(
+        _text('apiErrorSessionExpired', 'Oturum suresi doldu.'),
+      );
     }
     if (response.statusCode >= 400) {
       throw ApiException(_extractErrorMessage(payload));
@@ -401,7 +715,9 @@ class AppAuthApi {
 
     final payload = _decodeJsonMap(response);
     if (response.statusCode == 401 || response.statusCode == 403) {
-      throw const UnauthorizedApiException('Oturum suresi doldu.');
+      throw UnauthorizedApiException(
+        _text('apiErrorSessionExpired', 'Oturum suresi doldu.'),
+      );
     }
     if (response.statusCode >= 400) {
       throw ApiException(_extractErrorMessage(payload));
@@ -436,7 +752,9 @@ class AppAuthApi {
 
     final payload = _decodeJsonMap(response);
     if (response.statusCode == 401 || response.statusCode == 403) {
-      throw const UnauthorizedApiException('Oturum suresi doldu.');
+      throw UnauthorizedApiException(
+        _text('apiErrorSessionExpired', 'Oturum suresi doldu.'),
+      );
     }
     if (response.statusCode >= 400) {
       throw ApiException(_extractErrorMessage(payload));
@@ -454,7 +772,9 @@ class AppAuthApi {
 
     final payload = _decodeJsonMap(response);
     if (response.statusCode == 401 || response.statusCode == 403) {
-      throw const UnauthorizedApiException('Oturum suresi doldu.');
+      throw UnauthorizedApiException(
+        _text('apiErrorSessionExpired', 'Oturum suresi doldu.'),
+      );
     }
     if (response.statusCode >= 400 && response.statusCode != 402) {
       throw ApiException(_extractErrorMessage(payload));
@@ -474,7 +794,9 @@ class AppAuthApi {
 
     final payload = _decodeJsonMap(response);
     if (response.statusCode == 401 || response.statusCode == 403) {
-      throw const UnauthorizedApiException('Oturum suresi doldu.');
+      throw UnauthorizedApiException(
+        _text('apiErrorSessionExpired', 'Oturum suresi doldu.'),
+      );
     }
     if (response.statusCode >= 400) {
       throw ApiException(_extractErrorMessage(payload));
@@ -491,7 +813,9 @@ class AppAuthApi {
 
     final payload = _decodeJsonMap(response);
     if (response.statusCode == 401 || response.statusCode == 403) {
-      throw const UnauthorizedApiException('Oturum suresi doldu.');
+      throw UnauthorizedApiException(
+        _text('apiErrorSessionExpired', 'Oturum suresi doldu.'),
+      );
     }
     if (response.statusCode >= 400) {
       throw ApiException(_extractErrorMessage(payload));
@@ -514,7 +838,9 @@ class AppAuthApi {
 
     final payload = _decodeJsonMap(response);
     if (response.statusCode == 401 || response.statusCode == 403) {
-      throw const UnauthorizedApiException('Oturum suresi doldu.');
+      throw UnauthorizedApiException(
+        _text('apiErrorSessionExpired', 'Oturum suresi doldu.'),
+      );
     }
     if (response.statusCode >= 400) {
       throw ApiException(_extractErrorMessage(payload));
@@ -543,7 +869,9 @@ class AppAuthApi {
     }
 
     if (body.isEmpty) {
-      throw const ApiException('Guncellenecek alan bulunamadi.');
+      throw ApiException(
+        _text('apiErrorUpdateFieldsMissing', 'Guncellenecek alan bulunamadi.'),
+      );
     }
 
     final response = await _client.patch(
@@ -558,7 +886,9 @@ class AppAuthApi {
 
     final payload = _decodeJsonMap(response);
     if (response.statusCode == 401 || response.statusCode == 403) {
-      throw const UnauthorizedApiException('Oturum suresi doldu.');
+      throw UnauthorizedApiException(
+        _text('apiErrorSessionExpired', 'Oturum suresi doldu.'),
+      );
     }
     if (response.statusCode >= 400) {
       throw ApiException(_extractErrorMessage(payload));
@@ -575,7 +905,9 @@ class AppAuthApi {
 
     final payload = _decodeJsonMap(response);
     if (response.statusCode == 401 || response.statusCode == 403) {
-      throw const UnauthorizedApiException('Oturum suresi doldu.');
+      throw UnauthorizedApiException(
+        _text('apiErrorSessionExpired', 'Oturum suresi doldu.'),
+      );
     }
     if (response.statusCode >= 400) {
       throw ApiException(_extractErrorMessage(payload));
@@ -600,7 +932,39 @@ class AppAuthApi {
 
     final payload = _decodeJsonMap(response);
     if (response.statusCode == 401 || response.statusCode == 403) {
-      throw const UnauthorizedApiException('Oturum suresi doldu.');
+      throw UnauthorizedApiException(
+        _text('apiErrorSessionExpired', 'Oturum suresi doldu.'),
+      );
+    }
+    if (response.statusCode >= 400) {
+      throw ApiException(_extractErrorMessage(payload));
+    }
+
+    return AppMatchCandidate.fromJson(_unwrapDataMap(payload));
+  }
+
+  Future<AppMatchCandidate> fetchInfluencerProfile(
+    String token, {
+    required int userId,
+  }) async {
+    final response = await _client.get(
+      AppApi.uri(AppApi.influencerProfilePath(userId)),
+      headers: {'Accept': 'application/json', 'Authorization': 'Bearer $token'},
+    );
+
+    final payload = _decodeJsonMap(response);
+    if (response.statusCode == 401 || response.statusCode == 403) {
+      throw UnauthorizedApiException(
+        _text('apiErrorSessionExpired', 'Oturum suresi doldu.'),
+      );
+    }
+    if (response.statusCode == 404) {
+      throw ApiException(
+        _text(
+          'home.search.influencer_not_found',
+          'Bu profil ID ile aktif influencer bulunamadi.',
+        ),
+      );
     }
     if (response.statusCode >= 400) {
       throw ApiException(_extractErrorMessage(payload));
@@ -619,7 +983,12 @@ class AppAuthApi {
       body['ana_fotograf_mi'] = markAsPrimary;
     }
     if (body.isEmpty) {
-      throw const ApiException('Guncellenecek medya alani bulunamadi.');
+      throw ApiException(
+        _text(
+          'apiErrorMediaUpdateFieldsMissing',
+          'Guncellenecek medya alani bulunamadi.',
+        ),
+      );
     }
 
     final response = await _client.patch(
@@ -634,7 +1003,9 @@ class AppAuthApi {
 
     final payload = _decodeJsonMap(response);
     if (response.statusCode == 401 || response.statusCode == 403) {
-      throw const UnauthorizedApiException('Oturum suresi doldu.');
+      throw UnauthorizedApiException(
+        _text('apiErrorSessionExpired', 'Oturum suresi doldu.'),
+      );
     }
     if (response.statusCode >= 400) {
       throw ApiException(_extractErrorMessage(payload));
@@ -654,7 +1025,9 @@ class AppAuthApi {
 
     final payload = _decodeJsonMap(response);
     if (response.statusCode == 401 || response.statusCode == 403) {
-      throw const UnauthorizedApiException('Oturum suresi doldu.');
+      throw UnauthorizedApiException(
+        _text('apiErrorSessionExpired', 'Oturum suresi doldu.'),
+      );
     }
     if (response.statusCode >= 400) {
       throw ApiException(_extractErrorMessage(payload));
@@ -698,7 +1071,9 @@ class AppAuthApi {
 
     final payload = _decodeJsonMap(response);
     if (response.statusCode == 401 || response.statusCode == 403) {
-      throw const UnauthorizedApiException('Oturum suresi doldu.');
+      throw UnauthorizedApiException(
+        _text('apiErrorSessionExpired', 'Oturum suresi doldu.'),
+      );
     }
     if (response.statusCode >= 400) {
       throw ApiException(_extractErrorMessage(payload));
@@ -727,10 +1102,57 @@ class AppAuthApi {
     );
   }
 
+  Future<AppConversationMessagePage> fetchMobileConversationMessages(
+    String token, {
+    required int conversationId,
+    int? afterId,
+    int? beforeId,
+    int limit = 50,
+  }) async {
+    final query = <String, String>{
+      'limit': limit.clamp(1, 100).toString(),
+      if (afterId != null) 'after_id': afterId.toString(),
+      if (beforeId != null) 'before_id': beforeId.toString(),
+    };
+    final uri = AppApi.uri(
+      AppApi.mobileConversationMessagesPath(conversationId),
+    ).replace(queryParameters: query);
+
+    final response = await _client.get(
+      uri,
+      headers: {'Accept': 'application/json', 'Authorization': 'Bearer $token'},
+    );
+
+    final payload = _decodeJsonMap(response);
+    if (response.statusCode == 401 || response.statusCode == 403) {
+      throw UnauthorizedApiException(
+        _text('apiErrorSessionExpired', 'Oturum suresi doldu.'),
+      );
+    }
+    if (response.statusCode >= 400) {
+      throw ApiException(_extractErrorMessage(payload));
+    }
+
+    final meta = _asMap(payload['meta']);
+    final ai = _asMap(payload['ai']);
+    return AppConversationMessagePage(
+      messages: _extractDataList(payload)
+          .map(_conversationMessageFromJson)
+          .whereType<AppConversationMessage>()
+          .toList(),
+      currentPage: 1,
+      nextPage: meta?['has_more_older'] == true ? 2 : null,
+      aiStatus: _nullableString(ai?['status']?.toString()),
+      aiStatusText: _nullableString(ai?['status_text']?.toString()),
+      aiPlannedAt: DateTime.tryParse(ai?['planned_at']?.toString() ?? ''),
+    );
+  }
+
   Future<AppConversationMessage> sendConversationMessage(
     String token, {
     required int conversationId,
     required String text,
+    String? clientMessageId,
   }) async {
     final response = await _client.post(
       AppApi.uri(AppApi.datingChatMessagesPath(conversationId)),
@@ -739,12 +1161,19 @@ class AppAuthApi {
         'Authorization': 'Bearer $token',
         'Content-Type': 'application/json',
       },
-      body: jsonEncode({'mesaj_tipi': 'metin', 'mesaj_metni': text.trim()}),
+      body: jsonEncode({
+        'mesaj_tipi': 'metin',
+        'mesaj_metni': text.trim(),
+        if (clientMessageId != null && clientMessageId.trim().isNotEmpty)
+          'client_message_id': clientMessageId.trim(),
+      }),
     );
 
     final payload = _decodeJsonMap(response);
     if (response.statusCode == 401 || response.statusCode == 403) {
-      throw const UnauthorizedApiException('Oturum suresi doldu.');
+      throw UnauthorizedApiException(
+        _text('apiErrorSessionExpired', 'Oturum suresi doldu.'),
+      );
     }
     if (response.statusCode >= 400) {
       throw _extractApiException(payload);
@@ -752,7 +1181,68 @@ class AppAuthApi {
 
     final message = _conversationMessageFromJson(_unwrapDataMap(payload));
     if (message == null) {
-      throw const ApiException('Mesaj gonderildi ama sunucu yaniti okunamadi.');
+      throw ApiException(
+        _text(
+          'apiErrorMessageResponseUnreadable',
+          'Mesaj gonderildi ama sunucu yaniti okunamadi.',
+        ),
+      );
+    }
+    return message;
+  }
+
+  Future<AppConversationMessage> sendMobileConversationMessage(
+    String token, {
+    required int conversationId,
+    required String clientMessageId,
+    required String messageType,
+    String? text,
+    String? filePath,
+    Duration? fileDuration,
+  }) async {
+    final body = <String, Object>{
+      'client_message_id': clientMessageId,
+      'mesaj_tipi': messageType,
+    };
+    final normalizedText = text?.trim();
+    if (normalizedText != null) {
+      body['mesaj_metni'] = normalizedText;
+    }
+    if (filePath != null) {
+      body['dosya_yolu'] = filePath;
+    }
+    if (fileDuration != null) {
+      body['dosya_suresi'] = fileDuration.inSeconds;
+    }
+
+    final response = await _client.post(
+      AppApi.uri(AppApi.mobileConversationMessagesPath(conversationId)),
+      headers: {
+        'Accept': 'application/json',
+        'Authorization': 'Bearer $token',
+        'Content-Type': 'application/json',
+      },
+      body: jsonEncode(body),
+    );
+
+    final payload = _decodeJsonMap(response);
+    if (response.statusCode == 401 || response.statusCode == 403) {
+      throw UnauthorizedApiException(
+        _text('apiErrorSessionExpired', 'Oturum suresi doldu.'),
+      );
+    }
+    if (response.statusCode >= 400) {
+      throw _extractApiException(payload);
+    }
+
+    final message = _conversationMessageFromJson(_unwrapDataMap(payload));
+    if (message == null) {
+      throw ApiException(
+        _text(
+          'apiErrorMessageResponseUnreadable',
+          'Mesaj gonderildi ama sunucu yaniti okunamadi.',
+        ),
+      );
     }
     return message;
   }
@@ -773,7 +1263,9 @@ class AppAuthApi {
 
     final payload = _decodeJsonMap(response);
     if (response.statusCode == 401 || response.statusCode == 403) {
-      throw const UnauthorizedApiException('Oturum suresi doldu.');
+      throw UnauthorizedApiException(
+        _text('apiErrorSessionExpired', 'Oturum suresi doldu.'),
+      );
     }
     if (response.statusCode >= 400) {
       throw _extractApiException(payload);
@@ -784,7 +1276,12 @@ class AppAuthApi {
       translation?['metin']?.toString() ?? payload['ceviri_metni']?.toString(),
     );
     if (translatedText == null) {
-      throw const ApiException('Ceviri alindi ama metin okunamadi.');
+      throw ApiException(
+        _text(
+          'apiErrorTranslationTextUnreadable',
+          'Ceviri alindi ama metin okunamadi.',
+        ),
+      );
     }
 
     return message.copyWith(
@@ -808,7 +1305,9 @@ class AppAuthApi {
     );
 
     if (response.statusCode == 401 || response.statusCode == 403) {
-      throw const UnauthorizedApiException('Oturum suresi doldu.');
+      throw UnauthorizedApiException(
+        _text('apiErrorSessionExpired', 'Oturum suresi doldu.'),
+      );
     }
     if (response.statusCode >= 400) {
       final payload = _decodeJsonMap(response);
@@ -832,7 +1331,9 @@ class AppAuthApi {
     );
 
     if (response.statusCode == 401 || response.statusCode == 403) {
-      throw const UnauthorizedApiException('Oturum suresi doldu.');
+      throw UnauthorizedApiException(
+        _text('apiErrorSessionExpired', 'Oturum suresi doldu.'),
+      );
     }
     if (response.statusCode >= 400) {
       final payload = _decodeJsonMap(response);
@@ -848,7 +1349,9 @@ class AppAuthApi {
 
     final payload = _decodeJsonMap(response);
     if (response.statusCode == 401 || response.statusCode == 403) {
-      throw const UnauthorizedApiException('Oturum suresi doldu.');
+      throw UnauthorizedApiException(
+        _text('apiErrorSessionExpired', 'Oturum suresi doldu.'),
+      );
     }
     if (response.statusCode >= 400) {
       throw ApiException(_extractErrorMessage(payload));
@@ -882,7 +1385,9 @@ class AppAuthApi {
 
     final payload = _decodeJsonMap(response);
     if (response.statusCode == 401 || response.statusCode == 403) {
-      throw const UnauthorizedApiException('Oturum suresi doldu.');
+      throw UnauthorizedApiException(
+        _text('apiErrorSessionExpired', 'Oturum suresi doldu.'),
+      );
     }
     if (response.statusCode >= 400) {
       throw ApiException(_extractErrorMessage(payload));
@@ -923,7 +1428,9 @@ class AppAuthApi {
 
     final payload = _decodeJsonMap(response);
     if (response.statusCode == 401 || response.statusCode == 403) {
-      throw const UnauthorizedApiException('Oturum suresi doldu.');
+      throw UnauthorizedApiException(
+        _text('apiErrorSessionExpired', 'Oturum suresi doldu.'),
+      );
     }
     if (response.statusCode >= 400) {
       throw ApiException(_extractErrorMessage(payload));
@@ -937,7 +1444,9 @@ class AppAuthApi {
     );
 
     if (response.statusCode == 401 || response.statusCode == 403) {
-      throw const UnauthorizedApiException('Oturum suresi doldu.');
+      throw UnauthorizedApiException(
+        _text('apiErrorSessionExpired', 'Oturum suresi doldu.'),
+      );
     }
     if (response.statusCode >= 400) {
       final payload = _decodeJsonMap(response);
@@ -962,7 +1471,9 @@ class AppAuthApi {
 
     final payload = _decodeJsonMap(response);
     if (response.statusCode == 401 || response.statusCode == 403) {
-      throw const UnauthorizedApiException('Oturum suresi doldu.');
+      throw UnauthorizedApiException(
+        _text('apiErrorSessionExpired', 'Oturum suresi doldu.'),
+      );
     }
     if (response.statusCode >= 400) {
       throw ApiException(_extractErrorMessage(payload));
@@ -976,7 +1487,9 @@ class AppAuthApi {
     );
 
     if (response.statusCode == 401 || response.statusCode == 403) {
-      throw const UnauthorizedApiException('Oturum suresi doldu.');
+      throw UnauthorizedApiException(
+        _text('apiErrorSessionExpired', 'Oturum suresi doldu.'),
+      );
     }
     if (response.statusCode >= 400) {
       final payload = _decodeJsonMap(response);
@@ -1001,7 +1514,9 @@ class AppAuthApi {
 
     final payload = _decodeJsonMap(response);
     if (response.statusCode == 401 || response.statusCode == 403) {
-      throw const UnauthorizedApiException('Oturum suresi doldu.');
+      throw UnauthorizedApiException(
+        _text('apiErrorSessionExpired', 'Oturum suresi doldu.'),
+      );
     }
     if (response.statusCode >= 400) {
       throw ApiException(_extractErrorMessage(payload));
@@ -1035,7 +1550,9 @@ class AppAuthApi {
 
     final payload = _decodeJsonMap(response);
     if (response.statusCode == 401 || response.statusCode == 403) {
-      throw const UnauthorizedApiException('Oturum suresi doldu.');
+      throw UnauthorizedApiException(
+        _text('apiErrorSessionExpired', 'Oturum suresi doldu.'),
+      );
     }
     if (response.statusCode >= 400) {
       throw ApiException(_extractErrorMessage(payload));
@@ -1057,7 +1574,9 @@ class AppAuthApi {
     );
 
     if (response.statusCode == 401 || response.statusCode == 403) {
-      throw const UnauthorizedApiException('Oturum suresi doldu.');
+      throw UnauthorizedApiException(
+        _text('apiErrorSessionExpired', 'Oturum suresi doldu.'),
+      );
     }
     if (response.statusCode >= 400) {
       final payload = _decodeJsonMap(response);
@@ -1073,7 +1592,9 @@ class AppAuthApi {
 
     final payload = _decodeJsonMap(response);
     if (response.statusCode == 401 || response.statusCode == 403) {
-      throw const UnauthorizedApiException('Oturum suresi doldu.');
+      throw UnauthorizedApiException(
+        _text('apiErrorSessionExpired', 'Oturum suresi doldu.'),
+      );
     }
     if (response.statusCode >= 400) {
       throw ApiException(_extractErrorMessage(payload));
@@ -1092,7 +1613,9 @@ class AppAuthApi {
 
     final payload = _decodeJsonMap(response);
     if (response.statusCode == 401 || response.statusCode == 403) {
-      throw const UnauthorizedApiException('Oturum suresi doldu.');
+      throw UnauthorizedApiException(
+        _text('apiErrorSessionExpired', 'Oturum suresi doldu.'),
+      );
     }
     if (response.statusCode >= 400) {
       throw ApiException(_extractErrorMessage(payload));
@@ -1108,7 +1631,9 @@ class AppAuthApi {
     );
 
     if (response.statusCode == 401 || response.statusCode == 403) {
-      throw const UnauthorizedApiException('Oturum suresi doldu.');
+      throw UnauthorizedApiException(
+        _text('apiErrorSessionExpired', 'Oturum suresi doldu.'),
+      );
     }
     if (response.statusCode >= 400) {
       final payload = _decodeJsonMap(response);
@@ -1123,7 +1648,9 @@ class AppAuthApi {
     );
 
     if (response.statusCode == 401 || response.statusCode == 403) {
-      throw const UnauthorizedApiException('Oturum suresi doldu.');
+      throw UnauthorizedApiException(
+        _text('apiErrorSessionExpired', 'Oturum suresi doldu.'),
+      );
     }
     if (response.statusCode >= 400) {
       final payload = _decodeJsonMap(response);
@@ -1135,6 +1662,7 @@ class AppAuthApi {
     String token, {
     required bool notificationsEnabled,
     required bool vibrationEnabled,
+    required bool messageSoundsEnabled,
   }) async {
     final response = await _client.patch(
       AppApi.uri('/api/dating/bildirim-ayarlari'),
@@ -1146,12 +1674,15 @@ class AppAuthApi {
       body: jsonEncode({
         'bildirimler_acik_mi': notificationsEnabled,
         'titresim_acik_mi': vibrationEnabled,
+        'ses_acik_mi': messageSoundsEnabled,
       }),
     );
 
     final payload = _decodeJsonMap(response);
     if (response.statusCode == 401 || response.statusCode == 403) {
-      throw const UnauthorizedApiException('Oturum suresi doldu.');
+      throw UnauthorizedApiException(
+        _text('apiErrorSessionExpired', 'Oturum suresi doldu.'),
+      );
     }
     if (response.statusCode >= 400) {
       throw ApiException(_extractErrorMessage(payload));
@@ -1218,7 +1749,9 @@ class AppAuthApi {
     }
 
     if (response.statusCode == 401 || response.statusCode == 403) {
-      throw const UnauthorizedApiException('Oturum suresi doldu.');
+      throw UnauthorizedApiException(
+        _text('apiErrorSessionExpired', 'Oturum suresi doldu.'),
+      );
     }
     if (response.statusCode >= 400) {
       if (payload.isEmpty) {
@@ -1243,6 +1776,61 @@ class AppAuthApi {
     return AppProfilePhoto.fromJson(_unwrapDataMap(payload));
   }
 
+  Future<AppMobileUploadResult> uploadMobileMedia(
+    String token, {
+    required String filePath,
+    required String clientUploadId,
+    required String messageType,
+    UploadProgressCallback? onProgress,
+  }) async {
+    final request = _ProgressMultipartRequest(
+      'POST',
+      AppApi.uri(AppApi.mobileUploadsPath),
+      onProgress: onProgress == null
+          ? null
+          : (sent, total) {
+              if (total <= 0) {
+                onProgress(0);
+              } else {
+                onProgress((sent / total).clamp(0, 1).toDouble());
+              }
+            },
+    );
+    request.headers.addAll({
+      'Accept': 'application/json',
+      'Authorization': 'Bearer $token',
+    });
+    request.fields['mesaj_tipi'] = messageType;
+    request.fields['client_upload_id'] = clientUploadId;
+    request.files.add(
+      await http.MultipartFile.fromPath(
+        'dosya',
+        filePath,
+        contentType: _mediaTypeFromFilePath(filePath),
+      ),
+    );
+
+    final streamedResponse = await _client.send(request);
+    final response = await http.Response.fromStream(streamedResponse);
+    final payload = _decodeJsonMap(response);
+    if (response.statusCode == 401 || response.statusCode == 403) {
+      throw UnauthorizedApiException(
+        _text('apiErrorSessionExpired', 'Oturum suresi doldu.'),
+      );
+    }
+    if (response.statusCode >= 400) {
+      throw ApiException(_extractErrorMessage(payload));
+    }
+
+    return AppMobileUploadResult(
+      clientUploadId: _nullableString(payload['client_upload_id']?.toString()),
+      filePath: payload['dosya_yolu']?.toString() ?? '',
+      fileUrl: _nullableString(payload['dosya_url']?.toString()),
+      mimeType: _nullableString(payload['mime_tipi']?.toString()),
+      size: (payload['boyut'] as num?)?.toInt(),
+    );
+  }
+
   Future<AppProfilePhoto> uploadProfilePhoto(
     String token, {
     required String filePath,
@@ -1262,7 +1850,9 @@ class AppAuthApi {
     );
 
     if (response.statusCode == 401 || response.statusCode == 403) {
-      throw const UnauthorizedApiException('Oturum suresi doldu.');
+      throw UnauthorizedApiException(
+        _text('apiErrorSessionExpired', 'Oturum suresi doldu.'),
+      );
     }
     if (response.statusCode >= 400) {
       final payload = _decodeJsonMap(response);
@@ -1277,7 +1867,9 @@ class AppAuthApi {
     );
 
     if (response.statusCode == 401 || response.statusCode == 403) {
-      throw const UnauthorizedApiException('Oturum zaten sonlanmis.');
+      throw UnauthorizedApiException(
+        _text('apiErrorSessionAlreadyEnded', 'Oturum zaten sonlanmis.'),
+      );
     }
 
     if (response.statusCode >= 400) {
@@ -1293,7 +1885,9 @@ class AppAuthApi {
     );
 
     if (response.statusCode == 401 || response.statusCode == 403) {
-      throw const UnauthorizedApiException('Oturum zaten sonlanmis.');
+      throw UnauthorizedApiException(
+        _text('apiErrorSessionAlreadyEnded', 'Oturum zaten sonlanmis.'),
+      );
     }
 
     if (response.statusCode >= 400) {
@@ -1304,6 +1898,10 @@ class AppAuthApi {
 
   void close() {
     _client.close();
+  }
+
+  static String _text(String key, String fallback) {
+    return AppRuntimeText.instance.t(key, fallback);
   }
 
   static void _putIfNotBlank(
@@ -1350,7 +1948,10 @@ class AppAuthApi {
       return message;
     }
 
-    return 'Sunucu ile baglanti kurulurken bir hata olustu.';
+    return _text(
+      'apiErrorConnection',
+      'Sunucu ile baglanti kurulurken bir hata olustu.',
+    );
   }
 
   static ApiException _extractApiException(Map<String, dynamic> payload) {
@@ -1423,6 +2024,16 @@ class AppAuthApi {
     }).toList();
   }
 
+  static List<Map<String, dynamic>> _mapsFromValue(Object? value) {
+    if (value is! List) {
+      return const [];
+    }
+
+    return value.whereType<Map>().map((item) {
+      return item.map((key, val) => MapEntry(key.toString(), val));
+    }).toList();
+  }
+
   static AppConversationPreview? _conversationFromJson(
     Map<String, dynamic> json, {
     required int currentUserId,
@@ -1447,7 +2058,7 @@ class AppAuthApi {
       id: (json['id'] as num?)?.toInt() ?? 0,
       matchId: (json['eslesme_id'] as num?)?.toInt() ?? 0,
       peerId: peerId,
-      peerName: peer['ad']?.toString() ?? 'Kullanici',
+      peerName: peer['ad']?.toString() ?? _text('commonUser', 'Kullanici'),
       peerUsername: peer['kullanici_adi']?.toString() ?? '',
       peerProfileImageUrl: peer['profil_resmi']?.toString(),
       peerLanguageCode: _nullableString(
@@ -1474,30 +2085,51 @@ class AppAuthApi {
     );
   }
 
+  static AppConversationMessage? conversationMessageFromJson(
+    Map<String, dynamic> json,
+  ) {
+    return _conversationMessageFromJson(json);
+  }
+
   static AppConversationMessage? _conversationMessageFromJson(
     Map<String, dynamic> json,
   ) {
     final sender = _asMap(json['gonderen']);
     final durationInSeconds = (json['dosya_suresi'] as num?)?.toInt();
+    final senderId =
+        (sender?['id'] as num?)?.toInt() ??
+        (json['gonderen_user_id'] as num?)?.toInt() ??
+        int.tryParse(json['gonderen_user_id']?.toString() ?? '');
+    final senderName = _nullableString(
+      sender?['ad']?.toString() ??
+          sender?['kullanici_adi']?.toString() ??
+          json['gonderen_adi']?.toString(),
+    );
     return AppConversationMessage(
       id: (json['id'] as num?)?.toInt() ?? 0,
       conversationId: (json['sohbet_id'] as num?)?.toInt() ?? 0,
-      senderId: (sender?['id'] as num?)?.toInt(),
-      senderName: sender?['ad']?.toString() ?? 'Kullanici',
-      senderProfileImageUrl: sender?['profil_resmi']?.toString(),
+      senderId: senderId,
+      senderName: senderName ?? _text('commonUser', 'Kullanici'),
+      senderProfileImageUrl: _nullableString(
+        sender?['profil_resmi']?.toString() ??
+            json['gonderen_profil_resmi']?.toString(),
+      ),
       type: json['mesaj_tipi']?.toString() ?? 'metin',
       text: ChatTextSanitizer.sanitize(json['mesaj_metni']?.toString()),
-      fileUrl: _nullableString(json['dosya_yolu']?.toString()),
+      fileUrl: _nullableString(
+        json['dosya_yolu']?.toString() ?? json['dosya_url']?.toString(),
+      ),
       fileDuration: durationInSeconds == null
           ? null
           : Duration(seconds: durationInSeconds),
-      isRead: json['okundu_mu'] == true,
-      isAiGenerated: json['ai_tarafindan_uretildi_mi'] == true,
+      isRead: _boolFromValue(json['okundu_mu']),
+      isAiGenerated: _boolFromValue(json['ai_tarafindan_uretildi_mi']),
       languageCode: _nullableString(json['dil_kodu']?.toString()),
       languageName: _nullableString(json['dil_adi']?.toString()),
       translatedText: null,
       translationTargetLanguageCode: null,
       translationTargetLanguageName: null,
+      clientMessageId: _nullableString(json['client_message_id']?.toString()),
       createdAt: DateTime.tryParse(json['created_at']?.toString() ?? ''),
     );
   }
@@ -1524,7 +2156,7 @@ class AppAuthApi {
       type: _nullableString(
         json['tip']?.toString() ?? payload['tip']?.toString(),
       ),
-      title: title ?? 'Bildirim',
+      title: title ?? _text('notificationFallbackTitle', 'Bildirim'),
       message: message ?? '',
       route: _nullableString(
         json['rota']?.toString() ?? payload['rota']?.toString(),
@@ -1567,10 +2199,10 @@ class AppAuthApi {
     }
 
     return switch (type) {
-      'foto' => 'Fotograf gonderildi',
-      'gorsel' => 'Fotograf gonderildi',
-      'ses' => 'Sesli mesaj gonderildi',
-      'video' => 'Video gonderildi',
+      'foto' => _text('chatPreviewPhotoSent', 'Fotograf gonderildi'),
+      'gorsel' => _text('chatPreviewPhotoSent', 'Fotograf gonderildi'),
+      'ses' => _text('chatPreviewVoiceSent', 'Sesli mesaj gonderildi'),
+      'video' => _text('chatPreviewVideoSent', 'Video gonderildi'),
       _ => null,
     };
   }
@@ -1582,6 +2214,16 @@ class AppAuthApi {
     }
     return normalized;
   }
+
+  static bool _boolFromValue(Object? value) {
+    return switch (value) {
+      final bool boolValue => boolValue,
+      final num numValue => numValue != 0,
+      final String stringValue =>
+        stringValue.trim() == '1' || stringValue.trim().toLowerCase() == 'true',
+      _ => false,
+    };
+  }
 }
 
 class AppHttpClientFactory {
@@ -1589,12 +2231,233 @@ class AppHttpClientFactory {
 
   static http.Client createForApi() {
     final httpClient = HttpClient();
+    httpClient.connectionTimeout = const Duration(seconds: 8);
     if (kDebugMode) {
       final allowedUri = AppApi.uri('/');
       httpClient.badCertificateCallback = (certificate, host, port) {
         return host == allowedUri.host && port == allowedUri.port;
       };
     }
-    return IOClient(httpClient);
+    return AppHttpClient(IOClient(httpClient));
+  }
+}
+
+class AppHttpClient extends http.BaseClient {
+  static const Duration _requestTimeout = Duration(seconds: 18);
+  static final Map<String, Future<_BufferedResponse>> _inFlightGetRequests =
+      <String, Future<_BufferedResponse>>{};
+  static final Map<String, String> _etagByKey = <String, String>{};
+  static final Map<String, _BufferedResponse> _bodyByKey =
+      <String, _BufferedResponse>{};
+  static int _requestCounter = 0;
+
+  final http.Client _inner;
+
+  AppHttpClient(this._inner);
+
+  @override
+  Future<http.StreamedResponse> send(http.BaseRequest request) async {
+    final id = ++_requestCounter;
+    final startedAt = DateTime.now();
+    final isGet = request.method.toUpperCase() == 'GET';
+    final cacheKey = isGet ? _cacheKeyFor(request) : null;
+
+    if (cacheKey != null) {
+      final etag = _etagByKey[cacheKey];
+      if (etag != null && etag.trim().isNotEmpty) {
+        request.headers.putIfAbsent('If-None-Match', () => etag);
+      }
+
+      final inFlight = _inFlightGetRequests[cacheKey];
+      if (inFlight != null) {
+        final buffered = await inFlight;
+        _debugLog(id, request, buffered.statusCode, startedAt, deduped: true);
+        return buffered.toStreamedResponse(request);
+      }
+
+      final future = _sendBufferedWithRetry(request, cacheKey);
+      _inFlightGetRequests[cacheKey] = future;
+      try {
+        final buffered = await future;
+        _debugLog(id, request, buffered.statusCode, startedAt);
+        return buffered.toStreamedResponse(request);
+      } finally {
+        if (identical(_inFlightGetRequests[cacheKey], future)) {
+          _inFlightGetRequests.remove(cacheKey);
+        }
+      }
+    }
+
+    try {
+      final response = await _inner.send(request).timeout(_requestTimeout);
+      _debugLog(id, request, response.statusCode, startedAt);
+      return response;
+    } catch (error) {
+      _debugLog(id, request, null, startedAt, error: error);
+      rethrow;
+    }
+  }
+
+  Future<_BufferedResponse> _sendBufferedWithRetry(
+    http.BaseRequest request,
+    String cacheKey,
+  ) async {
+    Object? lastError;
+    for (var attempt = 0; attempt < 2; attempt++) {
+      try {
+        return await _sendBuffered(
+          _cloneRequest(request),
+          cacheKey,
+        ).timeout(_requestTimeout);
+      } on SocketException catch (error) {
+        lastError = error;
+      } on HandshakeException catch (error) {
+        lastError = error;
+      } on TimeoutException catch (error) {
+        lastError = error;
+      }
+    }
+
+    throw lastError ??
+        ApiException(
+          AppRuntimeText.instance.t(
+            'apiErrorServerUnreachable',
+            'Sunucuya ulasilamadi.',
+          ),
+        );
+  }
+
+  static http.BaseRequest _cloneRequest(http.BaseRequest request) {
+    final clone = http.Request(request.method, request.url)
+      ..headers.addAll(request.headers)
+      ..followRedirects = request.followRedirects
+      ..maxRedirects = request.maxRedirects
+      ..persistentConnection = request.persistentConnection;
+
+    if (request is http.Request) {
+      clone.bodyBytes = request.bodyBytes;
+    }
+
+    return clone;
+  }
+
+  Future<_BufferedResponse> _sendBuffered(
+    http.BaseRequest request,
+    String cacheKey,
+  ) async {
+    final response = await _inner.send(request);
+    final bytes = await response.stream.toBytes();
+    final buffered = _BufferedResponse.fromResponse(response, bytes);
+
+    if (buffered.statusCode == 304) {
+      final cached = _bodyByKey[cacheKey];
+      if (cached != null) {
+        return cached.copyWith(statusCode: 200, headers: buffered.headers);
+      }
+    }
+
+    final etag = buffered.headers['etag'];
+    if (buffered.statusCode >= 200 &&
+        buffered.statusCode < 300 &&
+        etag != null &&
+        etag.trim().isNotEmpty) {
+      _etagByKey[cacheKey] = etag;
+      _bodyByKey[cacheKey] = buffered;
+    }
+
+    return buffered;
+  }
+
+  static String _cacheKeyFor(http.BaseRequest request) {
+    final auth = request.headers['Authorization'] ?? '';
+    return '${request.method}:${request.url}:auth=${auth.hashCode}';
+  }
+
+  static void _debugLog(
+    int id,
+    http.BaseRequest request,
+    int? statusCode,
+    DateTime startedAt, {
+    bool deduped = false,
+    Object? error,
+  }) {
+    if (!kDebugMode) {
+      return;
+    }
+
+    final duration = DateTime.now().difference(startedAt).inMilliseconds;
+    final path = request.url.replace(query: '').path;
+    final result = statusCode == null ? 'ERR' : statusCode.toString();
+    final suffix = deduped ? ' deduped' : '';
+    final errorText = error == null ? '' : ' ${error.runtimeType}';
+    debugPrint(
+      'HTTP#$id ${request.method} $path -> $result ${duration}ms$suffix$errorText',
+    );
+  }
+
+  @override
+  void close() {
+    _inner.close();
+    super.close();
+  }
+}
+
+class _BufferedResponse {
+  final int statusCode;
+  final Map<String, String> headers;
+  final List<int> bodyBytes;
+  final int? contentLength;
+  final bool isRedirect;
+  final bool persistentConnection;
+  final String? reasonPhrase;
+
+  const _BufferedResponse({
+    required this.statusCode,
+    required this.headers,
+    required this.bodyBytes,
+    required this.contentLength,
+    required this.isRedirect,
+    required this.persistentConnection,
+    required this.reasonPhrase,
+  });
+
+  factory _BufferedResponse.fromResponse(
+    http.StreamedResponse response,
+    List<int> bodyBytes,
+  ) {
+    return _BufferedResponse(
+      statusCode: response.statusCode,
+      headers: Map<String, String>.from(response.headers),
+      bodyBytes: bodyBytes,
+      contentLength: response.contentLength,
+      isRedirect: response.isRedirect,
+      persistentConnection: response.persistentConnection,
+      reasonPhrase: response.reasonPhrase,
+    );
+  }
+
+  _BufferedResponse copyWith({int? statusCode, Map<String, String>? headers}) {
+    return _BufferedResponse(
+      statusCode: statusCode ?? this.statusCode,
+      headers: headers ?? this.headers,
+      bodyBytes: bodyBytes,
+      contentLength: contentLength,
+      isRedirect: isRedirect,
+      persistentConnection: persistentConnection,
+      reasonPhrase: reasonPhrase,
+    );
+  }
+
+  http.StreamedResponse toStreamedResponse(http.BaseRequest request) {
+    return http.StreamedResponse(
+      http.ByteStream.fromBytes(bodyBytes),
+      statusCode,
+      contentLength: bodyBytes.length,
+      request: request,
+      headers: headers,
+      isRedirect: isRedirect,
+      persistentConnection: persistentConnection,
+      reasonPhrase: reasonPhrase,
+    );
   }
 }

@@ -13,8 +13,10 @@ class BildirimController extends Controller
 {
     public function listele(Request $request)
     {
+        $bugun = now();
         $bildirimler = $request->user()
             ->notifications()
+            ->whereDate('created_at', $bugun->toDateString())
             ->latest()
             ->paginate(20);
 
@@ -24,13 +26,20 @@ class BildirimController extends Controller
     public function okunmamisSayisi(Request $request): JsonResponse
     {
         return response()->json([
-            'okunmamis_sayisi' => $request->user()->unreadNotifications()->count(),
+            'okunmamis_sayisi' => $request->user()
+                ->unreadNotifications()
+                ->whereDate('created_at', now()->toDateString())
+                ->count(),
         ]);
     }
 
     public function okuduIsaretle(Request $request): JsonResponse
     {
-        $request->user()->unreadNotifications->markAsRead();
+        $request->user()
+            ->unreadNotifications()
+            ->whereDate('created_at', now()->toDateString())
+            ->get()
+            ->markAsRead();
 
         return response()->json(['mesaj' => 'Tum bildirimler okundu olarak isaretlendi.']);
     }
@@ -101,6 +110,7 @@ class BildirimController extends Controller
         $veri = $request->validate([
             'bildirimler_acik_mi' => 'sometimes|boolean',
             'titresim_acik_mi' => 'sometimes|boolean',
+            'ses_acik_mi' => 'sometimes|boolean',
         ]);
 
         $request->user()->update($veri);

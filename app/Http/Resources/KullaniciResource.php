@@ -4,6 +4,7 @@ namespace App\Http\Resources;
 
 use App\Models\Engelleme;
 use App\Models\SessizeAlinanKullanici;
+use App\Services\Users\UserOnlineStatusService;
 use App\Support\MediaUrl;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
@@ -15,6 +16,7 @@ class KullaniciResource extends JsonResource
         $kendiVerisiGorulebilir = $this->kendiVerisiGorulebilir($request);
         $istekYapanId = $request->user()?->id;
         $profilDetayiGoruntuleniyor = $request->is('api/dating/profil/*');
+        $onlineStatus = app(UserOnlineStatusService::class)->resolve($this->resource, withNextActiveAt: false);
 
         return [
             'id' => $this->id,
@@ -31,7 +33,9 @@ class KullaniciResource extends JsonResource
             'ilce' => $this->ilce,
             'biyografi' => $this->biyografi,
             'profil_resmi' => MediaUrl::resolve($this->profil_resmi),
-            'cevrim_ici_mi' => $this->cevrim_ici_mi,
+            'cevrim_ici_mi' => $onlineStatus['is_online'],
+            'isOnline' => $onlineStatus['is_online'],
+            'onlineStatusReason' => $onlineStatus['reason'],
             'gorunum_modu' => $this->when($kendiVerisiGorulebilir, $this->gorunum_modu),
             'ses_acik_mi' => $this->when($kendiVerisiGorulebilir, $this->ses_acik_mi),
             'bildirimler_acik_mi' => $this->when($kendiVerisiGorulebilir, $this->bildirimler_acik_mi),

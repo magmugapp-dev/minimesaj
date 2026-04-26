@@ -57,17 +57,10 @@ class ProfileNetworkImage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Image.network(
-      imageUrl,
+    return CachedAppImage(
+      imageUrl: imageUrl,
       fit: fit,
-      gaplessPlayback: true,
-      frameBuilder: (context, child, frame, wasSynchronouslyLoaded) {
-        if (wasSynchronouslyLoaded || frame != null) {
-          return child;
-        }
-        return placeholder;
-      },
-      errorBuilder: (_, _, _) => placeholder,
+      errorBuilder: (_) => placeholder,
     );
   }
 }
@@ -442,18 +435,16 @@ class ProfilePhotoManagerPreview extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (primaryPhoto != null && primaryPhoto!.url.isNotEmpty) {
-      return ProfileNetworkImage(
+      return CachedAppImage(
         imageUrl: primaryPhoto!.url,
         fit: BoxFit.cover,
-        placeholder: ProfileImagePlaceholder(label: placeholderLabel),
       );
     }
 
     if (fallbackImageUrl != null && fallbackImageUrl!.isNotEmpty) {
-      return ProfileNetworkImage(
+      return CachedAppImage(
         imageUrl: fallbackImageUrl!,
         fit: BoxFit.cover,
-        placeholder: ProfileImagePlaceholder(label: placeholderLabel),
       );
     }
 

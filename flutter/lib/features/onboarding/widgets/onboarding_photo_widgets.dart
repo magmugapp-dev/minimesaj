@@ -10,9 +10,12 @@ Future<void> showOnboardingPhotoSourceSheet(
   return showCupertinoModalPopup<void>(
     context: context,
     builder: (ctx) => CupertinoActionSheet(
-      title: const Text(
-        'Fotograf kaynagi',
-        style: TextStyle(fontFamily: AppFont.family),
+      title: Text(
+        AppRuntimeText.instance.t(
+          'onboarding.photo.source.title',
+          'Fotograf kaynagi',
+        ),
+        style: const TextStyle(fontFamily: AppFont.family),
       ),
       actions: [
         CupertinoActionSheetAction(
@@ -20,9 +23,9 @@ Future<void> showOnboardingPhotoSourceSheet(
             Navigator.of(ctx).pop();
             onCameraTap();
           },
-          child: const Text(
-            'Kamera',
-            style: TextStyle(fontFamily: AppFont.family),
+          child: Text(
+            AppRuntimeText.instance.t('commonCamera', 'Kamera'),
+            style: const TextStyle(fontFamily: AppFont.family),
           ),
         ),
         CupertinoActionSheetAction(
@@ -30,18 +33,18 @@ Future<void> showOnboardingPhotoSourceSheet(
             Navigator.of(ctx).pop();
             onGalleryTap();
           },
-          child: const Text(
-            'Galeri',
-            style: TextStyle(fontFamily: AppFont.family),
+          child: Text(
+            AppRuntimeText.instance.t('commonGallery', 'Galeri'),
+            style: const TextStyle(fontFamily: AppFont.family),
           ),
         ),
       ],
       cancelButton: CupertinoActionSheetAction(
         isDefaultAction: true,
         onPressed: () => Navigator.of(ctx).pop(),
-        child: const Text(
-          'Vazgec',
-          style: TextStyle(fontFamily: AppFont.family),
+        child: Text(
+          AppRuntimeText.instance.t('commonCancel', 'Vazgec'),
+          style: const TextStyle(fontFamily: AppFont.family),
         ),
       ),
     ),
@@ -94,12 +97,13 @@ class OnboardingPhotoSlot extends StatelessWidget {
                   : fallbackPhotoUrl != null && fallbackPhotoUrl!.isNotEmpty
                   ? ClipOval(
                       key: const ValueKey('fallback-photo'),
-                      child: Image.network(
-                        fallbackPhotoUrl!,
+                      child: CachedAppImage(
+                        imageUrl: fallbackPhotoUrl,
                         width: slotSize,
                         height: slotSize,
-                        fit: BoxFit.cover,
-                        errorBuilder: (_, _, _) =>
+                        cacheWidth: (slotSize * 2).round(),
+                        cacheHeight: (slotSize * 2).round(),
+                        errorBuilder: (_) =>
                             OnboardingDashedPhotoPlaceholder(size: slotSize),
                       ),
                     )
@@ -152,15 +156,18 @@ class OnboardingDashedPhotoPlaceholder extends StatelessWidget {
     return CustomPaint(
       size: Size(size, size),
       painter: const OnboardingDashedCirclePainter(),
-      child: const Center(
+      child: Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(CupertinoIcons.camera, size: 28, color: AppColors.gray),
-            SizedBox(height: 8),
+            const Icon(CupertinoIcons.camera, size: 28, color: AppColors.gray),
+            const SizedBox(height: 8),
             Text(
-              'Fotograf Sec',
-              style: TextStyle(
+              AppRuntimeText.instance.t(
+                'onboarding.photo.select',
+                'Fotograf Sec',
+              ),
+              style: const TextStyle(
                 fontFamily: AppFont.family,
                 fontWeight: FontWeight.w500,
                 fontSize: 14,

@@ -49,7 +49,9 @@ class ProfilePolicyScaffold extends StatelessWidget {
                   children: [
                     for (var index = 0; index < sections.length; index++)
                       ProfilePolicySection(
-                        title: '${index + 1}. ${sections[index].heading}',
+                        title: sections[index].heading.trim().isEmpty
+                            ? ''
+                            : '${index + 1}. ${sections[index].heading}',
                         body: sections[index].body,
                       ),
                     const SizedBox(height: 24),
@@ -81,16 +83,18 @@ class ProfilePolicySection extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            title,
-            style: const TextStyle(
-              fontFamily: AppFont.family,
-              fontWeight: FontWeight.w700,
-              fontSize: 14,
-              color: AppColors.black,
+          if (title.trim().isNotEmpty) ...[
+            Text(
+              title,
+              style: const TextStyle(
+                fontFamily: AppFont.family,
+                fontWeight: FontWeight.w700,
+                fontSize: 14,
+                color: AppColors.black,
+              ),
             ),
-          ),
-          const SizedBox(height: 6),
+            const SizedBox(height: 6),
+          ],
           Text(
             body,
             style: const TextStyle(

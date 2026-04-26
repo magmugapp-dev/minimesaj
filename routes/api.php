@@ -17,7 +17,15 @@ use Illuminate\Support\Facades\Route;
 // ── Uygulama Ayarları (Public) ───────────────────────────────────────
 Route::prefix('uygulama')->middleware('throttle:api')->group(function () {
     Route::get('ayarlar', [\App\Http\Controllers\Api\UygulamaAyarController::class, 'index']);
+    Route::get('yasal-metinler', [\App\Http\Controllers\Api\UygulamaAyarController::class, 'yasalMetinler']);
     Route::get('logo', [\App\Http\Controllers\Api\UygulamaAyarController::class, 'logo']);
+});
+
+Route::get('app-content', \App\Http\Controllers\Api\AppContentController::class)
+    ->middleware('throttle:api');
+
+Route::prefix('mobile')->middleware('throttle:api')->group(function () {
+    Route::get('config', [\App\Http\Controllers\Mobile\MobileController::class, 'config']);
 });
 
 if (app()->environment('testing')) {
@@ -46,6 +54,14 @@ Route::middleware(['auth:sanctum', 'throttle:api'])->group(function () {
     Route::delete('auth/hesap', [\App\Http\Controllers\Kimlik\KimlikController::class, 'hesapSil']);
     Route::post('uygulama/destek-talebi', [\App\Http\Controllers\Api\DestekTalebiController::class, 'gonder']);
 
+    Route::prefix('mobile')->group(function () {
+        Route::get('bootstrap', [\App\Http\Controllers\Mobile\MobileController::class, 'bootstrap']);
+        Route::post('sync', [\App\Http\Controllers\Mobile\MobileController::class, 'sync']);
+        Route::get('conversations/{conversation}/messages', [\App\Http\Controllers\Mobile\MobileController::class, 'messages']);
+        Route::post('conversations/{conversation}/messages', [\App\Http\Controllers\Mobile\MobileController::class, 'sendMessage']);
+        Route::post('uploads', [\App\Http\Controllers\Dating\MedyaController::class, 'yukle']);
+    });
+
     // ── Dating (Flutter) ─────────────────────────────────────────────
     Route::prefix('dating')->group(function () {
         Route::get('kesfet', [\App\Http\Controllers\Dating\KesfetController::class, 'index']);
@@ -55,6 +71,7 @@ Route::middleware(['auth:sanctum', 'throttle:api'])->group(function () {
         Route::post('eslesme-gec/{kullanici}', [\App\Http\Controllers\Dating\EslesmeMerkeziController::class, 'gec']);
         Route::post('eslesme-sohbet/{kullanici}', [\App\Http\Controllers\Dating\EslesmeMerkeziController::class, 'sohbetBaslat']);
         Route::get('profil', [\App\Http\Controllers\Dating\ProfilController::class, 'goster']);
+        Route::get('influencer-profile/{kullanici}', [\App\Http\Controllers\Dating\ProfilController::class, 'influencer']);
         Route::get('profil/{kullanici}', [\App\Http\Controllers\Dating\ProfilController::class, 'kullanici']);
         Route::patch('profil', [\App\Http\Controllers\Dating\ProfilController::class, 'guncelle']);
 
@@ -117,6 +134,7 @@ Route::middleware(['auth:sanctum', 'throttle:api'])->group(function () {
         Route::get('paketler', [\App\Http\Controllers\Odeme\PuanPaketiController::class, 'index']);
         Route::get('abonelik-paketler', [\App\Http\Controllers\Odeme\AbonelikPaketiController::class, 'index']);
         Route::post('dogrula', [\App\Http\Controllers\Odeme\OdemeController::class, 'dogrula']);
+        Route::get('reklam-odul/durum', [\App\Http\Controllers\Odeme\ReklamOdulController::class, 'durum']);
         Route::post('reklam-odul', [\App\Http\Controllers\Odeme\ReklamOdulController::class, 'kaydet']);
     });
 

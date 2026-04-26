@@ -12,6 +12,7 @@ use App\Models\Sohbet;
 use App\Models\User;
 use App\Notifications\YeniEslesme;
 use App\Services\YapayZeka\AiKullaniciHazirlamaServisi;
+use App\Services\Users\UserOnlineStatusService;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -24,10 +25,12 @@ class EslesmeServisi
         private ?AiKullaniciHazirlamaServisi $aiKullaniciHazirlamaServisi = null,
         private ?PuanServisi $puanServisi = null,
         private ?AyarServisi $ayarServisi = null,
+        private ?UserOnlineStatusService $userOnlineStatusService = null,
     ) {
         $this->aiKullaniciHazirlamaServisi ??= app(AiKullaniciHazirlamaServisi::class);
         $this->puanServisi ??= app(PuanServisi::class);
         $this->ayarServisi ??= app(AyarServisi::class);
+        $this->userOnlineStatusService ??= app(UserOnlineStatusService::class);
     }
 
     public function sohbetBaslat(User $baslatan, User $aday): array
@@ -113,6 +116,7 @@ class EslesmeServisi
     public function merkez(User $user): array
     {
         $user = $this->gunlukHaklariYenile($user->fresh());
+        $this->senkronizeAiAdayDurumlari($user);
         $adaySorgusu = $this->adaySorgusu($user);
 
         return [
@@ -208,6 +212,8 @@ class EslesmeServisi
      */
     public function rastgeleEslestir(User $user): ?Eslesme
     {
+        $this->senkronizeAiAdayDurumlari($user);
+
         $eslesen = $this->adaySorgusu($user)
             ->inRandomOrder()
             ->first();
@@ -306,6 +312,8 @@ class EslesmeServisi
 
     private function sonrakiAday(User $user): ?User
     {
+        $this->senkronizeAiAdayDurumlari($user);
+
         foreach ($this->adayHavuzuSirasi($user) as [$cinsiyet, $sadeceCevrimici]) {
             $aday = $this->adaySec(
                 $this->adaySorgusu($user, $cinsiyet, $sadeceCevrimici)->with('fotograflar'),
@@ -420,6 +428,22 @@ $gecilen = EslesmeGecilenKullanici::query()
             ->push($user->id)
             ->unique()
             ->values();
+    }
+
+    private function senkronizeAiAdayDurumlari(User $user): void
+    {
+        $adaylar = User::query()
+            ->where('hesap_tipi', 'ai')
+            ->where('hesap_durumu', 'aktif')
+            ->where('is_admin', false)
+            ->whereNotIn('id', $this->haricTutulanKullaniciIdleri($user))
+            ->with([
+                'aiAyar:id,user_id,aktif_mi,saat_dilimi,uyku_baslangic,uyku_bitis,hafta_sonu_uyku_baslangic,hafta_sonu_uyku_bitis',
+                'availabilitySchedules:id,user_id,recurrence_type,specific_date,day_of_week,starts_at,ends_at,status',
+            ])
+            ->get(['id', 'hesap_tipi', 'hesap_durumu', 'cevrim_ici_mi', 'son_gorulme_tarihi']);
+
+        $this->userOnlineStatusService->syncCollection($adaylar);
     }
 
     private function cinsiyetFiltresiUygula(Builder $sorgu, User $user, ?string $zorunluCinsiyet = null): void
@@ -559,17 +583,6 @@ $gecilen = EslesmeGecilenKullanici::query()
             if ($this->queueIsFaked()) {
                 EslesmeSonrasiAiIlkMesajGorevi::dispatch($sohbet, $aiUser);
             }
-
-            return;
-        }
-
-        if (app()->environment('local')) {
-            ProcessAiTurnJob::dispatchSync(
-                'dating',
-                'first_message',
-                $aiUser->id,
-                $sohbet->id,
-            );
 
             return;
         }

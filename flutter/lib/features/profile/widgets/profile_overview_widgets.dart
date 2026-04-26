@@ -1,5 +1,3 @@
-import 'dart:io';
-
 import 'package:magmug/l10n/app_localizations.dart';
 import 'package:magmug/app_core.dart';
 import 'package:video_player/video_player.dart';
@@ -15,10 +13,8 @@ Future<void> openProfileMediaViewer(
 
   return Navigator.of(context).push(
     CupertinoPageRoute<void>(
-      builder: (_) => ProfileMediaViewerScreen(
-        media: media,
-        initialIndex: initialIndex,
-      ),
+      builder: (_) =>
+          ProfileMediaViewerScreen(media: media, initialIndex: initialIndex),
       fullscreenDialog: true,
     ),
   );
@@ -122,10 +118,17 @@ class ProfileHeaderSection extends ConsumerWidget {
                   ],
                 ),
                 child: ClipOval(
-                  child: remotePhoto != null && remotePhoto.isNotEmpty
-                      ? Image.network(remotePhoto, fit: BoxFit.cover)
-                      : photo != null
-                      ? Image.file(File(photo), fit: BoxFit.cover)
+                  child:
+                      (remotePhoto != null && remotePhoto.isNotEmpty) ||
+                          photo != null
+                      ? CachedAppImage(
+                          imageUrl:
+                              remotePhoto != null && remotePhoto.isNotEmpty
+                              ? remotePhoto
+                              : photo,
+                          cacheWidth: 192,
+                          cacheHeight: 192,
+                        )
                       : _ProfileAvatarPlaceholder(label: displayName),
                 ),
               ),
@@ -526,10 +529,11 @@ class _ProfileMediaSectionState extends ConsumerState<ProfileMediaSection> {
           fit: StackFit.expand,
           children: [
             if (photo.isPhoto || photo.previewUrl != null)
-              Image.network(
-                photo.displayUrl,
-                fit: BoxFit.cover,
-                errorBuilder: (_, _, _) => _videoPlaceholder(),
+              CachedAppImage(
+                imageUrl: photo.displayUrl,
+                cacheWidth: 240,
+                cacheHeight: 240,
+                errorBuilder: (_) => _videoPlaceholder(),
               )
             else
               _videoPlaceholder(),
@@ -548,6 +552,8 @@ class _ProfileMediaSectionState extends ConsumerState<ProfileMediaSection> {
                   ),
                   child: Text(
                     l10n.profileBadgePrimary,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
                       fontFamily: AppFont.family,
                       fontWeight: FontWeight.w700,
@@ -581,6 +587,8 @@ class _ProfileMediaSectionState extends ConsumerState<ProfileMediaSection> {
                       const SizedBox(width: 4),
                       Text(
                         l10n.profileBadgeVideo,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
                           fontFamily: AppFont.family,
                           fontWeight: FontWeight.w700,
@@ -682,6 +690,8 @@ class ProfileMediaTabBar extends StatelessWidget {
                 alignment: Alignment.center,
                 child: Text(
                   labels[i],
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                   style: TextStyle(
                     fontFamily: AppFont.family,
                     fontWeight: FontWeight.w600,
@@ -743,7 +753,8 @@ class _ProfileMediaViewerScreenState extends State<ProfileMediaViewerScreen> {
             controller: _pageController,
             itemCount: media.length,
             onPageChanged: (value) => setState(() => _currentIndex = value),
-            itemBuilder: (_, index) => _ProfileMediaViewerPage(media: media[index]),
+            itemBuilder: (_, index) =>
+                _ProfileMediaViewerPage(media: media[index]),
           ),
           SafeArea(
             child: Padding(
@@ -807,7 +818,15 @@ class _ProfileMediaViewerScreenState extends State<ProfileMediaViewerScreen> {
                   borderRadius: BorderRadius.circular(999),
                 ),
                 child: Text(
-                  currentItem.isVideo ? 'Video' : 'Fotograf',
+                  currentItem.isVideo
+                      ? AppRuntimeText.instance.t(
+                          'profile.media.type.video',
+                          'Video',
+                        )
+                      : AppRuntimeText.instance.t(
+                          'profile.media.type.photo',
+                          'Fotograf',
+                        ),
                   style: const TextStyle(
                     fontFamily: AppFont.family,
                     fontWeight: FontWeight.w700,
@@ -830,7 +849,8 @@ class _ProfileMediaViewerPage extends StatefulWidget {
   const _ProfileMediaViewerPage({required this.media});
 
   @override
-  State<_ProfileMediaViewerPage> createState() => _ProfileMediaViewerPageState();
+  State<_ProfileMediaViewerPage> createState() =>
+      _ProfileMediaViewerPageState();
 }
 
 class _ProfileMediaViewerPageState extends State<_ProfileMediaViewerPage> {
@@ -868,12 +888,15 @@ class _ProfileMediaViewerPageState extends State<_ProfileMediaViewerPage> {
       child: InteractiveViewer(
         minScale: 1,
         maxScale: 4,
-        child: Image.network(
-          widget.media.url,
+        child: CachedAppImage(
+          imageUrl: widget.media.url,
           fit: BoxFit.contain,
-          errorBuilder: (_, _, _) => const _ProfileMediaViewerFallback(
+          errorBuilder: (_) => _ProfileMediaViewerFallback(
             icon: CupertinoIcons.photo,
-            label: 'Medya yuklenemedi.',
+            label: AppRuntimeText.instance.t(
+              'profile.media.error.load_failed',
+              'Medya yuklenemedi.',
+            ),
           ),
         ),
       ),
@@ -883,9 +906,12 @@ class _ProfileMediaViewerPageState extends State<_ProfileMediaViewerPage> {
   Widget _buildVideo() {
     final controller = _videoController;
     if (controller == null || _initializeVideoFuture == null) {
-      return const _ProfileMediaViewerFallback(
+      return _ProfileMediaViewerFallback(
         icon: CupertinoIcons.exclamationmark_triangle,
-        label: 'Video acilamadi.',
+        label: AppRuntimeText.instance.t(
+          'profile.media.error.video_open_failed',
+          'Video acilamadi.',
+        ),
       );
     }
 
@@ -893,14 +919,15 @@ class _ProfileMediaViewerPageState extends State<_ProfileMediaViewerPage> {
       future: _initializeVideoFuture,
       builder: (context, snapshot) {
         if (snapshot.connectionState != ConnectionState.done) {
-          return const Center(
-            child: CupertinoActivityIndicator(radius: 14),
-          );
+          return const Center(child: CupertinoActivityIndicator(radius: 14));
         }
         if (snapshot.hasError || !controller.value.isInitialized) {
-          return const _ProfileMediaViewerFallback(
+          return _ProfileMediaViewerFallback(
             icon: CupertinoIcons.exclamationmark_triangle,
-            label: 'Video acilamadi.',
+            label: AppRuntimeText.instance.t(
+              'profile.media.error.video_open_failed',
+              'Video acilamadi.',
+            ),
           );
         }
 
@@ -955,10 +982,7 @@ class _ProfileMediaViewerFallback extends StatelessWidget {
   final IconData icon;
   final String label;
 
-  const _ProfileMediaViewerFallback({
-    required this.icon,
-    required this.label,
-  });
+  const _ProfileMediaViewerFallback({required this.icon, required this.label});
 
   @override
   Widget build(BuildContext context) {

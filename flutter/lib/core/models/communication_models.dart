@@ -69,6 +69,8 @@ class AppConversationMessage {
   final String? translatedText;
   final String? translationTargetLanguageCode;
   final String? translationTargetLanguageName;
+  final String? clientMessageId;
+  final String deliveryStatus;
   final DateTime? createdAt;
 
   const AppConversationMessage({
@@ -88,6 +90,8 @@ class AppConversationMessage {
     this.translatedText,
     this.translationTargetLanguageCode,
     this.translationTargetLanguageName,
+    this.clientMessageId,
+    this.deliveryStatus = 'sent',
     this.createdAt,
   });
 
@@ -117,6 +121,8 @@ class AppConversationMessage {
           translationTargetLanguageCode ?? this.translationTargetLanguageCode,
       translationTargetLanguageName:
           translationTargetLanguageName ?? this.translationTargetLanguageName,
+      clientMessageId: clientMessageId,
+      deliveryStatus: deliveryStatus,
       createdAt: createdAt,
     );
   }

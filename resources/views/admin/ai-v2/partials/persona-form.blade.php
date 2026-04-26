@@ -10,9 +10,24 @@
     $selectedCountry = old('persona_ulke', $persona?->persona_ulke ?? old('ulke', $kullanici?->ulke ?? 'Turkiye'));
     $selectedRegion = old('persona_bolge', $persona?->persona_bolge);
     $selectedCity = old('persona_sehir', $persona?->persona_sehir);
+    $selectedTimezone = old('saat_dilimi', $persona?->saat_dilimi ?? config('app.timezone'));
     $behaviorValues = collect($behaviorSliders)->mapWithKeys(function (array $meta, string $field) use ($persona) {
         return [$field => (int) old($field, $persona?->{$field} ?? ($meta['default'] ?? 5))];
     })->all();
+    $scheduleRows = old('availability_schedules', $scheduleRows ?? []);
+    if (!is_array($scheduleRows)) {
+        $scheduleRows = [];
+    }
+    $scheduleRows = collect($scheduleRows)->map(function ($row) {
+        return [
+            'recurrence_type' => data_get($row, 'recurrence_type', 'date'),
+            'specific_date' => data_get($row, 'specific_date', data_get($row, 'date', '')),
+            'starts_at' => data_get($row, 'starts_at', data_get($row, 'start_time', '')),
+            'ends_at' => data_get($row, 'ends_at', data_get($row, 'end_time', '')),
+            'status' => data_get($row, 'status', data_get($row, 'durum', 'active')),
+        ];
+    })->values()->all();
+    $hasScheduleErrors = collect($errors->keys())->contains(fn (string $key) => str_starts_with($key, 'availability_schedules'));
 @endphp
 
 <form method="POST" action="{{ $action }}" class="ai-console space-y-6"
@@ -21,6 +36,8 @@
         personaCountry: @js($selectedCountry),
         personaRegion: @js($selectedRegion),
         personaCity: @js($selectedCity),
+        scheduleTimezone: @js($selectedTimezone),
+        scheduleRows: @js($scheduleRows),
         behavior: @js($behaviorValues),
         regions() {
             return Object.keys(this.locationCatalog[this.personaCountry]?.regions ?? {});
@@ -37,13 +54,68 @@
             if (!this.cities().includes(this.personaCity)) {
                 this.personaCity = '';
             }
+        },
+        blankScheduleRow() {
+            return {
+                recurrence_type: 'date',
+                specific_date: '',
+                starts_at: '',
+                ends_at: '',
+                status: 'active',
+            };
+        },
+        addScheduleRow() {
+            this.scheduleRows.push(this.blankScheduleRow());
+        },
+        removeScheduleRow(index) {
+            this.scheduleRows.splice(index, 1);
+        },
+        scheduleDateFor(offsetDays) {
+            try {
+                const localDate = new Date(new Date().toLocaleString('en-US', {
+                    timeZone: this.scheduleTimezone || 'UTC'
+                }));
+                localDate.setHours(0, 0, 0, 0);
+                localDate.setDate(localDate.getDate() + offsetDays);
+
+                const year = localDate.getFullYear();
+                const month = String(localDate.getMonth() + 1).padStart(2, '0');
+                const day = String(localDate.getDate()).padStart(2, '0');
+
+                return `${year}-${month}-${day}`;
+            } catch (error) {
+                const fallback = new Date();
+                fallback.setHours(0, 0, 0, 0);
+                fallback.setDate(fallback.getDate() + offsetDays);
+
+                const year = fallback.getFullYear();
+                const month = String(fallback.getMonth() + 1).padStart(2, '0');
+                const day = String(fallback.getDate()).padStart(2, '0');
+
+                return `${year}-${month}-${day}`;
+            }
+        },
+        scheduleMinDate() {
+            return this.scheduleDateFor(0);
+        },
+        scheduleMaxDate() {
+            return this.scheduleDateFor(30);
+        },
+        scheduleWindowLabel() {
+            return `${this.scheduleMinDate()} - ${this.scheduleMaxDate()}`;
         }
     }"
-    x-init="syncLocation()">
+    x-init="syncLocation(); if (scheduleRows.length === 0) { addScheduleRow(); }">
     @csrf
     @unless ($isCreate)
         @method('PUT')
     @endunless
+
+    @if (!empty($hiddenFields ?? []))
+        @foreach ($hiddenFields as $field => $value)
+            <input type="hidden" name="{{ $field }}" value="{{ $value }}">
+        @endforeach
+    @endif
 
     <section class="ai-console-hero">
         <div class="grid gap-6 xl:grid-cols-[minmax(0,1.18fr)_22rem] xl:items-start">
@@ -92,7 +164,13 @@
         </div>
     @endif
 
-    @include('admin.ai-v2.partials.navigation')
+    @if (($showNavigation ?? true))
+        @include('admin.ai-v2.partials.navigation')
+    @endif
+
+    @if (!empty($preSectionsView ?? null))
+        @include($preSectionsView)
+    @endif
 
     <div class="ai-console-grid">
         <section class="ai-console-panel">
@@ -513,7 +591,7 @@
                 <div class="ai-console-control-group ai-console-control-group--2 mt-5">
                     <label class="md:col-span-2">
                         <span class="ai-console-label">Saat Dilimi</span>
-                        <input class="ai-console-input" type="text" name="saat_dilimi" value="{{ old('saat_dilimi', $persona?->saat_dilimi ?? config('app.timezone')) }}" placeholder="Europe/Istanbul">
+                        <input class="ai-console-input" type="text" name="saat_dilimi" x-model="scheduleTimezone" value="{{ $selectedTimezone }}" placeholder="Europe/Istanbul">
                     </label>
                     <label>
                         <span class="ai-console-label">Uyku Baslangic</span>
@@ -554,6 +632,88 @@
                 </div>
             </section>
         </div>
+
+        <section class="ai-console-panel">
+            <div class="ai-console-panel__header">
+                <div>
+                    <h2 class="ai-console-panel__title">Aktif / Pasif Saatler</h2>
+                    <p class="ai-console-panel__copy">Gun bazli aktiflik override araliklari. Pasif kayitlar ayni ana denk gelen aktif kayitlardan once gelir.</p>
+                </div>
+            </div>
+
+            <div class="rounded-2xl border border-slate-800 bg-slate-950/60 px-4 py-4 text-sm text-slate-300">
+                <div class="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                        <div class="ai-console-kicker">Tarih Penceresi</div>
+                        <p class="mt-2 text-sm leading-6 text-slate-400">Saat araliklari secili saat dilimine gore sonraki bir aylik alan icinde kaydedilir. Ayni gun icinde birden fazla satir ekleyebilirsin.</p>
+                    </div>
+                    <div class="rounded-xl border border-slate-800 bg-slate-900/80 px-3 py-2 text-xs font-semibold uppercase tracking-[0.16em] text-slate-300" x-text="scheduleWindowLabel()"></div>
+                </div>
+            </div>
+
+            @if ($hasScheduleErrors)
+                <div class="mt-4 rounded-2xl border border-rose-500/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
+                    {{ $errors->first('availability_schedules') ?: $errors->first('availability_schedules.*') ?: $errors->first() }}
+                </div>
+            @endif
+
+            <div class="mt-5 space-y-4">
+                <template x-for="(row, index) in scheduleRows" :key="`${index}-${row.specific_date}-${row.starts_at}-${row.ends_at}-${row.status}`">
+                    <div class="ai-console-card">
+                        <input type="hidden" x-bind:name="`availability_schedules[${index}][recurrence_type]`" x-model="row.recurrence_type">
+
+                        <div class="grid gap-4 md:grid-cols-[minmax(0,1.2fr)_1fr_1fr_0.95fr_auto]">
+                            <label>
+                                <span class="ai-console-label">Tarih</span>
+                                <input
+                                    class="ai-console-input"
+                                    type="date"
+                                    x-model="row.specific_date"
+                                    x-bind:name="`availability_schedules[${index}][specific_date]`"
+                                    x-bind:min="scheduleMinDate()"
+                                    x-bind:max="scheduleMaxDate()">
+                            </label>
+
+                            <label>
+                                <span class="ai-console-label">Baslangic</span>
+                                <input
+                                    class="ai-console-input"
+                                    type="time"
+                                    x-model="row.starts_at"
+                                    x-bind:name="`availability_schedules[${index}][starts_at]`">
+                            </label>
+
+                            <label>
+                                <span class="ai-console-label">Bitis</span>
+                                <input
+                                    class="ai-console-input"
+                                    type="time"
+                                    x-model="row.ends_at"
+                                    x-bind:name="`availability_schedules[${index}][ends_at]`">
+                            </label>
+
+                            <label>
+                                <span class="ai-console-label">Durum</span>
+                                <select class="ai-console-select" x-model="row.status" x-bind:name="`availability_schedules[${index}][status]`">
+                                    @foreach ($scheduleStatusOptions as $value => $label)
+                                        <option value="{{ $value }}">{{ $label }}</option>
+                                    @endforeach
+                                </select>
+                            </label>
+
+                            <div class="flex items-end">
+                                <button type="button" class="ai-console-button ai-console-button--ghost w-full" @click="removeScheduleRow(index)">Sil</button>
+                            </div>
+                        </div>
+                    </div>
+                </template>
+            </div>
+
+            <div class="mt-5 flex flex-wrap justify-between gap-3">
+                <p class="text-sm leading-6 text-slate-400">Baslangic saati bitis saatinden kucuk olmali. Cakisan araliklar kaydedilmez.</p>
+                <button type="button" class="ai-console-button ai-console-button--ghost" @click="addScheduleRow()">Saat Araligi Ekle</button>
+            </div>
+        </section>
 
         <div class="sticky bottom-4 z-10">
             <div class="ai-console-toolbar">

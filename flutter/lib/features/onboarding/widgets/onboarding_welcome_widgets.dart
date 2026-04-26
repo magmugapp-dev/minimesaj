@@ -39,7 +39,7 @@ class OnboardingWelcomeView extends StatelessWidget {
                       children: [
                         SizedBox(height: compact ? 8 : 24),
                         Text(
-                          'magmug',
+                          AppRuntimeText.instance.t('app.name.lower', 'magmug'),
                           textAlign: TextAlign.center,
                           style: TextStyle(
                             fontFamily: AppFont.family,
@@ -64,7 +64,10 @@ class OnboardingWelcomeView extends StatelessWidget {
                         ),
                         SizedBox(height: compact ? 10 : 16),
                         Text(
-                          'Flortlerin icin ozel, guvenli\nve sana ozel bir alan',
+                          AppRuntimeText.instance.t(
+                            'onboardingWelcomeHeroCopy',
+                            'Flortlerin icin ozel, guvenli\nve sana ozel bir alan',
+                          ),
                           textAlign: TextAlign.center,
                           style: TextStyle(
                             fontFamily: AppFont.family,
@@ -77,7 +80,10 @@ class OnboardingWelcomeView extends StatelessWidget {
                         ),
                         SizedBox(height: compact ? 18 : 24),
                         AuthButton(
-                          label: 'Google ile devam et',
+                          label: AppRuntimeText.instance.t(
+                            'onboarding.auth.google',
+                            'Google ile devam et',
+                          ),
                           iconAsset: 'assets/images/icon_google.png',
                           background: AppColors.white,
                           labelColor: AppColors.black,
@@ -90,7 +96,10 @@ class OnboardingWelcomeView extends StatelessWidget {
                         ),
                         const SizedBox(height: 12),
                         AuthButton(
-                          label: 'Apple ile devam et',
+                          label: AppRuntimeText.instance.t(
+                            'onboarding.auth.apple',
+                            'Apple ile devam et',
+                          ),
                           iconAsset: 'assets/images/icon_apple.png',
                           background: AppColors.black,
                           labelColor: AppColors.white,
@@ -131,16 +140,25 @@ class OnboardingGradientTaglineText extends StatelessWidget {
     );
     return Column(
       children: [
-        const Text('Mesajlasmanin', style: baseStyle),
+        Text(
+          AppRuntimeText.instance.t(
+            'onboardingWelcomeTaglinePrefix',
+            'Mesajlasmanin',
+          ),
+          style: baseStyle,
+        ),
         ShaderMask(
           shaderCallback: (bounds) => const LinearGradient(
             begin: Alignment.centerLeft,
             end: Alignment.centerRight,
             colors: [AppColors.indigo, AppColors.peach, AppColors.coral],
           ).createShader(bounds),
-          child: const Text(
-            'yeni hali',
-            style: TextStyle(
+          child: Text(
+            AppRuntimeText.instance.t(
+              'onboardingWelcomeTaglineHighlight',
+              'yeni hali',
+            ),
+            style: const TextStyle(
               fontFamily: AppFont.family,
               fontWeight: FontWeight.w700,
               fontSize: 22,
@@ -261,9 +279,17 @@ class _OnboardingTermsLineState extends State<OnboardingTermsLine> {
           color: AppColors.black,
         ),
         children: [
-          const TextSpan(text: 'Devam ederek '),
           TextSpan(
-            text: 'Kullanim Sartlarini',
+            text: AppRuntimeText.instance.t(
+              'onboarding.terms.prefix',
+              'Devam ederek ',
+            ),
+          ),
+          TextSpan(
+            text: AppRuntimeText.instance.t(
+              'onboarding.terms.link',
+              'Kullanim Sartlarini',
+            ),
             style: const TextStyle(
               fontWeight: FontWeight.w700,
               color: AppColors.black,
@@ -271,7 +297,12 @@ class _OnboardingTermsLineState extends State<OnboardingTermsLine> {
             ),
             recognizer: _recognizer,
           ),
-          const TextSpan(text: ' kabul etmis olursunuz'),
+          TextSpan(
+            text: AppRuntimeText.instance.t(
+              'onboarding.terms.suffix',
+              ' kabul etmis olursunuz',
+            ),
+          ),
         ],
       ),
       textAlign: TextAlign.center,

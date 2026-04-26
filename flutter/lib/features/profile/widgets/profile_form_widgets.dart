@@ -414,6 +414,10 @@ class ProfileNotificationPrefsSheetView extends StatelessWidget {
   final String vibrationDescription;
   final bool vibrationEnabled;
   final ValueChanged<bool> onVibrationChanged;
+  final String messageSoundsTitle;
+  final String messageSoundsDescription;
+  final bool messageSoundsEnabled;
+  final ValueChanged<bool> onMessageSoundsChanged;
   final String saveLabel;
   final VoidCallback? onSave;
 
@@ -428,6 +432,10 @@ class ProfileNotificationPrefsSheetView extends StatelessWidget {
     required this.vibrationDescription,
     required this.vibrationEnabled,
     required this.onVibrationChanged,
+    required this.messageSoundsTitle,
+    required this.messageSoundsDescription,
+    required this.messageSoundsEnabled,
+    required this.onMessageSoundsChanged,
     required this.saveLabel,
     required this.onSave,
   });
@@ -462,6 +470,13 @@ class ProfileNotificationPrefsSheetView extends StatelessWidget {
           description: vibrationDescription,
           value: vibrationEnabled,
           onChanged: onVibrationChanged,
+        ),
+        Container(height: 1, color: const Color(0xFFF0F0F0)),
+        ProfileNotificationPreferenceRow(
+          title: messageSoundsTitle,
+          description: messageSoundsDescription,
+          value: messageSoundsEnabled,
+          onChanged: onMessageSoundsChanged,
         ),
         const SizedBox(height: 16),
         GradientButton(label: saveLabel, onTap: onSave),
