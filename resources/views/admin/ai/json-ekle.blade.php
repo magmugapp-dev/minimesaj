@@ -14,7 +14,8 @@
                 <div class="studio-alert__row">
                     <div class="studio-alert__icon">
                         <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
-                            <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m0 3.75h.008v.008H12v-.008zM10.29 3.86 1.82 18a2.25 2.25 0 0 0 1.93 3.37h16.5a2.25 2.25 0 0 0 1.93-3.37L13.71 3.86a2.25 2.25 0 0 0-3.42 0Z" />
+                            <path stroke-linecap="round" stroke-linejoin="round"
+                                d="M12 9v3.75m0 3.75h.008v.008H12v-.008zM10.29 3.86 1.82 18a2.25 2.25 0 0 0 1.93 3.37h16.5a2.25 2.25 0 0 0 1.93-3.37L13.71 3.86a2.25 2.25 0 0 0-3.42 0Z" />
                         </svg>
                     </div>
                     <div>
@@ -30,7 +31,8 @@
                 <div class="studio-alert__row">
                     <div class="studio-alert__icon">
                         <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
-                            <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m0 3.75h.008v.008H12v-.008zM10.29 3.86 1.82 18a2.25 2.25 0 0 0 1.93 3.37h16.5a2.25 2.25 0 0 0 1.93-3.37L13.71 3.86a2.25 2.25 0 0 0-3.42 0Z" />
+                            <path stroke-linecap="round" stroke-linejoin="round"
+                                d="M12 9v3.75m0 3.75h.008v.008H12v-.008zM10.29 3.86 1.82 18a2.25 2.25 0 0 0 1.93 3.37h16.5a2.25 2.25 0 0 0 1.93-3.37L13.71 3.86a2.25 2.25 0 0 0-3.42 0Z" />
                         </svg>
                     </div>
                     <div>

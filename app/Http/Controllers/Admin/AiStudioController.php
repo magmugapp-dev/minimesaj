@@ -11,6 +11,8 @@ use App\Models\AiMemory;
 use App\Models\AiPersonaProfile;
 use App\Models\AiTurnLog;
 use App\Models\User;
+use App\Services\AyarServisi;
+use App\Services\Media\UserProfilePhotoService;
 use App\Services\Users\UserAvailabilityScheduleService;
 use App\Services\Users\UserOnlineStatusService;
 use App\Services\YapayZeka\V2\AiEngineConfigService;
@@ -21,8 +23,10 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 use Illuminate\Validation\Validator;
 use Illuminate\View\View;
+use Throwable;
 
 class AiStudioController extends Controller
 {
@@ -31,11 +35,15 @@ class AiStudioController extends Controller
         private ?AiPersonaService $personaService = null,
         private ?UserAvailabilityScheduleService $availabilityScheduleService = null,
         private ?UserOnlineStatusService $userOnlineStatusService = null,
+        private ?UserProfilePhotoService $profilePhotoService = null,
+        private ?AyarServisi $ayarServisi = null,
     ) {
         $this->engineConfigService ??= app(AiEngineConfigService::class);
         $this->personaService ??= app(AiPersonaService::class);
         $this->availabilityScheduleService ??= app(UserAvailabilityScheduleService::class);
         $this->userOnlineStatusService ??= app(UserOnlineStatusService::class);
+        $this->profilePhotoService ??= app(UserProfilePhotoService::class);
+        $this->ayarServisi ??= app(AyarServisi::class);
     }
 
     public function index(Request $request): View
@@ -54,6 +62,7 @@ class AiStudioController extends Controller
                         ->orWhere('biyografi', 'like', '%' . $search . '%');
                 });
             })
+            ->withCount(['fotograflar as fotograf_sayisi' => fn($query) => $query->where('medya_tipi', 'fotograf')])
             ->with(['aiPersonaProfile.engineConfig'])
             ->orderBy('ad')
             ->get()
@@ -65,7 +74,7 @@ class AiStudioController extends Controller
 
         $istatistikler = [
             'persona_sayisi' => $personalar->count(),
-            'aktif_persona' => $personalar->filter(fn (User $user) => $user->aiPersonaProfile?->aktif_mi)->count(),
+            'aktif_persona' => $personalar->filter(fn(User $user) => $user->aiPersonaProfile?->aktif_mi)->count(),
             'aktif_state' => AiConversationState::query()->whereIn('ai_durumu', ['typing', 'queued'])->count(),
             'bugunku_turn' => AiTurnLog::query()->whereDate('created_at', today())->count(),
         ];
@@ -124,9 +133,17 @@ class AiStudioController extends Controller
             return $user;
         });
 
-        return redirect()
+        $photoErrors = $this->uploadPhotosFromRequest($request, $kullanici);
+
+        $redirect = redirect()
             ->route('admin.ai.goster', $kullanici)
             ->with('basari', $kullanici->ad . ' AI persona kaydi olusturuldu.');
+
+        if ($photoErrors !== []) {
+            $redirect->with('hatalar', $photoErrors);
+        }
+
+        return $redirect;
     }
 
     public function engineUpdate(Request $request): RedirectResponse
@@ -168,6 +185,7 @@ class AiStudioController extends Controller
         abort_unless($kullanici->hesap_tipi === 'ai', 404);
 
         $persona = $this->personaService->ensureForUser($kullanici);
+        $kullanici->loadMissing(['fotograflar' => fn($query) => $query->orderBy('sira_no')->orderBy('id')]);
 
         return view('admin.ai-v2.show', array_merge($this->sharedViewData(), [
             'kullanici' => $kullanici,
@@ -197,6 +215,7 @@ class AiStudioController extends Controller
         abort_unless($kullanici->hesap_tipi === 'ai', 404);
 
         $kullanici->loadMissing('availabilitySchedules');
+        $kullanici->loadMissing(['fotograflar' => fn($query) => $query->orderBy('sira_no')->orderBy('id')]);
         $persona = $this->personaService->ensureForUser($kullanici);
 
         return view('admin.ai-v2.edit', array_merge($this->sharedViewData(), [
@@ -383,6 +402,8 @@ class AiStudioController extends Controller
             'required_rules' => 'nullable|string|max:4000',
             'availability_schedules' => 'nullable|array',
             'availability_schedules.*' => 'nullable|array',
+            'fotograflar' => ['nullable', 'array', 'max:' . $this->profilePhotoService->maxPhotos()],
+            'fotograflar.*' => ['file', 'mimes:jpg,jpeg,png,webp', 'max:' . $this->maxPhotoSizeKb()],
         ];
 
         foreach ($dropdowns['behavior_sliders'] as $field => $meta) {
@@ -483,39 +504,16 @@ class AiStudioController extends Controller
             'metadata' => $metadata,
         ];
 
+        $legacyPayload = [];
         foreach (array_keys($dropdowns['behavior_sliders']) as $field) {
-            $personaPayload[$field] = (int) $validated[$field];
+            $personaPayload[$field] = $validated[$field];
+            $legacyPayload[$field] = $validated[$field];
         }
 
         return [
             'user' => $userPayload,
             'persona' => $personaPayload,
-            'legacy' => [
-                'aktif_mi' => $personaPayload['aktif_mi'],
-                'model_adi' => $validated['model_adi'],
-                'persona_ozeti' => $personaPayload['persona_ozeti'],
-                'konusma_tonu' => $personaPayload['konusma_tonu'],
-                'konusma_stili' => $personaPayload['konusma_stili'],
-                'ilk_mesaj_atar_mi' => $personaPayload['ilk_mesaj_atar_mi'],
-                'ilk_mesaj_tonu' => $personaPayload['ilk_mesaj_tonu'],
-                'mesaj_uzunlugu_min' => $minimumLength,
-                'mesaj_uzunlugu_max' => $maximumLength,
-                'minimum_cevap_suresi_saniye' => $minimumDelay,
-                'maksimum_cevap_suresi_saniye' => $maximumDelay,
-                'saat_dilimi' => $personaPayload['saat_dilimi'],
-                'uyku_baslangic' => $personaPayload['uyku_baslangic'],
-                'uyku_bitis' => $personaPayload['uyku_bitis'],
-                'hafta_sonu_uyku_baslangic' => $personaPayload['hafta_sonu_uyku_baslangic'],
-                'hafta_sonu_uyku_bitis' => $personaPayload['hafta_sonu_uyku_bitis'],
-                'emoji_seviyesi' => $personaPayload['emoji_seviyesi'],
-                'flort_seviyesi' => $personaPayload['flort_seviyesi'],
-                'giriskenlik_seviyesi' => $personaPayload['giriskenlik_seviyesi'],
-                'utangaclik_seviyesi' => $personaPayload['utangaclik_seviyesi'],
-                'duygusallik_seviyesi' => $personaPayload['duygusallik_seviyesi'],
-                'kiskanclik_seviyesi' => $personaPayload['kiskanclik_seviyesi'],
-                'mizah_seviyesi' => $personaPayload['mizah_seviyesi'],
-                'zeka_seviyesi' => $personaPayload['zeka_seviyesi'],
-            ],
+            'legacy' => $legacyPayload,
             'guardrails' => [
                 'blocked_topics' => $this->textToLines($validated['blocked_topics'] ?? null),
                 'required_rules' => $this->textToLines($validated['required_rules'] ?? null),
@@ -550,19 +548,19 @@ class AiStudioController extends Controller
         $region = $data['persona_bolge'] ?? null;
         $city = $data['persona_sehir'] ?? null;
 
-        if ($country && !isset($catalog[$country])) {
+        if ($country && ! isset($catalog[$country])) {
             $validator->errors()->add('persona_ulke', 'Secilen ulke katalogda bulunmuyor.');
 
             return;
         }
 
-        if ($region && !$country) {
+        if ($region && ! $country) {
             $validator->errors()->add('persona_ulke', 'Bolge secimi icin once ulke secmelisin.');
 
             return;
         }
 
-        if ($city && (!$country || !$region)) {
+        if ($city && (! $country || ! $region)) {
             $validator->errors()->add('persona_bolge', 'Sehir secimi icin once ulke ve bolge secmelisin.');
 
             return;
@@ -571,7 +569,7 @@ class AiStudioController extends Controller
         if ($country && $region) {
             $regions = array_keys($catalog[$country]['regions'] ?? []);
 
-            if (!in_array($region, $regions, true)) {
+            if (! in_array($region, $regions, true)) {
                 $validator->errors()->add('persona_bolge', 'Secilen bolge bu ulke icin gecersiz.');
 
                 return;
@@ -581,7 +579,7 @@ class AiStudioController extends Controller
         if ($country && $region && $city) {
             $cities = $catalog[$country]['regions'][$region] ?? [];
 
-            if (!in_array($city, $cities, true)) {
+            if (! in_array($city, $cities, true)) {
                 $validator->errors()->add('persona_sehir', 'Secilen sehir bu bolge icin gecersiz.');
             }
         }
@@ -590,39 +588,38 @@ class AiStudioController extends Controller
     private function mirrorLegacySettings(User $kullanici, AiPersonaProfile $persona, array $legacy): void
     {
         $engineConfig = $this->engineConfigService->activeConfig();
+        $dropdowns = $this->dropdowns();
+
+        $ayarlar = [
+            'aktif_mi' => $persona->aktif_mi,
+            'saglayici_tipi' => 'gemini',
+            'model_adi' => data_get($persona->metadata, 'model_adi', $engineConfig->model_adi),
+            'kisilik_aciklamasi' => $persona->persona_ozeti,
+            'konusma_tonu' => $persona->konusma_tonu,
+            'konusma_stili' => $persona->konusma_stili,
+            'ilk_mesaj_atar_mi' => $persona->ilk_mesaj_atar_mi,
+            'ilk_mesaj_sablonu' => $persona->ilk_mesaj_tonu,
+            'minimum_cevap_suresi_saniye' => $persona->minimum_cevap_suresi_saniye,
+            'maksimum_cevap_suresi_saniye' => $persona->maksimum_cevap_suresi_saniye,
+            'mesaj_uzunlugu_min' => $persona->mesaj_uzunlugu_min,
+            'mesaj_uzunlugu_max' => $persona->mesaj_uzunlugu_max,
+            'saat_dilimi' => $persona->saat_dilimi,
+            'uyku_baslangic' => $persona->uyku_baslangic,
+            'uyku_bitis' => $persona->uyku_bitis,
+            'hafta_sonu_uyku_baslangic' => $persona->hafta_sonu_uyku_baslangic,
+            'hafta_sonu_uyku_bitis' => $persona->hafta_sonu_uyku_bitis,
+            'temperature' => $engineConfig->temperature,
+            'top_p' => $engineConfig->top_p,
+            'max_output_tokens' => $engineConfig->max_output_tokens,
+        ];
+
+        foreach (array_keys($dropdowns['behavior_sliders']) as $field) {
+            $ayarlar[$field] = $legacy[$field] ?? $persona->{$field} ?? $dropdowns['behavior_sliders'][$field]['default'] ?? 5;
+        }
 
         AiAyar::query()->updateOrCreate(
             ['user_id' => $kullanici->id],
-            [
-                'aktif_mi' => $legacy['aktif_mi'],
-                'saglayici_tipi' => 'gemini',
-                'model_adi' => $legacy['model_adi'],
-                'kisilik_aciklamasi' => $legacy['persona_ozeti'],
-                'konusma_tonu' => $legacy['konusma_tonu'],
-                'konusma_stili' => $legacy['konusma_stili'],
-                'emoji_seviyesi' => $legacy['emoji_seviyesi'],
-                'flort_seviyesi' => $legacy['flort_seviyesi'],
-                'giriskenlik_seviyesi' => $legacy['giriskenlik_seviyesi'],
-                'utangaclik_seviyesi' => $legacy['utangaclik_seviyesi'],
-                'duygusallik_seviyesi' => $legacy['duygusallik_seviyesi'],
-                'kiskanclik_seviyesi' => $legacy['kiskanclik_seviyesi'],
-                'mizah_seviyesi' => $legacy['mizah_seviyesi'],
-                'zeka_seviyesi' => $legacy['zeka_seviyesi'],
-                'ilk_mesaj_atar_mi' => $legacy['ilk_mesaj_atar_mi'],
-                'ilk_mesaj_sablonu' => $legacy['ilk_mesaj_tonu'],
-                'minimum_cevap_suresi_saniye' => $legacy['minimum_cevap_suresi_saniye'],
-                'maksimum_cevap_suresi_saniye' => $legacy['maksimum_cevap_suresi_saniye'],
-                'mesaj_uzunlugu_min' => $legacy['mesaj_uzunlugu_min'],
-                'mesaj_uzunlugu_max' => $legacy['mesaj_uzunlugu_max'],
-                'saat_dilimi' => $legacy['saat_dilimi'],
-                'uyku_baslangic' => $legacy['uyku_baslangic'],
-                'uyku_bitis' => $legacy['uyku_bitis'],
-                'hafta_sonu_uyku_baslangic' => $legacy['hafta_sonu_uyku_baslangic'],
-                'hafta_sonu_uyku_bitis' => $legacy['hafta_sonu_uyku_bitis'],
-                'temperature' => $engineConfig->temperature,
-                'top_p' => $engineConfig->top_p,
-                'max_output_tokens' => $engineConfig->max_output_tokens,
-            ],
+            $ayarlar,
         );
 
         $metadata = $persona->metadata ?? [];
@@ -646,7 +643,37 @@ class AiStudioController extends Controller
                 'active' => 'Aktif',
                 'passive' => 'Pasif',
             ],
+            'maxPhotos' => $this->profilePhotoService->maxPhotos(),
         ];
+    }
+
+    private function uploadPhotosFromRequest(Request $request, User $kullanici): array
+    {
+        if (! $request->hasFile('fotograflar')) {
+            return [];
+        }
+
+        $errors = [];
+
+        foreach ($request->file('fotograflar', []) as $file) {
+            try {
+                $this->profilePhotoService->upload($kullanici, $file);
+            } catch (ValidationException $exception) {
+                $errors[] = $file->getClientOriginalName() . ': ' . collect($exception->errors())->flatten()->implode(' ');
+            } catch (Throwable $exception) {
+                report($exception);
+                $errors[] = $file->getClientOriginalName() . ': Fotograf yuklenemedi.';
+            }
+        }
+
+        return $errors;
+    }
+
+    private function maxPhotoSizeKb(): int
+    {
+        $maxPhotoSizeMb = max(1, (int) $this->ayarServisi->al('max_foto_boyut_mb', config('storage.upload.max_image_size_mb', 50)));
+
+        return $maxPhotoSizeMb * 1024;
     }
 
     private function dropdowns(): array
@@ -661,9 +688,9 @@ class AiStudioController extends Controller
         array $requiredRules,
     ): void {
         AiGuardrailRule::query()
-            ->when($aiEngineConfig, fn ($query) => $query->where('ai_engine_config_id', $aiEngineConfig->id))
-            ->when($aiPersonaProfile, fn ($query) => $query->where('ai_persona_profile_id', $aiPersonaProfile->id))
-            ->when(!$aiEngineConfig && !$aiPersonaProfile, fn ($query) => $query->whereRaw('1 = 0'))
+            ->when($aiEngineConfig, fn($query) => $query->where('ai_engine_config_id', $aiEngineConfig->id))
+            ->when($aiPersonaProfile, fn($query) => $query->where('ai_persona_profile_id', $aiPersonaProfile->id))
+            ->when(! $aiEngineConfig && ! $aiPersonaProfile, fn($query) => $query->whereRaw('1 = 0'))
             ->whereIn('rule_type', ['blocked_topic', 'required_rule'])
             ->delete();
 

@@ -138,6 +138,38 @@ it('rejects dropdown values outside the v2 catalog', function () {
         ->assertSessionHasErrors(['meslek']);
 });
 
+it('imports keyed json ai persona records without relying on numeric indexes', function () {
+    $admin = User::factory()->create([
+        'is_admin' => true,
+    ]);
+
+    $payload = [
+        'persona_one' => [
+            'ad' => 'Nora',
+            'soyad' => 'Json',
+            'kullanici_adi' => 'nora_keyed_json_ai',
+            'cinsiyet' => 'kadin',
+            'saglayici_tipi' => 'gemini',
+            'model_adi' => 'gemini-3.1-auto-quality',
+            'biyografi' => 'JSON import karakteri.',
+        ],
+    ];
+
+    $response = $this->actingAs($admin)
+        ->post(route('admin.ai.json-kaydet'), [
+            'json_veri' => json_encode($payload, JSON_UNESCAPED_UNICODE),
+        ]);
+
+    $response
+        ->assertRedirect(route('admin.ai.index'))
+        ->assertSessionHas('basari');
+
+    expect(User::query()
+        ->where('kullanici_adi', 'nora_keyed_json_ai')
+        ->where('hesap_tipi', 'ai')
+        ->exists())->toBeTrue();
+});
+
 function studioPayload(array $overrides = []): array
 {
     return array_merge([

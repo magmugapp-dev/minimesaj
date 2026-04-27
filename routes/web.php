@@ -1,9 +1,11 @@
 <?php
 
-use App\Http\Controllers\Admin\AiController;
-use App\Http\Controllers\Admin\AiStudioController;
 use App\Http\Controllers\Admin\AbonelikPaketiController;
+use App\Http\Controllers\Admin\AiController;
+use App\Http\Controllers\Admin\AiPhotoController;
+use App\Http\Controllers\Admin\AiStudioController;
 use App\Http\Controllers\Admin\AyarController;
+use App\Http\Controllers\Admin\DestekTalebiController;
 use App\Http\Controllers\Admin\DilMetinController;
 use App\Http\Controllers\Admin\EngelController;
 use App\Http\Controllers\Admin\EslesmeController;
@@ -15,7 +17,6 @@ use App\Http\Controllers\Admin\InstagramController;
 use App\Http\Controllers\Admin\IstatistikController;
 use App\Http\Controllers\Admin\KullaniciController;
 use App\Http\Controllers\Admin\PanoController;
-use App\Http\Controllers\Admin\DestekTalebiController;
 use App\Http\Controllers\Admin\PuanPaketiController;
 use App\Http\Controllers\Admin\SikayetController;
 use Illuminate\Support\Facades\Route;
@@ -48,11 +49,16 @@ Route::prefix('admin')->group(function () {
         Route::get('ai/states', [AiStudioController::class, 'states'])->name('admin.ai.states');
         Route::get('ai/memories', [AiStudioController::class, 'memories'])->name('admin.ai.memories');
         Route::get('ai/traces', [AiStudioController::class, 'traces'])->name('admin.ai.traces');
+        Route::get('ai/fotograflar', [AiPhotoController::class, 'index'])->name('admin.ai.fotograflar');
+        Route::post('ai/fotograflar', [AiPhotoController::class, 'store'])->name('admin.ai.fotograflar.store');
         Route::get('ai/ekle', [AiStudioController::class, 'create'])->name('admin.ai.ekle');
         Route::post('ai/ekle', [AiStudioController::class, 'store'])->name('admin.ai.kaydet');
         Route::get('ai/json-ekle', [AiController::class, 'jsonEkle'])->name('admin.ai.json-ekle');
         Route::post('ai/json-ekle', [AiController::class, 'jsonKaydet'])->name('admin.ai.json-kaydet');
         Route::post('ai/toplu-durum', [AiController::class, 'topluDurumGuncelle'])->name('admin.ai.toplu-durum');
+        Route::post('ai/{kullanici}/fotograflar', [AiPhotoController::class, 'storeForUser'])->name('admin.ai.fotograflar.user-store');
+        Route::patch('ai/{kullanici}/fotograflar/{fotograf}', [AiPhotoController::class, 'update'])->name('admin.ai.fotograflar.update');
+        Route::delete('ai/{kullanici}/fotograflar/{fotograf}', [AiPhotoController::class, 'destroy'])->name('admin.ai.fotograflar.destroy');
         Route::get('ai/{kullanici}', [AiStudioController::class, 'show'])->name('admin.ai.goster');
         Route::get('ai/{kullanici}/duzenle', [AiStudioController::class, 'edit'])->name('admin.ai.duzenle');
         Route::put('ai/{kullanici}', [AiStudioController::class, 'update'])->name('admin.ai.guncelle');

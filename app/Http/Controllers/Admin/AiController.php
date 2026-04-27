@@ -265,98 +265,80 @@ class AiController extends Controller
 
     public function jsonEkle()
     {
+        $behaviorSliders = config('ai_studio_dropdowns.behavior_sliders', []);
+        $behaviorDefaults = collect($behaviorSliders)
+            ->mapWithKeys(fn(array $meta, string $key) => [$key => (int) ($meta['default'] ?? 5)])
+            ->all();
+
         $sablon = [
             [
+                // Kimlik
                 'ad' => 'Zeynep',
                 'soyad' => 'Yılmaz',
                 'kullanici_adi' => 'zeynep_ai',
                 'cinsiyet' => 'kadin',
                 'dogum_yili' => 1998,
+                'biyografi' => 'Müzik ve seyahat tutkunu bir ruh. Yeni yerler keşfetmeyi ve anı biriktirmeyi severim.',
+                // Dil & Konum
                 'ulke' => 'Türkiye',
                 'il' => 'İstanbul',
                 'ilce' => 'Kadıköy',
-                'biyografi' => 'Müzik ve seyahat tutkunu',
                 'ana_dil_kodu' => 'tr',
-                'ana_dil_adi' => 'Turkish',
-                'ikinci_diller' => ['English'],
+                'ikinci_diller' => ['English', 'German'],
                 'persona_ulke' => 'Türkiye',
                 'persona_bolge' => 'Marmara',
                 'persona_sehir' => 'İstanbul',
+                'persona_mahalle' => 'Sanat ve kafe mahallesi',
+                'kulturel_koken' => 'Akdeniz',
+                'uyruk' => 'Türkiye',
+                // Yaşam & Kariyer
+                'yasam_tarzi' => 'Sanatsal ve bohem',
                 'meslek' => 'Grafik tasarımcı',
                 'sektor' => 'Tasarım',
-                'egitim' => 'Üniversite',
-                'yas_araligi' => '24-28',
-                'gunluk_rutin' => 'Sabah kahve, gün içinde tasarım işleri, akşam yürüyüş.',
-                'hobiler' => 'Müzik, fotoğraf, küçük kafeler',
-                'konusma_imzasi' => 'Kısa, doğal ve hafif şakacı yazar.',
-                // AI Ayarları
+                'egitim' => 'Lisans',
+                'okul_bolum' => 'Görsel İletişim Tasarımı',
+                'yas_araligi' => '23-27',
+                'gunluk_rutin' => 'Sabahları ilham almak için mutlaka bir kahve içer, gün içinde dijital sanat üzerine çalışır, akşamları ise yeni müzikler keşfeder.',
+                'hobiler' => 'Analog fotoğrafçılık, plak koleksiyonu yapmak, küçük ve bağımsız kafeleri keşfetmek, seramik atölyelerine katılmak.',
+                'sevdigi_mekanlar' => 'Tarihi yarımadadaki kitapçılar, Karaköy ve Balat\'taki sanat galerileri, Moda sahilindeki çay bahçeleri.',
+                'aile_arkadas_notu' => 'Ailesiyle sıcak bir ilişkisi var ama bağımsızlığına düşkün. Az ama öz, yaratıcı ve enerjik bir arkadaş çevresine sahip.',
+                // İletişim & Davranış
                 'aktif_mi' => true,
-                'saglayici_tipi' => 'gemini',
-                'model_adi' => GeminiSaglayici::MODEL_ADI,
-                'yedek_saglayici_tipi' => null,
-                'yedek_model_adi' => null,
-                'kisilik_tipi' => 'eglenceli',
-                'kisilik_aciklamasi' => 'Neşeli ve enerjik bir karakter',
-                'konusma_tonu' => 'samimi',
-                'konusma_stili' => 'gunluk',
-                // Seviye Ayarları (0-10)
-                'emoji_seviyesi' => 5,
-                'flort_seviyesi' => 6,
-                'giriskenlik_seviyesi' => 7,
-                'utangaclik_seviyesi' => 3,
-                'duygusallik_seviyesi' => 5,
-                'kiskanclik_seviyesi' => 2,
-                'mizah_seviyesi' => 7,
-                'zeka_seviyesi' => 6,
-                // Mesajlaşma
+                'model_adi' => data_get(config('ai_studio_dropdowns.models', []), GeminiSaglayici::MODEL_ADI, 'gemini-1.5-flash'),
                 'ilk_mesaj_atar_mi' => true,
-                'ilk_mesaj_sablonu' => 'Merhaba! Nasılsın? 😊',
-                'gunluk_konusma_limiti' => 100,
-                'tek_kullanici_gunluk_mesaj_limiti' => 50,
-                'minimum_cevap_suresi_saniye' => 3,
-                'maksimum_cevap_suresi_saniye' => 30,
-                'ortalama_mesaj_uzunlugu' => 80,
-                'mesaj_uzunlugu_min' => 10,
-                'mesaj_uzunlugu_max' => 300,
-                'sesli_mesaj_gonderebilir_mi' => false,
-                'foto_gonderebilir_mi' => false,
-                // Zamanlama
+                'ilk_mesaj_tonu' => 'Samimi, enerjik ve hafif meraklı bir tonda. Karşı tarafı sıkmadan sohbete başlamayı hedefler.',
+                'persona_ozeti' => 'Yaratıcı, enerjik ve hayatı dolu dolu yaşamayı seven bir karakter. Sanata ve estetiğe önem verir, derin ve anlamlı sohbetlerden keyif alır.',
+                'iliski_gecmisi_tonu' => 'Temkinli ama acik',
+                'konusma_imzasi' => 'Konuşmalarında sıkça "ilham verici" veya "harika" gibi kelimeler kullanır, genellikle cümlelerini bir emoji ile bitirir.',
+                'cevap_ritmi' => 'Dengeli',
+                'emoji_aliskanligi' => 'Yerinde kullanir',
+                'kacinilacak_persona_detaylari' => 'Asla sıkıcı, monoton veya yüzeysel bir izlenim vermemeli. Teknolojiden çok sanattan ve insandan bahsetmeli.',
+                'konusma_tonu' => 'samimi',
+                'konusma_stili' => 'akici',
+                // Zamanlama & Mesajlaşma
+                'minimum_cevap_suresi_saniye' => 5,
+                'maksimum_cevap_suresi_saniye' => 45,
+                'mesaj_uzunlugu_min' => 20,
+                'mesaj_uzunlugu_max' => 250,
                 'saat_dilimi' => 'Europe/Istanbul',
-                'uyku_baslangic' => '01:00',
-                'uyku_bitis' => '08:00',
-                'hafta_sonu_uyku_baslangic' => '02:00',
-                'hafta_sonu_uyku_bitis' => '10:00',
-                'rastgele_gecikme_dakika' => 0,
+                'uyku_baslangic' => '01:30',
+                'uyku_bitis' => '09:00',
+                'hafta_sonu_uyku_baslangic' => '02:30',
+                'hafta_sonu_uyku_bitis' => '10:30',
                 'availability_schedules' => [
                     [
                         'date' => now()->addDay()->toDateString(),
-                        'start_time' => '10:00',
-                        'end_time' => '13:00',
+                        'start_time' => '11:00',
+                        'end_time' => '14:00',
                         'status' => 'active',
                     ],
-                    [
-                        'date' => now()->addDay()->toDateString(),
-                        'start_time' => '22:00',
-                        'end_time' => '23:30',
-                        'status' => 'passive',
-                    ],
                 ],
-                // Sistem
-                'sistem_komutu' => 'Sen bir arkadaş canlısı genç kadınsın.',
-                'yasakli_konular' => ['politika', 'din'],
-                'zorunlu_kurallar' => ['Türkçe konuş', 'Kibar ol'],
-                // Hafıza
-                'hafiza_aktif_mi' => true,
-                'hafiza_seviyesi' => 'orta',
-                'kullaniciyi_hatirlar_mi' => true,
-                'iliski_seviyesi_takibi_aktif_mi' => true,
-                'puanlama_etiketi' => 'A',
-                // Model Parametreleri
-                'temperature' => 0.8,
-                'top_p' => 0.9,
-                'max_output_tokens' => 1024,
             ],
         ];
+
+        // Davranış özelliklerini şablona dinamik olarak ekle
+        $sablon[0] = array_merge($sablon[0], $behaviorDefaults);
+        ksort($sablon[0]);
 
         return view('admin.ai.json-ekle', [
             'sablon' => json_encode($sablon, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE),
@@ -381,6 +363,11 @@ class AiController extends Controller
             return back()
                 ->withInput()
                 ->with('hata', 'JSON en az bir kullanıcı içermelidir.');
+        }
+
+        // Eğer veri 'characters' anahtarı altında bir liste içeriyorsa, o listeyi kullan
+        if (isset($veri['characters']) && is_array($veri['characters'])) {
+            $veri = $veri['characters'];
         }
 
         // İlk seviye array değilse, tekli objeyi array'e sar
@@ -418,6 +405,11 @@ class AiController extends Controller
             'availability_schedules.*' => 'nullable|array',
         ];
 
+        $behaviorSliders = config('ai_studio_dropdowns.behavior_sliders', []);
+        foreach (array_keys($behaviorSliders) as $key) {
+            $kurallar[$key] = 'nullable|integer|min:0|max:10';
+        }
+
         $hatalar = [];
         $olusturulanlar = [];
         $availabilityScheduleService = app(UserAvailabilityScheduleService::class);
@@ -426,11 +418,14 @@ class AiController extends Controller
         DB::beginTransaction();
 
         try {
-            foreach ($veri as $index => $kayit) {
-                $sira = $index + 1;
+            $sira = 0;
+
+            foreach ($veri as $kayit) {
+                $sira++;
 
                 if (! is_array($kayit)) {
                     $hatalar[] = "#{$sira}: Geçersiz kayıt formatı.";
+
                     continue;
                 }
 
@@ -450,14 +445,22 @@ class AiController extends Controller
                     $mesajlar = implode(', ', $dogrulayici->errors()->all());
                     $kullaniciAdi = $kayit['kullanici_adi'] ?? '?';
                     $hatalar[] = "#{$sira} ({$kullaniciAdi}): {$mesajlar}";
+
                     continue;
                 }
 
                 // Aynı batch içinde tekrar kontrolü
                 if (in_array($kayit['kullanici_adi'], $olusturulanlar)) {
                     $hatalar[] = "#{$sira}: '{$kayit['kullanici_adi']}' bu toplu işlemde tekrar ediyor.";
+
                     continue;
                 }
+
+                $minimumCevapSuresi = (int) ($kayit['minimum_cevap_suresi_saniye'] ?? 4);
+                $maksimumCevapSuresi = max($minimumCevapSuresi, (int) ($kayit['maksimum_cevap_suresi_saniye'] ?? 24));
+                $minimumMesajUzunlugu = (int) ($kayit['mesaj_uzunlugu_min'] ?? 18);
+                $maksimumMesajUzunlugu = max($minimumMesajUzunlugu, (int) ($kayit['mesaj_uzunlugu_max'] ?? 220));
+                $saatDilimi = (string) ($kayit['saat_dilimi'] ?? config('app.timezone', 'Europe/Istanbul'));
 
                 $kullanici = User::create([
                     'ad' => $kayit['ad'],
@@ -474,57 +477,30 @@ class AiController extends Controller
                     'password' => bcrypt(Str::random(32)),
                 ]);
 
-                $kullanici->aiAyar()->create([
+                $behaviorSliders = config('ai_studio_dropdowns.behavior_sliders', []);
+                $aiAyarPayload = [
                     'aktif_mi' => $kayit['aktif_mi'] ?? true,
-                    'saglayici_tipi' => $kayit['saglayici_tipi'],
-                    'model_adi' => $kayit['saglayici_tipi'] === 'gemini'
-                        ? GeminiSaglayici::MODEL_ADI
-                        : $kayit['model_adi'],
-                    'yedek_saglayici_tipi' => $kayit['yedek_saglayici_tipi'] ?? null,
-                    'yedek_model_adi' => ($kayit['yedek_saglayici_tipi'] ?? null) === 'gemini'
-                        ? GeminiSaglayici::MODEL_ADI
-                        : ($kayit['yedek_model_adi'] ?? null),
-                    'kisilik_tipi' => $kayit['kisilik_tipi'] ?? null,
-                    'kisilik_aciklamasi' => $kayit['kisilik_aciklamasi'] ?? null,
-                    'konusma_tonu' => $kayit['konusma_tonu'] ?? null,
-                    'konusma_stili' => $kayit['konusma_stili'] ?? null,
-                    'emoji_seviyesi' => $kayit['emoji_seviyesi'] ?? 5,
-                    'flort_seviyesi' => $kayit['flort_seviyesi'] ?? 5,
-                    'giriskenlik_seviyesi' => $kayit['giriskenlik_seviyesi'] ?? 5,
-                    'utangaclik_seviyesi' => $kayit['utangaclik_seviyesi'] ?? 5,
-                    'duygusallik_seviyesi' => $kayit['duygusallik_seviyesi'] ?? 5,
-                    'kiskanclik_seviyesi' => $kayit['kiskanclik_seviyesi'] ?? 3,
-                    'mizah_seviyesi' => $kayit['mizah_seviyesi'] ?? 5,
-                    'zeka_seviyesi' => $kayit['zeka_seviyesi'] ?? 5,
+                    'saglayici_tipi' => 'gemini',
+                    'model_adi' => $kayit['model_adi'] ?? GeminiSaglayici::MODEL_ADI,
                     'ilk_mesaj_atar_mi' => $kayit['ilk_mesaj_atar_mi'] ?? false,
                     'ilk_mesaj_sablonu' => $kayit['ilk_mesaj_sablonu'] ?? null,
-                    'gunluk_konusma_limiti' => $kayit['gunluk_konusma_limiti'] ?? null,
-                    'tek_kullanici_gunluk_mesaj_limiti' => $kayit['tek_kullanici_gunluk_mesaj_limiti'] ?? null,
-                    'minimum_cevap_suresi_saniye' => $kayit['minimum_cevap_suresi_saniye'] ?? null,
-                    'maksimum_cevap_suresi_saniye' => $kayit['maksimum_cevap_suresi_saniye'] ?? null,
-                    'ortalama_mesaj_uzunlugu' => $kayit['ortalama_mesaj_uzunlugu'] ?? null,
-                    'mesaj_uzunlugu_min' => $kayit['mesaj_uzunlugu_min'] ?? null,
-                    'mesaj_uzunlugu_max' => $kayit['mesaj_uzunlugu_max'] ?? null,
-                    'sesli_mesaj_gonderebilir_mi' => $kayit['sesli_mesaj_gonderebilir_mi'] ?? false,
-                    'foto_gonderebilir_mi' => $kayit['foto_gonderebilir_mi'] ?? false,
-                    'saat_dilimi' => $kayit['saat_dilimi'] ?? null,
-                    'uyku_baslangic' => $kayit['uyku_baslangic'] ?? null,
-                    'uyku_bitis' => $kayit['uyku_bitis'] ?? null,
+                    'minimum_cevap_suresi_saniye' => $minimumCevapSuresi,
+                    'maksimum_cevap_suresi_saniye' => $maksimumCevapSuresi,
+                    'mesaj_uzunlugu_min' => $minimumMesajUzunlugu,
+                    'mesaj_uzunlugu_max' => $maksimumMesajUzunlugu,
+                    'saat_dilimi' => $saatDilimi,
+                    'uyku_baslangic' => $kayit['uyku_baslangic'] ?? '01:00',
+                    'uyku_bitis' => $kayit['uyku_bitis'] ?? '08:00',
                     'hafta_sonu_uyku_baslangic' => $kayit['hafta_sonu_uyku_baslangic'] ?? null,
                     'hafta_sonu_uyku_bitis' => $kayit['hafta_sonu_uyku_bitis'] ?? null,
-                    'rastgele_gecikme_dakika' => $kayit['rastgele_gecikme_dakika'] ?? null,
                     'sistem_komutu' => $kayit['sistem_komutu'] ?? null,
-                    'yasakli_konular' => $kayit['yasakli_konular'] ?? null,
-                    'zorunlu_kurallar' => $kayit['zorunlu_kurallar'] ?? null,
-                    'hafiza_aktif_mi' => $kayit['hafiza_aktif_mi'] ?? false,
-                    'hafiza_seviyesi' => $kayit['hafiza_seviyesi'] ?? null,
-                    'kullaniciyi_hatirlar_mi' => $kayit['kullaniciyi_hatirlar_mi'] ?? false,
-                    'iliski_seviyesi_takibi_aktif_mi' => $kayit['iliski_seviyesi_takibi_aktif_mi'] ?? false,
-                    'puanlama_etiketi' => $kayit['puanlama_etiketi'] ?? null,
-                    'temperature' => $kayit['temperature'] ?? 0.8,
-                    'top_p' => $kayit['top_p'] ?? 0.9,
-                    'max_output_tokens' => $kayit['max_output_tokens'] ?? 1024,
-                ]);
+                ];
+
+                foreach (array_keys($behaviorSliders) as $field) {
+                    $aiAyarPayload[$field] = $kayit[$field] ?? $behaviorSliders[$field]['default'] ?? 5;
+                }
+
+                $kullanici->aiAyar()->create($aiAyarPayload);
 
                 $personaPayload = $this->personaPayloadFromJson($kayit, $kullanici);
                 AiPersonaProfile::query()->updateOrCreate(
@@ -542,6 +518,7 @@ class AiController extends Controller
 
             if (! empty($hatalar) && empty($olusturulanlar)) {
                 DB::rollBack();
+
                 return back()
                     ->withInput()
                     ->with('hata', 'Hiçbir kayıt oluşturulamadı.')
@@ -564,6 +541,7 @@ class AiController extends Controller
                 ->with('basari', $mesaj);
         } catch (\Exception $e) {
             DB::rollBack();
+
             return back()
                 ->withInput()
                 ->with('hata', 'Bir hata oluştu: ' . $e->getMessage());
@@ -572,6 +550,7 @@ class AiController extends Controller
 
     private function personaPayloadFromJson(array $kayit, User $kullanici): array
     {
+        $behaviorSliders = config('ai_studio_dropdowns.behavior_sliders', []);
         $payload = [
             'ai_engine_config_id' => app(AiEngineConfigService::class)->activeConfig()->id,
             'aktif_mi' => $kayit['aktif_mi'] ?? true,
@@ -581,12 +560,6 @@ class AiController extends Controller
             'persona_ozeti' => $kayit['persona_ozeti'] ?? $kayit['kisilik_aciklamasi'] ?? $kullanici->biyografi,
             'konusma_tonu' => $kayit['konusma_tonu'] ?? null,
             'konusma_stili' => $kayit['konusma_stili'] ?? null,
-            'mizah_seviyesi' => $kayit['mizah_seviyesi'] ?? 5,
-            'flort_seviyesi' => $kayit['flort_seviyesi'] ?? 4,
-            'emoji_seviyesi' => $kayit['emoji_seviyesi'] ?? 3,
-            'giriskenlik_seviyesi' => $kayit['giriskenlik_seviyesi'] ?? 5,
-            'utangaclik_seviyesi' => $kayit['utangaclik_seviyesi'] ?? 3,
-            'duygusallik_seviyesi' => $kayit['duygusallik_seviyesi'] ?? 5,
             'mesaj_uzunlugu_min' => $kayit['mesaj_uzunlugu_min'] ?? 18,
             'mesaj_uzunlugu_max' => $kayit['mesaj_uzunlugu_max'] ?? 220,
             'minimum_cevap_suresi_saniye' => $kayit['minimum_cevap_suresi_saniye'] ?? 4,
@@ -613,11 +586,14 @@ class AiController extends Controller
             'aile_arkadas_notu' => $kayit['aile_arkadas_notu'] ?? null,
             'iliski_gecmisi_tonu' => $kayit['iliski_gecmisi_tonu'] ?? null,
             'konusma_imzasi' => $kayit['konusma_imzasi'] ?? null,
-            'argo_seviyesi' => $kayit['argo_seviyesi'] ?? 2,
             'cevap_ritmi' => $kayit['cevap_ritmi'] ?? null,
             'emoji_aliskanligi' => $kayit['emoji_aliskanligi'] ?? null,
             'kacinilacak_persona_detaylari' => $kayit['kacinilacak_persona_detaylari'] ?? null,
         ];
+
+        foreach (array_keys($behaviorSliders) as $field) {
+            $payload[$field] = $kayit[$field] ?? $behaviorSliders[$field]['default'] ?? 5;
+        }
 
         $payload['ana_dil_adi'] = $payload['ana_dil_adi'] ?: Language::name($payload['ana_dil_kodu']);
 

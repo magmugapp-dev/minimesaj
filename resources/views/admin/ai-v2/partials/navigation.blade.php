@@ -16,6 +16,11 @@
             'title' => 'Hafiza',
         ],
         [
+            'route' => 'admin.ai.fotograflar',
+            'matches' => ['admin.ai.fotograflar', 'admin.ai.fotograflar.*'],
+            'title' => 'Fotograflar',
+        ],
+        [
             'route' => 'admin.ai.traces',
             'matches' => ['admin.ai.traces'],
             'title' => 'Kayitlar',

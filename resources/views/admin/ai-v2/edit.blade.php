@@ -12,4 +12,11 @@
         'cancelLabel' => 'Vazgec',
         'submitLabel' => 'Degisiklikleri Kaydet',
     ])
+
+    <div class="ai-console mt-6">
+        @include('admin.ai-v2.partials.photo-manager', [
+            'kullanici' => $kullanici,
+            'maxPhotos' => $maxPhotos,
+        ])
+    </div>
 @endsection
