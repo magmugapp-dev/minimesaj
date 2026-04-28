@@ -3,7 +3,6 @@
 namespace Database\Seeders;
 
 use App\Models\Ayar;
-use App\Services\YapayZeka\GeminiSaglayici;
 use Illuminate\Database\Seeder;
 
 class AyarSeeder extends Seeder
@@ -33,7 +32,7 @@ class AyarSeeder extends Seeder
             ['anahtar' => 'openai_api_key', 'deger' => '', 'grup' => 'ai_saglayicilar', 'tip' => 'string', 'aciklama' => 'OpenAI API Key'],
             ['anahtar' => 'openai_varsayilan_model', 'deger' => 'gpt-4o', 'grup' => 'ai_saglayicilar', 'tip' => 'string', 'aciklama' => 'OpenAI Varsayılan Model'],
             ['anahtar' => 'gemini_api_key', 'deger' => '', 'grup' => 'ai_saglayicilar', 'tip' => 'string', 'aciklama' => 'Gemini API Key'],
-            ['anahtar' => 'gemini_varsayilan_model', 'deger' => GeminiSaglayici::MODEL_ADI, 'grup' => 'ai_saglayicilar', 'tip' => 'string', 'aciklama' => 'Gemini Varsayılan Model'],
+            // ['anahtar' => 'gemini_varsayilan_model', 'deger' => GeminiSaglayici::MODEL_ADI, 'grup' => 'ai_saglayicilar', 'tip' => 'string', 'aciklama' => 'Gemini Varsayılan Model'],
             ['anahtar' => 'varsayilan_ai_saglayici', 'deger' => 'gemini', 'grup' => 'ai_saglayicilar', 'tip' => 'string', 'aciklama' => 'Varsayılan AI Sağlayıcı'],
             ['anahtar' => 'yedek_ai_saglayici', 'deger' => 'openai', 'grup' => 'ai_saglayicilar', 'tip' => 'string', 'aciklama' => 'Yedek AI Sağlayıcı'],
             ['anahtar' => 'ai_max_token', 'deger' => '1024', 'grup' => 'ai_saglayicilar', 'tip' => 'integer', 'aciklama' => 'AI Maks Token'],
@@ -156,7 +155,6 @@ class AyarSeeder extends Seeder
             ['anahtar' => 'api_dakika_limit', 'deger' => '60', 'grup' => 'rate_limiting', 'tip' => 'integer', 'aciklama' => 'API İstek Limiti (/dakika)'],
             ['anahtar' => 'auth_dakika_limit', 'deger' => '10', 'grup' => 'rate_limiting', 'tip' => 'integer', 'aciklama' => 'Auth İstek Limiti (/dakika)'],
             ['anahtar' => 'ai_dakika_limit', 'deger' => '20', 'grup' => 'rate_limiting', 'tip' => 'integer', 'aciklama' => 'AI İstek Limiti (/dakika)'],
-            ['anahtar' => 'instagram_dakika_limit', 'deger' => '30', 'grup' => 'rate_limiting', 'tip' => 'integer', 'aciklama' => 'Instagram İstek Limiti (/dakika)'],
 
             // ── Eşleştirme ─────────────────────────────────────────
             ['anahtar' => 'eslestirme_algoritma', 'deger' => 'yakin_konum', 'grup' => 'eslestirme', 'tip' => 'string', 'aciklama' => 'Eşleştirme Algoritması'],
@@ -165,11 +163,6 @@ class AyarSeeder extends Seeder
             ['anahtar' => 'ai_eslestirme_aktif', 'deger' => '1', 'grup' => 'eslestirme', 'tip' => 'boolean', 'aciklama' => 'AI ile Eşleştirme Aktif'],
             ['anahtar' => 'one_cikarma_suresi_saat', 'deger' => '24', 'grup' => 'eslestirme', 'tip' => 'integer', 'aciklama' => 'Profil Öne Çıkarma Süresi (saat)'],
 
-            // ── Instagram ──────────────────────────────────────────
-            ['anahtar' => 'instagram_api_url', 'deger' => 'https://www.instagram.com', 'grup' => 'instagram', 'tip' => 'string', 'aciklama' => 'Instagram API URL'],
-            ['anahtar' => 'instagram_webhook_secret', 'deger' => '', 'grup' => 'instagram', 'tip' => 'string', 'aciklama' => 'Instagram Webhook Secret'],
-            ['anahtar' => 'instagram_senkron_araligi_dakika', 'deger' => '5', 'grup' => 'instagram', 'tip' => 'integer', 'aciklama' => 'Instagram Senkron Aralığı (dakika)'],
-            ['anahtar' => 'instagram_max_hesap_kullanici', 'deger' => '3', 'grup' => 'instagram', 'tip' => 'integer', 'aciklama' => 'Kullanıcı Başı Maks Instagram Hesabı'],
         ];
 
         foreach ($ayarlar as $ayar) {

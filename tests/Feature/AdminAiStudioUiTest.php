@@ -10,60 +10,51 @@ it('renders the redesigned ai studio pages for an admin', function () {
         'ad' => 'Aylin',
         'soyad' => 'Deneme',
     ]);
+    $character = $aiUser->aiCharacter()->create([
+        'character_id' => 'aylin_deneme',
+        'character_version' => 1,
+        'schema_version' => 'bv1.0',
+        'active' => true,
+        'display_name' => 'Aylin Deneme',
+        'username' => $aiUser->kullanici_adi,
+        'primary_language_code' => 'tr',
+        'primary_language_name' => 'Turkish',
+        'quality_tag' => 'A',
+        'character_json' => [
+            'schema_version' => 'bv1.0',
+            'character_id' => 'aylin_deneme',
+            'character_version' => 1,
+            'identity' => ['first_name' => 'Aylin', 'last_name' => 'Deneme', 'username' => $aiUser->kullanici_adi],
+            'languages' => ['primary_language_code' => 'tr', 'primary_language_name' => 'Turkish'],
+            'model_config' => ['model_name' => 'gemini-2.5-flash'],
+        ],
+        'model_name' => 'gemini-2.5-flash',
+        'temperature' => 0.8,
+        'top_p' => 0.9,
+        'max_output_tokens' => 1024,
+    ]);
 
     $this->actingAs($admin)
         ->get(route('admin.ai.index'))
         ->assertOk()
-        ->assertSeeText('AI Studio')
-        ->assertSeeText('Motor ayarlari')
-        ->assertSeeText('AI kullanici listesi')
-        ->assertSee('placeholder="AI ara"', false)
-        ->assertDontSeeText('Motor, persona ve canli akisi tek panelde yonet.');
+        ->assertSeeText('AI karakterler')
+        ->assertSeeText('Karakter listesi')
+        ->assertSeeText('Global prompt')
+        ->assertSeeText('Blok esikleri')
+        ->assertSeeText('Aylin Deneme')
+        ->assertSeeText('gemini-2.5-flash');
 
     $this->actingAs($admin)
         ->get(route('admin.ai.ekle'))
         ->assertOk()
-        ->assertSeeText('Yeni AI Persona')
-        ->assertSeeText('Kimlik ve Hesap')
-        ->assertSeeText('Davranis Sliderlari')
-        ->assertSee('Profilde gorunen kisa tanitim metni.', false)
-        ->assertSee('Karakterin omurgasini, enerjisini, sosyal tavrini ve birinin aklinda nasil kaldigini yaz.', false)
-        ->assertSeeText('Yasam Cevresi')
-        ->assertSeeText('Sanat ve kafe mahallesi')
-        ->assertSeeText('Kulturel Koken')
-        ->assertSeeText('Bati Avrupa')
-        ->assertSeeText('Konusma Tonu')
-        ->assertSeeText('Utangac ama sicak')
-        ->assertSeeText('Cevap Ritmi')
-        ->assertSeeText('Yavas ama derinlikli')
-        ->assertSeeText('Aktif / Pasif Saatler');
+        ->assertSeeText('Yeni AI karakter')
+        ->assertSeeText('Karakter JSON')
+        ->assertSeeText('Re-engagement template JSON')
+        ->assertSeeText('Profil fotografi');
 
     $this->actingAs($admin)
-        ->get(route('admin.ai.goster', $aiUser))
+        ->get(route('admin.ai.duzenle', $character))
         ->assertOk()
-        ->assertSeeText('Aylin Deneme')
-        ->assertSeeText('Davranis Matrisi');
-
-    $this->actingAs($admin)
-        ->get(route('admin.ai.duzenle', $aiUser))
-        ->assertOk()
-        ->assertSeeText('Davranis Sliderlari')
-        ->assertSeeText('Kimlik ve Hesap')
-        ->assertSeeText('Kisisel Kurallar')
-        ->assertSeeText('Aktif / Pasif Saatler');
-
-    $this->actingAs($admin)
-        ->get(route('admin.ai.states'))
-        ->assertOk()
-        ->assertSeeText('Sohbet Durumlari');
-
-    $this->actingAs($admin)
-        ->get(route('admin.ai.memories'))
-        ->assertOk()
-        ->assertSeeText('AI Hafiza');
-
-    $this->actingAs($admin)
-        ->get(route('admin.ai.traces'))
-        ->assertOk()
-        ->assertSeeText('AI Trace');
+        ->assertSeeText('AI karakter duzenle')
+        ->assertSee('aylin_deneme');
 });

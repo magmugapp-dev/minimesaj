@@ -61,13 +61,12 @@ class KullaniciController extends Controller
             'eslesmeler',
             'sikayetler',
             'odemeler',
-            'instagramHesaplari',
             'puanHareketleri',
         ]);
 
         $kullanici->load([
             'fotograflar',
-            'aiAyar',
+            'aiCharacter',
         ]);
 
         $sonOdemeler = $kullanici->odemeler()->latest()->take(5)->get();

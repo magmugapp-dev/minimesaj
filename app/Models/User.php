@@ -77,34 +77,14 @@ class User extends Authenticatable
         return $this->hasMany(UserFotografi::class);
     }
 
-    public function aiAyar(): HasOne
+    public function aiCharacter(): HasOne
     {
-        return $this->hasOne(AiAyar::class);
+        return $this->hasOne(AiCharacter::class);
     }
 
-    public function aiPersonaProfile(): HasOne
+    public function aiMessageTurns(): HasMany
     {
-        return $this->hasOne(AiPersonaProfile::class, 'ai_user_id');
-    }
-
-    public function aiConversationStates(): HasMany
-    {
-        return $this->hasMany(AiConversationState::class, 'ai_user_id');
-    }
-
-    public function availabilitySchedules(): HasMany
-    {
-        return $this->hasMany(UserAvailabilitySchedule::class);
-    }
-
-    public function aiMemoriesV2(): HasMany
-    {
-        return $this->hasMany(AiMemory::class, 'ai_user_id');
-    }
-
-    public function aiTurnLogs(): HasMany
-    {
-        return $this->hasMany(AiTurnLog::class, 'ai_user_id');
+        return $this->hasMany(AiMessageTurn::class, 'ai_user_id');
     }
 
     public function eslesmeler(): HasMany
@@ -140,11 +120,6 @@ class User extends Authenticatable
     public function odemeler(): HasMany
     {
         return $this->hasMany(Odeme::class);
-    }
-
-    public function instagramHesaplari(): HasMany
-    {
-        return $this->hasMany(InstagramHesap::class);
     }
 
     public function gonderdigiHediyeler(): HasMany

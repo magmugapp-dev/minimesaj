@@ -435,17 +435,11 @@ class ProfilePhotoManagerPreview extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (primaryPhoto != null && primaryPhoto!.url.isNotEmpty) {
-      return CachedAppImage(
-        imageUrl: primaryPhoto!.url,
-        fit: BoxFit.cover,
-      );
+      return CachedAppImage(imageUrl: primaryPhoto!.url, fit: BoxFit.cover);
     }
 
     if (fallbackImageUrl != null && fallbackImageUrl!.isNotEmpty) {
-      return CachedAppImage(
-        imageUrl: fallbackImageUrl!,
-        fit: BoxFit.cover,
-      );
+      return CachedAppImage(imageUrl: fallbackImageUrl!, fit: BoxFit.cover);
     }
 
     return ProfileImagePlaceholder(label: placeholderLabel);

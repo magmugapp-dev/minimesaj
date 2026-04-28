@@ -103,8 +103,8 @@ class EslesmeMerkeziController extends Controller
             'sohbet_id' => $sonuc['sohbet_id'],
             'sohbet' => SohbetResource::make(
                 $sonuc['sohbet']->loadMissing([
-                    'eslesme.user.aiPersonaProfile:ai_user_id,ana_dil_kodu,ana_dil_adi',
-                    'eslesme.eslesenUser.aiPersonaProfile:ai_user_id,ana_dil_kodu,ana_dil_adi',
+                    'eslesme.user.aiCharacter:id,user_id,character_id,character_version,schema_version,active,display_name,primary_language_code,primary_language_name,model_name,character_json',
+                    'eslesme.eslesenUser.aiCharacter:id,user_id,character_id,character_version,schema_version,active,display_name,primary_language_code,primary_language_name,model_name,character_json',
                 ])
             )->resolve($request),
         ]);

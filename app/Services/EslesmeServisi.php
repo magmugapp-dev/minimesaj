@@ -3,31 +3,24 @@
 namespace App\Services;
 
 use App\Events\EslesmeOlustu;
-use App\Jobs\EslesmeSonrasiAiIlkMesajGorevi;
-use App\Jobs\ProcessAiTurnJob;
 use App\Models\Engelleme;
 use App\Models\Eslesme;
 use App\Models\EslesmeGecilenKullanici;
 use App\Models\Sohbet;
 use App\Models\User;
 use App\Notifications\YeniEslesme;
-use App\Services\YapayZeka\AiKullaniciHazirlamaServisi;
 use App\Services\Users\UserOnlineStatusService;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Queue;
-use Illuminate\Support\Testing\Fakes\QueueFake;
 
 class EslesmeServisi
 {
     public function __construct(
-        private ?AiKullaniciHazirlamaServisi $aiKullaniciHazirlamaServisi = null,
         private ?PuanServisi $puanServisi = null,
         private ?AyarServisi $ayarServisi = null,
         private ?UserOnlineStatusService $userOnlineStatusService = null,
     ) {
-        $this->aiKullaniciHazirlamaServisi ??= app(AiKullaniciHazirlamaServisi::class);
         $this->puanServisi ??= app(PuanServisi::class);
         $this->ayarServisi ??= app(AyarServisi::class);
         $this->userOnlineStatusService ??= app(UserOnlineStatusService::class);
@@ -65,10 +58,6 @@ class EslesmeServisi
             ];
         }
 
-        if ($aday->hesap_tipi === 'ai') {
-            $this->aiKullaniciHazirlamaServisi->hazirla($aday);
-        }
-
         return DB::transaction(function () use ($baslatan, $aday) {
             $eslesme = Eslesme::create([
                 'user_id' => $baslatan->id,
@@ -96,7 +85,7 @@ class EslesmeServisi
                     $aiUser = $this->ilkMesajiAtacakAiBul($baslatan, $aday);
 
                     if ($aiUser) {
-                        $this->dispatchIlkAiMesaj($sohbet, $aiUser);
+                        $this->gonderTemplateIlkMesaj($sohbet, $aiUser);
                     }
                 } catch (\Throwable $exception) {
                     report($exception);
@@ -222,10 +211,6 @@ class EslesmeServisi
             return null;
         }
 
-        if ($eslesen->hesap_tipi === 'ai') {
-            $this->aiKullaniciHazirlamaServisi->hazirla($eslesen);
-        }
-
         return DB::transaction(function () use ($user, $eslesen) {
             $eslesme = Eslesme::create([
                 'user_id' => $user->id,
@@ -247,7 +232,7 @@ class EslesmeServisi
                 $aiUser = $this->ilkMesajiAtacakAiBul($user, $eslesen);
 
                 if ($aiUser) {
-                    $this->dispatchIlkAiMesaj($sohbet, $aiUser);
+                    $this->gonderTemplateIlkMesaj($sohbet, $aiUser);
                 }
             });
 
@@ -277,9 +262,19 @@ class EslesmeServisi
             return null;
         }
 
-        $this->aiKullaniciHazirlamaServisi->hazirla($aday);
+        $aday = $aday->fresh('aiCharacter');
+        $character = $aday?->aiCharacter;
 
-        return $aday->fresh('aiAyar');
+        if (!$character?->active || !data_get($character->character_json, 'messaging.sends_first_message', false)) {
+            return null;
+        }
+
+        $templates = data_get($character->character_json, 'messaging.first_message_templates', []);
+        if (!is_array($templates) || count(array_filter($templates)) === 0) {
+            return null;
+        }
+
+        return $aday;
     }
 
     private function engellemeVarMi(User $birinci, User $ikinci): bool
@@ -438,8 +433,7 @@ $gecilen = EslesmeGecilenKullanici::query()
             ->where('is_admin', false)
             ->whereNotIn('id', $this->haricTutulanKullaniciIdleri($user))
             ->with([
-                'aiAyar:id,user_id,aktif_mi,saat_dilimi,uyku_baslangic,uyku_bitis,hafta_sonu_uyku_baslangic,hafta_sonu_uyku_bitis',
-                'availabilitySchedules:id,user_id,recurrence_type,specific_date,day_of_week,starts_at,ends_at,status',
+                'aiCharacter:id,user_id,active,character_json',
             ])
             ->get(['id', 'hesap_tipi', 'hesap_durumu', 'cevrim_ici_mi', 'son_gorulme_tarihi']);
 
@@ -577,26 +571,24 @@ $gecilen = EslesmeGecilenKullanici::query()
         return $puan;
     }
 
-    private function dispatchIlkAiMesaj(Sohbet $sohbet, User $aiUser): void
+    private function gonderTemplateIlkMesaj(Sohbet $sohbet, User $aiUser): void
     {
-        if (app()->environment('testing')) {
-            if ($this->queueIsFaked()) {
-                EslesmeSonrasiAiIlkMesajGorevi::dispatch($sohbet, $aiUser);
-            }
+        $character = $aiUser->aiCharacter;
+        $templates = data_get($character?->character_json, 'messaging.first_message_templates', []);
+        $templates = collect(is_array($templates) ? $templates : [])
+            ->filter(fn ($template) => is_string($template) && trim($template) !== '')
+            ->values();
 
+        if ($templates->isEmpty()) {
             return;
         }
 
-        ProcessAiTurnJob::dispatch(
-            'dating',
-            'first_message',
-            $aiUser->id,
-            $sohbet->id,
+        $index = abs(crc32($sohbet->id.'|'.$aiUser->id)) % $templates->count();
+        app(MesajServisi::class)->gonderAiMesaji(
+            $sohbet,
+            $aiUser,
+            $templates[$index],
+            'ai-first-'.$sohbet->id.'-'.$aiUser->id,
         );
-    }
-
-    private function queueIsFaked(): bool
-    {
-        return Queue::getFacadeRoot() instanceof QueueFake;
     }
 }

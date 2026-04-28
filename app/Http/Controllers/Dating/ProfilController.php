@@ -15,7 +15,7 @@ class ProfilController extends Controller
     public function goster(Request $request): JsonResponse|KullaniciResource
     {
         return new KullaniciResource(
-            $request->user()->load('fotograflar', 'aiAyar', 'availabilitySchedules')
+            $request->user()->load('fotograflar', 'aiCharacter')
         );
     }
 
@@ -34,19 +34,9 @@ class ProfilController extends Controller
                 'aldigiHediyeler' => fn ($query) => $query
                     ->with(['hediye', 'gonderen:id,ad,soyad,kullanici_adi,profil_resmi'])
                     ->latest(),
-                'aiAyar',
-                'availabilitySchedules',
+                'aiCharacter',
             ])
         );
-    }
-
-    public function influencer(Request $request, User $kullanici): KullaniciResource
-    {
-        if ($kullanici->is_admin || $kullanici->hesap_tipi !== 'ai' || $kullanici->hesap_durumu !== 'aktif') {
-            throw new NotFoundHttpException();
-        }
-
-        return $this->kullanici($request, $kullanici);
     }
 
     public function guncelle(ProfilGuncelleRequest $request)

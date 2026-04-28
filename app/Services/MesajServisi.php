@@ -2,39 +2,25 @@
 
 namespace App\Services;
 
-use App\Exceptions\MesajlasmaEngeliException;
 use App\Events\MesajGonderildi;
 use App\Events\MesajlarOkundu;
-use App\Events\YapayZekaCevabiHazir;
-use App\Jobs\ProcessAiTurnJob;
-use App\Jobs\YapayZekaCevapGorevi;
+use App\Exceptions\MesajlasmaEngeliException;
 use App\Models\Engelleme;
 use App\Models\Mesaj;
 use App\Models\SessizeAlinanKullanici;
 use App\Models\Sohbet;
 use App\Models\User;
-use App\Models\YapayZekaGorevi;
 use App\Notifications\YeniMesaj;
-use App\Services\YapayZeka\AiKullaniciHazirlamaServisi;
-use App\Services\YapayZeka\AiMesajZamanlamaServisi;
-use App\Services\YapayZeka\GeminiSaglayici;
-use App\Services\YapayZeka\V2\AiPersonaService;
+use App\Services\Ai\AiTurnService;
 use App\Support\AiMessageTextSanitizer;
 use App\Support\Language;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Queue;
-use Illuminate\Support\Testing\Fakes\QueueFake;
 
 class MesajServisi
 {
-    public function __construct(
-        private ?AiKullaniciHazirlamaServisi $aiKullaniciHazirlamaServisi = null,
-        private ?AiPersonaService $aiPersonaService = null,
-        private ?AiMesajZamanlamaServisi $aiMesajZamanlamaServisi = null,
-    ) {
-        $this->aiKullaniciHazirlamaServisi ??= app(AiKullaniciHazirlamaServisi::class);
-        $this->aiPersonaService ??= app(AiPersonaService::class);
-        $this->aiMesajZamanlamaServisi ??= app(AiMesajZamanlamaServisi::class);
+    public function __construct(private ?AiTurnService $aiTurnService = null)
+    {
+        $this->aiTurnService ??= app(AiTurnService::class);
     }
 
     public function gonder(Sohbet $sohbet, User $gonderen, array $veri): Mesaj
@@ -86,57 +72,11 @@ class MesajServisi
                 'toplam_mesaj_sayisi' => DB::raw('toplam_mesaj_sayisi + 1'),
             ]);
 
-            if ($karsiTaraf?->hesap_tipi === 'ai') {
-                $this->aiKullaniciHazirlamaServisi->hazirla($karsiTaraf);
-            }
-
             DB::afterCommit(function () use ($mesaj, $sohbet, $gonderen, $karsiTaraf) {
                 MesajGonderildi::dispatch($mesaj);
 
                 if ($karsiTaraf?->hesap_tipi === 'ai') {
-                    $aiUser = $karsiTaraf->fresh('aiAyar') ?? $karsiTaraf;
-                    $zamanlama = $this->aiMesajZamanlamaServisi->sohbetCevabiDurumu(
-                        $mesaj,
-                        $aiUser,
-                        now(),
-                    );
-
-                    YapayZekaGorevi::updateOrCreate(
-                        [
-                            'gelen_mesaj_id' => $mesaj->id,
-                            'ai_user_id' => $aiUser->id,
-                        ],
-                        [
-                            'sohbet_id' => $sohbet->id,
-                            'durum' => $this->bekleyenGorevDurumu($zamanlama['bekleme_nedeni'] ?? null),
-                            'deneme_sayisi' => 0,
-                            'hata_mesaji' => null,
-                            'cevap_metni' => null,
-                            'saglayici_tipi' => $aiUser->aiAyar?->saglayici_tipi ?? 'gemini',
-                            'model_adi' => $aiUser->aiAyar?->model_adi ?? GeminiSaglayici::MODEL_ADI,
-                            'istek_baslatildi_at' => null,
-                            'son_parca_at' => null,
-                            'tamamlandi_at' => null,
-                            'yanit_suresi_ms' => null,
-                        ]
-                    );
-
-                    if (app()->environment('testing')) {
-                        if ($this->queueIsFaked()) {
-                            YapayZekaCevapGorevi::dispatch($sohbet, $mesaj, $aiUser);
-                        }
-
-                        return;
-                    }
-
-                    ProcessAiTurnJob::dispatch(
-                        'dating',
-                        'reply',
-                        $aiUser->id,
-                        $sohbet->id,
-                        $mesaj->id,
-                    );
-
+                    $this->aiTurnService->createReplyTurn($sohbet, $mesaj, $karsiTaraf);
                     return;
                 }
 
@@ -156,8 +96,7 @@ class MesajServisi
     {
         return DB::transaction(function () use ($sohbet, $aiUser, $veri) {
             $language = $this->messageLanguageFor($aiUser);
-            $messageText = $veri['mesaj_metni'] ?? null;
-            $messageText = AiMessageTextSanitizer::sanitize($messageText);
+            $messageText = AiMessageTextSanitizer::sanitize($veri['mesaj_metni'] ?? null);
 
             $mesaj = Mesaj::create([
                 'sohbet_id' => $sohbet->id,
@@ -170,6 +109,7 @@ class MesajServisi
                 'dosya_suresi' => $veri['dosya_suresi'] ?? null,
                 'dosya_boyutu' => $veri['dosya_boyutu'] ?? null,
                 'cevaplanan_mesaj_id' => $veri['cevaplanan_mesaj_id'] ?? null,
+                'client_message_id' => $veri['client_message_id'] ?? null,
                 'ai_tarafindan_uretildi_mi' => true,
             ]);
 
@@ -183,11 +123,10 @@ class MesajServisi
             $karsiTarafId = $eslesme->user_id === $aiUser->id
                 ? $eslesme->eslesen_user_id
                 : $eslesme->user_id;
-
             $karsiTaraf = User::find($karsiTarafId);
 
             DB::afterCommit(function () use ($mesaj, $aiUser, $karsiTaraf) {
-                YapayZekaCevabiHazir::dispatch($mesaj);
+                MesajGonderildi::dispatch($mesaj);
 
                 if (
                     $karsiTaraf instanceof User
@@ -220,18 +159,6 @@ class MesajServisi
         return $guncellenen;
     }
 
-    private function bekleyenGorevDurumu(?string $beklemeNedeni): string
-    {
-        return match ($beklemeNedeni) {
-            'aktif_saat_disinda' => 'aktif_saat_bekleniyor',
-            'cevrim_disi' => 'cevrim_disi_bekleniyor',
-            'sohbet_sessizde' => 'sessiz_mod_bekleniyor',
-            'cevap_akisi' => 'cevap_akisi_bekleniyor',
-            'ai_pasif' => 'ai_pasif',
-            default => 'bekliyor',
-        };
-    }
-
     private function gonderenKarsiTarafTarafindanEngellenmis(int $gonderenId, int $karsiTarafId): bool
     {
         return Engelleme::query()
@@ -243,11 +170,14 @@ class MesajServisi
     private function messageLanguageFor(User $user): array
     {
         if ($user->hesap_tipi === 'ai') {
-            $persona = $this->aiPersonaService->ensureForUser($user);
-            $code = Language::normalizeCode($persona->ana_dil_kodu) ?: Language::normalizeCode($user->dil) ?: 'tr';
+            $character = $user->aiCharacter()->first();
+            $code = Language::normalizeCode(data_get($character?->character_json, 'languages.primary_language_code'))
+                ?: Language::normalizeCode($user->dil)
+                ?: 'tr';
+
             return [
                 'code' => $code,
-                'name' => $persona->ana_dil_adi ?: Language::name($code),
+                'name' => data_get($character?->character_json, 'languages.primary_language_name') ?: Language::name($code),
             ];
         }
 
@@ -257,10 +187,5 @@ class MesajServisi
             'code' => $code,
             'name' => Language::name($code),
         ];
-    }
-
-    private function queueIsFaked(): bool
-    {
-        return Queue::getFacadeRoot() instanceof QueueFake;
     }
 }

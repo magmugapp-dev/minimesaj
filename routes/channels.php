@@ -26,10 +26,3 @@ Broadcast::channel('sohbet.{sohbetId}', function ($user, $sohbetId) {
     $eslesme = $sohbet->eslesme;
     return $user->id === $eslesme->user_id || $user->id === $eslesme->eslesen_user_id;
 });
-
-// Instagram: Hesap bazlı event kanalı (extension websocket ile dinler)
-Broadcast::channel('instagram-hesap.{hesapId}', function ($user, $hesapId) {
-    return \App\Models\InstagramHesap::where('id', $hesapId)
-        ->where('user_id', $user->id)
-        ->exists();
-});

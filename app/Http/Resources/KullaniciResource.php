@@ -76,7 +76,17 @@ class KullaniciResource extends JsonResource
                 fn () => HediyeGonderimiResource::collection($this->whenLoaded('aldigiHediyeler'))
             ),
             'fotograflar' => FotografResource::collection($this->whenLoaded('fotograflar')),
-            'ai_ayar' => new AiAyarResource($this->whenLoaded('aiAyar')),
+            'ai_character' => $this->whenLoaded('aiCharacter', fn () => [
+                'character_id' => $this->aiCharacter?->character_id,
+                'character_version' => $this->aiCharacter?->character_version,
+                'schema_version' => $this->aiCharacter?->schema_version,
+                'active' => (bool) $this->aiCharacter?->active,
+                'display_name' => $this->aiCharacter?->display_name,
+                'primary_language_code' => $this->aiCharacter?->primary_language_code,
+                'primary_language_name' => $this->aiCharacter?->primary_language_name,
+                'model_name' => $this->aiCharacter?->model_name,
+                'character_json' => $this->aiCharacter?->character_json,
+            ]),
             'created_at' => $this->created_at,
         ];
     }

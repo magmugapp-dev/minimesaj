@@ -49,8 +49,8 @@ class Sohbet extends Model
         return $this->belongsTo(Mesaj::class, 'son_mesaj_id');
     }
 
-    public function yapayZekaGorevleri(): HasMany
+    public function aiMessageTurns(): HasMany
     {
-        return $this->hasMany(YapayZekaGorevi::class, 'sohbet_id');
+        return $this->hasMany(AiMessageTurn::class, 'conversation_id');
     }
 }

@@ -76,13 +76,8 @@ Schedule::call(function () {
 
 // Başarısız AI görevlerini temizle (7 günden eski)
 Schedule::call(function () {
-    DB::table('yapay_zeka_gorevleri')
-        ->where('durum', 'basarisiz')
-        ->where('created_at', '<', now()->subWeek())
+    DB::table('ai_message_turns')
+        ->whereIn('status', ['completed', 'cancelled'])
+        ->where('updated_at', '<', now()->subMonth())
         ->delete();
-
-    DB::table('instagram_ai_gorevleri')
-        ->where('durum', 'basarisiz')
-        ->where('created_at', '<', now()->subWeek())
-        ->delete();
-})->weekly()->name('basarisiz-gorev-temizle');
+})->weekly()->name('ai-turn-temizle');

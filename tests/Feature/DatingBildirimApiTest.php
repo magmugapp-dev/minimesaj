@@ -1,6 +1,5 @@
 <?php
 
-use App\Jobs\EslesmeSonrasiAiIlkMesajGorevi;
 use App\Models\Eslesme;
 use App\Models\Mesaj;
 use App\Models\PushDeviceToken;
@@ -9,7 +8,6 @@ use App\Models\User;
 use App\Services\MesajServisi;
 use App\Notifications\Messages\FcmMessage;
 use App\Notifications\YeniMesaj;
-use Illuminate\Support\Facades\Queue;
 use Laravel\Sanctum\Sanctum;
 
 it('registers and reassigns a push device token to the latest authenticated user', function () {
@@ -264,6 +262,27 @@ it('includes ai users in discovery and starts a direct match conversation', func
         'hesap_durumu' => 'aktif',
         'cevrim_ici_mi' => true,
     ]);
+    $aiKullanici->aiCharacter()->create([
+        'character_id' => 'dating_ai_test',
+        'character_version' => 1,
+        'schema_version' => 'bv1.0',
+        'active' => true,
+        'display_name' => 'Dating AI',
+        'username' => $aiKullanici->kullanici_adi,
+        'primary_language_code' => 'tr',
+        'primary_language_name' => 'Turkish',
+        'quality_tag' => 'A',
+        'character_json' => [
+            'character_id' => 'dating_ai_test',
+            'languages' => ['primary_language_code' => 'tr', 'primary_language_name' => 'Turkish'],
+            'model_config' => ['model_name' => 'gemini-2.5-flash'],
+            'messaging' => ['first_message_templates' => ['Selam, tanistigimiza sevindim.']],
+        ],
+        'model_name' => 'gemini-2.5-flash',
+        'temperature' => 0.8,
+        'top_p' => 0.9,
+        'max_output_tokens' => 1024,
+    ]);
 
     Sanctum::actingAs($kullanici);
 
@@ -284,11 +303,11 @@ it('includes ai users in discovery and starts a direct match conversation', func
         'durum' => 'aktif',
     ]);
 
-    $this->assertDatabaseHas('ai_ayarlar', [
+    $this->assertDatabaseHas('ai_characters', [
         'user_id' => $aiKullanici->id,
-        'aktif_mi' => true,
-        'saglayici_tipi' => 'gemini',
-        'model_adi' => 'gemini-3.1-auto-quality',
+        'character_id' => 'dating_ai_test',
+        'active' => true,
+        'model_name' => 'gemini-2.5-flash',
     ]);
 });
 
@@ -326,32 +345,5 @@ it('can return a random photo-backed discovery showcase for the home banner', fu
 
     collect($response->json('data'))->each(function (array $aday) {
         expect($aday['profil_resmi'] ?? null)->not->toBeNull();
-    });
-});
-
-it('queues an ai first message after an automatic ai match is created', function () {
-    Queue::fake();
-
-    $kullanici = User::factory()->create([
-        'hesap_tipi' => 'user',
-        'hesap_durumu' => 'aktif',
-        'cevrim_ici_mi' => true,
-    ]);
-
-    $aiKullanici = User::factory()->create([
-        'hesap_tipi' => 'ai',
-        'hesap_durumu' => 'aktif',
-        'cevrim_ici_mi' => true,
-    ]);
-
-    Sanctum::actingAs($kullanici);
-
-    $this->postJson("/api/dating/eslesme-sohbet/{$aiKullanici->id}")
-        ->assertOk()
-        ->assertJsonPath('durum', 'eslesme');
-
-    Queue::assertPushed(EslesmeSonrasiAiIlkMesajGorevi::class, function (EslesmeSonrasiAiIlkMesajGorevi $job) use ($aiKullanici) {
-        return $job->aiUser->id === $aiKullanici->id
-            && $job->sohbet->exists;
     });
 });

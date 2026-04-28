@@ -187,8 +187,8 @@
                     <p class="text-xs text-gray-500">Eşleşme</p>
                 </div>
                 <div class="rounded-lg bg-white p-4 shadow text-center">
-                    <p class="text-2xl font-bold text-gray-900">{{ $kullanici->instagram_hesaplari_count }}</p>
-                    <p class="text-xs text-gray-500">Instagram</p>
+                    <p class="text-2xl font-bold text-gray-900">{{ $kullanici->aiCharacter ? '1' : '0' }}</p>
+                    <p class="text-xs text-gray-500">AI Karakter</p>
                 </div>
             </div>
 
@@ -221,23 +221,23 @@
                 </div>
             </div>
 
-            {{-- AI Ayarları (varsa) --}}
-            @if ($kullanici->aiAyar)
+            {{-- AI Karakter (varsa) --}}
+            @if ($kullanici->aiCharacter)
                 <div class="rounded-lg bg-white p-6 shadow">
-                    <h3 class="mb-4 text-sm font-semibold uppercase tracking-wider text-gray-500">AI Ayarları</h3>
+                    <h3 class="mb-4 text-sm font-semibold uppercase tracking-wider text-gray-500">AI Karakter</h3>
                     <div class="grid grid-cols-2 gap-4 sm:grid-cols-3">
                         <div>
-                            <p class="text-xs text-gray-500">Sağlayıcı</p>
-                            <p class="text-sm font-medium text-gray-900">{{ $kullanici->aiAyar->aktif_saglayici }}</p>
+                            <p class="text-xs text-gray-500">Model</p>
+                            <p class="text-sm font-medium text-gray-900">{{ $kullanici->aiCharacter->model_name }}</p>
                         </div>
                         <div>
                             <p class="text-xs text-gray-500">Saat Dilimi</p>
-                            <p class="text-sm font-medium text-gray-900">{{ $kullanici->aiAyar->saat_dilimi ?? '—' }}</p>
+                            <p class="text-sm font-medium text-gray-900">{{ data_get($kullanici->aiCharacter->character_json, 'schedule.timezone', '—') }}</p>
                         </div>
                         <div>
-                            <p class="text-xs text-gray-500">Cevap Gecikmesi</p>
+                            <p class="text-xs text-gray-500">Cevap Araligi</p>
                             <p class="text-sm font-medium text-gray-900">
-                                {{ $kullanici->aiAyar->min_cevap_gecikmesi }}–{{ $kullanici->aiAyar->max_cevap_gecikmesi }}s
+                                {{ data_get($kullanici->aiCharacter->character_json, 'rate_limits.min_response_seconds', 0) }}–{{ data_get($kullanici->aiCharacter->character_json, 'rate_limits.max_response_seconds', 0) }}s
                             </p>
                         </div>
                     </div>

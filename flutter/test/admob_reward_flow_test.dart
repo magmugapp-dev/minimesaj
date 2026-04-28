@@ -1,6 +1,8 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:hive/hive.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:magmug/app_core.dart';
@@ -10,6 +12,29 @@ import 'package:magmug/features/profile/widgets/profile_purchase_widgets.dart';
 import 'package:magmug/l10n/app_localizations.dart';
 
 void main() {
+  late Directory hiveDirectory;
+
+  setUpAll(() async {
+    hiveDirectory = await Directory.systemTemp.createTemp(
+      'magmug_hive_admob_test_',
+    );
+    Hive.init(hiveDirectory.path);
+  });
+
+  setUp(() async {
+    await _clearHiveBoxes();
+  });
+
+  tearDown(() async {
+    await Hive.close();
+  });
+
+  tearDownAll(() async {
+    if (await hiveDirectory.exists()) {
+      await hiveDirectory.delete(recursive: true);
+    }
+  });
+
   test('public settings parse admob configuration and resolve test units', () {
     final settings = AppPublicSettings.fromJson({
       'uygulama_adi': 'Magmug',
@@ -345,6 +370,33 @@ void main() {
     expect(find.text('Durdur'), findsOneWidget);
     expect(find.byKey(const ValueKey('matching-progress-bar')), findsOneWidget);
   });
+}
+
+Future<void> _clearHiveBoxes() async {
+  const boxes = [
+    'app_session',
+    'app_preferences',
+    'app_content',
+    'app_public_settings',
+    'ai_prompt',
+    'ai_characters',
+    'ai_memory',
+    'ai_pending_turns',
+    'chat_messages',
+    'chat_previews',
+    'chat_outbox',
+    'media_cache_index',
+  ];
+
+  for (final box in boxes) {
+    try {
+      if (Hive.isBoxOpen(box)) {
+        await Hive.box<dynamic>(box).clear();
+      } else {
+        await Hive.deleteBoxFromDisk(box);
+      }
+    } catch (_) {}
+  }
 }
 
 void _primeNextMatchingNativeAdRequest() {

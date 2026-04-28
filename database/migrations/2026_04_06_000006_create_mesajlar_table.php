@@ -15,6 +15,9 @@ Schema::create('mesajlar', function (Blueprint $table) {
     $table->foreignId('gonderen_user_id')->constrained('users')->cascadeOnDelete();
     $table->enum('mesaj_tipi', ['metin', 'ses', 'foto', 'sistem'])->default('metin');
     $table->longText('mesaj_metni')->nullable();
+    $table->string('dil_kodu', 12)->nullable();
+    $table->string('dil_adi', 80)->nullable();
+    $table->json('ceviriler')->nullable();
     $table->string('dosya_yolu')->nullable();
     $table->integer('dosya_suresi')->nullable();
     $table->bigInteger('dosya_boyutu')->nullable();

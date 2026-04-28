@@ -1,7 +1,6 @@
 <?php
 
 use App\Events\MesajGonderildi;
-use App\Events\YapayZekaCevabiHazir;
 use App\Models\Eslesme;
 use App\Models\Mesaj;
 use App\Models\MobileUpload;
@@ -263,36 +262,6 @@ it('broadcasts full mobile message payloads for realtime cache patches', functio
         ->and(str_contains($payload['dosya_yolu'], 'mesajlar/voice.m4a'))->toBeTrue()
         ->and($payload['dosya_suresi'])->toBe(12)
         ->and($payload['client_message_id'])->toBe('client-voice-1')
-        ->and($payload['okundu_mu'])->toBeFalse();
-});
-
-it('broadcasts full ai reply payloads for realtime cache patches', function () {
-    $user = User::factory()->create();
-    $peer = User::factory()->create();
-    $conversation = mobileApiConversation($user, $peer);
-
-    $message = Mesaj::query()->create([
-        'sohbet_id' => $conversation->id,
-        'gonderen_user_id' => $peer->id,
-        'mesaj_tipi' => 'metin',
-        'mesaj_metni' => '{"reply":"Merhaba"}',
-        'ai_tarafindan_uretildi_mi' => true,
-        'okundu_mu' => false,
-        'created_at' => now(),
-        'updated_at' => now(),
-    ]);
-
-    $payload = (new YapayZekaCevabiHazir($message))->broadcastWith();
-
-    expect($payload)
-        ->toHaveKey('gonderen')
-        ->and($payload['id'])->toBe($message->id)
-        ->and($payload['sohbet_id'])->toBe($conversation->id)
-        ->and($payload['gonderen_user_id'])->toBe($peer->id)
-        ->and($payload['gonderen']['id'])->toBe($peer->id)
-        ->and($payload['mesaj_tipi'])->toBe('metin')
-        ->and($payload['mesaj_metni'])->toBe('Merhaba')
-        ->and($payload['ai_tarafindan_uretildi_mi'])->toBeTrue()
         ->and($payload['okundu_mu'])->toBeFalse();
 });
 

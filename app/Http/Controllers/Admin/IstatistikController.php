@@ -3,11 +3,9 @@
 namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
+use App\Models\AiMessageTurn;
 use App\Models\Engelleme;
 use App\Models\Eslesme;
-use App\Models\InstagramAiGorevi;
-use App\Models\InstagramHesap;
-use App\Models\InstagramMesaj;
 use App\Models\Mesaj;
 use App\Models\Odeme;
 use App\Models\PuanHareketi;
@@ -58,19 +56,19 @@ class IstatistikController extends Controller
             'puan_harcanan'     => abs(PuanHareketi::where('puan_miktari', '<', 0)->sum('puan_miktari')),
         ];
 
-        // ── Instagram İstatistikleri ──
-        $instagram = [
-            'hesap_toplam'      => InstagramHesap::count(),
-            'hesap_bagli'       => InstagramHesap::where('aktif_mi', true)->count(),
-            'hesap_oto_yanit'   => InstagramHesap::where('otomatik_cevap_aktif_mi', true)->count(),
-            'mesaj_toplam'      => InstagramMesaj::count(),
-            'mesaj_bugun'       => InstagramMesaj::whereDate('created_at', today())->count(),
-            'mesaj_gelen'       => InstagramMesaj::where('gonderen_tipi', 'karsi_taraf')->count(),
-            'mesaj_giden'       => InstagramMesaj::where('gonderen_tipi', 'biz')->count(),
-            'mesaj_ai'          => InstagramMesaj::where('gonderen_tipi', 'ai')->count(),
-            'ai_gorev_toplam'   => InstagramAiGorevi::count(),
-            'ai_gorev_basarili' => InstagramAiGorevi::where('durum', 'tamamlandi')->count(),
-            'ai_gorev_basarisiz' => InstagramAiGorevi::where('durum', 'basarisiz')->count(),
+        // AI operasyon istatistikleri
+        $aiOperasyon = [
+            'hesap_toplam'      => User::where('hesap_tipi', 'ai')->count(),
+            'hesap_bagli'       => User::where('hesap_tipi', 'ai')->where('hesap_durumu', 'aktif')->count(),
+            'hesap_oto_yanit'   => User::where('hesap_tipi', 'ai')->whereHas('aiCharacter', fn ($query) => $query->where('active', true))->count(),
+            'mesaj_toplam'      => Mesaj::where('ai_tarafindan_uretildi_mi', true)->count(),
+            'mesaj_bugun'       => Mesaj::where('ai_tarafindan_uretildi_mi', true)->whereDate('created_at', today())->count(),
+            'mesaj_gelen'       => Mesaj::where('ai_tarafindan_uretildi_mi', false)->count(),
+            'mesaj_giden'       => Mesaj::where('ai_tarafindan_uretildi_mi', true)->count(),
+            'mesaj_ai'          => Mesaj::where('ai_tarafindan_uretildi_mi', true)->count(),
+            'ai_gorev_toplam'   => AiMessageTurn::count(),
+            'ai_gorev_basarili' => AiMessageTurn::where('status', 'completed')->count(),
+            'ai_gorev_basarisiz' => AiMessageTurn::where('status', 'deferred')->count(),
         ];
 
         // ── Son 7 Gün Trend (grafik için) ──
@@ -90,7 +88,7 @@ class IstatistikController extends Controller
             'mesaj',
             'moderasyon',
             'finansal',
-            'instagram',
+            'aiOperasyon',
             'trendler',
         ));
     }

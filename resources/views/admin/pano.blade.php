@@ -8,18 +8,12 @@
         $cevrimiciToplam = (int) $istatistikler['cevrimici_gercek'] + (int) $istatistikler['cevrimici_ai'];
         $aiOrani = $toplamHesap > 0 ? ($istatistikler['toplam_ai'] / $toplamHesap) * 100 : 0;
         $cevrimiciOran = $toplamHesap > 0 ? ($cevrimiciToplam / $toplamHesap) * 100 : 0;
-        $instagramKapsama =
-            (int) $istatistikler['toplam_ai'] > 0
-                ? ($istatistikler['instagram_hesaplar'] / max(1, (int) $istatistikler['toplam_ai'])) * 100
-                : 0;
         $bugunHacim = (int) $istatistikler['bugunun_kayitlari'] + (int) $istatistikler['bugunun_mesajlari'];
         $gelirMetni = 'TRY ' . number_format($istatistikler['toplam_gelir'], 2, ',', '.');
         $aiOraniMetni = '%' . number_format($aiOrani, 1, ',', '.');
         $cevrimiciOranMetni = '%' . number_format($cevrimiciOran, 1, ',', '.');
-        $instagramKapsamaMetni = '%' . number_format($instagramKapsama, 1, ',', '.');
         $aiBar = min(100, round($aiOrani, 1));
         $cevrimiciBar = min(100, round($cevrimiciOran, 1));
-        $instagramBar = min(100, round($instagramKapsama, 1));
     @endphp
 
     <div class="studio">
@@ -85,8 +79,8 @@
                             <strong>{{ $aiOraniMetni }}</strong>
                         </div>
                         <div class="board-ring-card__row">
-                            <span>Instagram</span>
-                            <strong>{{ number_format($istatistikler['instagram_hesaplar']) }}</strong>
+                            <span>AI karakter</span>
+                            <strong>{{ number_format($istatistikler['toplam_ai']) }}</strong>
                         </div>
                     </div>
                 </article>
@@ -96,8 +90,7 @@
                         <div class="board-card__label">Gelir</div>
                         <div class="board-card__value">{{ $gelirMetni }}</div>
                         <div class="board-card__meta">basarili odemeler</div>
-                        <div class="board-card__trend">{{ number_format($istatistikler['instagram_hesaplar']) }} instagram
-                        </div>
+                        <div class="board-card__trend">{{ number_format($istatistikler['bugunun_mesajlari']) }} mesaj</div>
                     </article>
 
                     <article class="board-card board-card--rose">
@@ -188,18 +181,16 @@
 
                 <article class="board-stat board-stat--amber">
                     <div class="board-stat__top">
-                        <div class="board-stat__label">Instagram</div>
+                        <div class="board-stat__label">Eslesme</div>
                         <div class="board-stat__icon">
                             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                                 stroke-width="1.8" aria-hidden="true">
-                                <rect x="3.5" y="3.5" width="17" height="17" rx="4.5" />
-                                <circle cx="12" cy="12" r="4.2" />
-                                <path stroke-linecap="round" stroke-linejoin="round" d="M17.4 6.6h.01" />
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M21 8.25c0-2.485-2.099-4.5-4.688-4.5-1.935 0-3.597 1.126-4.312 2.733-.715-1.607-2.377-2.733-4.313-2.733C5.1 3.75 3 5.765 3 8.25c0 7.22 9 12 9 12s9-4.78 9-12Z" />
                             </svg>
                         </div>
                     </div>
-                    <div class="board-stat__value">{{ number_format($istatistikler['instagram_hesaplar']) }}</div>
-                    <div class="board-stat__meta">baglanti</div>
+                    <div class="board-stat__value">{{ number_format($istatistikler['aktif_eslesmeler']) }}</div>
+                    <div class="board-stat__meta">aktif</div>
                 </article>
             </section>
 
@@ -233,15 +224,6 @@
                             </div>
                         </div>
 
-                        <div class="board-progress-card">
-                            <div class="board-progress__top">
-                                <span class="board-progress__label">Instagram kapsama</span>
-                                <span class="board-progress__value">{{ $instagramKapsamaMetni }}</span>
-                            </div>
-                            <div class="board-progress__track">
-                                <div class="board-progress__fill" style="width: {{ $instagramBar }}%;"></div>
-                            </div>
-                        </div>
                     </div>
                 </article>
 
@@ -282,22 +264,6 @@
                                 <div class="board-action__title">AI Studio</div>
                                 <div class="board-action__meta">profil</div>
                                 <div class="board-action__value">{{ number_format($istatistikler['toplam_ai']) }}</div>
-                            </div>
-                        </a>
-
-                        <a href="{{ route('admin.influencer.index') }}" class="board-action">
-                            <div class="board-action__icon">
-                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none"
-                                    stroke="currentColor" stroke-width="1.8" aria-hidden="true">
-                                    <path stroke-linecap="round" stroke-linejoin="round"
-                                        d="M9 12h6m-3-3v6m6 5H6a2 2 0 0 1-2-2V8.8a2 2 0 0 1 .6-1.42l3.77-3.6A2 2 0 0 1 9.76 3H18a2 2 0 0 1 2 2v13a2 2 0 0 1-2 2Z" />
-                                </svg>
-                            </div>
-                            <div>
-                                <div class="board-action__title">Influencer</div>
-                                <div class="board-action__meta">havuz</div>
-                                <div class="board-action__value">{{ number_format($istatistikler['instagram_hesaplar']) }}
-                                </div>
                             </div>
                         </a>
 

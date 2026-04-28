@@ -1,0 +1,520 @@
+import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
+import 'dart:math' as math;
+
+import 'package:http/http.dart' as http;
+import 'package:magmug/core/models/communication_models.dart';
+import 'package:magmug/core/network/app_api.dart';
+import 'package:magmug/core/network/app_auth_api.dart';
+import 'package:magmug/core/storage/app_storage.dart';
+import 'package:magmug/features/chat/chat_local_store.dart';
+
+class FlutterAiTurnProcessor {
+  FlutterAiTurnProcessor._();
+
+  static final FlutterAiTurnProcessor instance = FlutterAiTurnProcessor._();
+
+  bool _running = false;
+  Timer? _deferredTimer;
+
+  Future<void> run({required String token, required int ownerUserId}) async {
+    if (_running || token.trim().isEmpty || ownerUserId <= 0) {
+      return;
+    }
+
+    _running = true;
+    final client = AppHttpClientFactory.createForApi();
+    try {
+      await _syncBootstrap(client, token);
+      final turns = await _fetchPendingTurns(client, token);
+      for (final turn in turns) {
+        if ((turn['ai_user_id'] as num?)?.toInt() == ownerUserId) {
+          continue;
+        }
+        await _storePendingTurn(turn, ownerUserId: ownerUserId);
+        await _processTurn(
+          client,
+          token: token,
+          ownerUserId: ownerUserId,
+          turn: turn,
+        );
+      }
+      await _scheduleNextLocalDeferred(token: token, ownerUserId: ownerUserId);
+    } catch (_) {
+      // AI background work is intentionally silent.
+    } finally {
+      _running = false;
+      client.close();
+    }
+  }
+
+  Future<void> _syncBootstrap(http.Client client, String token) async {
+    final response = await client.get(
+      AppApi.uri(AppApi.mobileAiBootstrapPath),
+      headers: {'Accept': 'application/json', 'Authorization': 'Bearer $token'},
+    );
+    if (response.statusCode >= 400 || response.bodyBytes.isEmpty) {
+      return;
+    }
+
+    final payload = _decodeMap(response.bodyBytes);
+    final prompt = _asMap(payload['prompt']);
+    if (prompt != null) {
+      await (await AppHiveBoxes.aiPrompt()).put('active', prompt);
+    }
+  }
+
+  Future<List<Map<String, dynamic>>> _fetchPendingTurns(
+    http.Client client,
+    String token,
+  ) async {
+    final response = await client.get(
+      AppApi.uri(AppApi.mobileAiPendingTurnsPath),
+      headers: {'Accept': 'application/json', 'Authorization': 'Bearer $token'},
+    );
+    if (response.statusCode >= 400 || response.bodyBytes.isEmpty) {
+      return const [];
+    }
+
+    final payload = _decodeMap(response.bodyBytes);
+    return _mapsFromValue(payload['data']);
+  }
+
+  Future<void> _processTurn(
+    http.Client client, {
+    required String token,
+    required int ownerUserId,
+    required Map<String, dynamic> turn,
+  }) async {
+    final turnId = (turn['id'] as num?)?.toInt();
+    final conversationId = (turn['conversation_id'] as num?)?.toInt();
+    if (turnId == null || conversationId == null) {
+      return;
+    }
+
+    final context = await _fetchTurnContext(
+      client,
+      token: token,
+      conversationId: conversationId,
+      turnId: turnId,
+    );
+    if (context == null) {
+      return;
+    }
+
+    final aiUserId =
+        (_asMap(context['turn'])?['ai_user_id'] as num?)?.toInt() ??
+        (context['ai_user_id'] as num?)?.toInt();
+    if (aiUserId == null) {
+      return;
+    }
+
+    final text = await _generateWithSilentRetries(
+      client,
+      token: token,
+      turnId: turnId,
+      context: context,
+    );
+    if (text == null || text.trim().isEmpty) {
+      return;
+    }
+
+    final cleaned = await _handleBlockTags(
+      client,
+      token: token,
+      aiUserId: aiUserId,
+      text: text,
+    );
+    final parts = cleaned
+        .split(RegExp(r'\n\s*\n+'))
+        .map((part) => part.trim())
+        .where((part) => part.isNotEmpty)
+        .toList(growable: false);
+    if (parts.isEmpty) {
+      return;
+    }
+
+    final messages = await _persistReply(
+      client,
+      token: token,
+      conversationId: conversationId,
+      turnId: turnId,
+      parts: parts,
+    );
+    if (messages.isNotEmpty) {
+      await ChatLocalStore.instance.upsertConversationMessages(
+        messages,
+        ownerUserId: ownerUserId,
+      );
+      await _removePendingTurn(ownerUserId: ownerUserId, turnId: turnId);
+    }
+  }
+
+  Future<Map<String, dynamic>?> _fetchTurnContext(
+    http.Client client, {
+    required String token,
+    required int conversationId,
+    required int turnId,
+  }) async {
+    final uri = AppApi.uri(
+      AppApi.mobileAiTurnContextPath(conversationId),
+    ).replace(queryParameters: {'turn_id': '$turnId'});
+    final response = await client.get(
+      uri,
+      headers: {'Accept': 'application/json', 'Authorization': 'Bearer $token'},
+    );
+    if (response.statusCode >= 400 || response.bodyBytes.isEmpty) {
+      return null;
+    }
+
+    final context = _decodeMap(response.bodyBytes);
+    final prompt = _asMap(context['global_prompt']);
+    if (prompt != null) {
+      await (await AppHiveBoxes.aiPrompt()).put('active', prompt);
+    }
+    final character = _asMap(context['character']);
+    final characterId = character?['character_id']?.toString();
+    if (characterId != null && characterId.trim().isNotEmpty) {
+      await (await AppHiveBoxes.aiCharacters()).put(characterId, character);
+    }
+    await (await AppHiveBoxes.aiMemory())
+        .put('conversation:${context['conversation_id']}', {
+          'messages': context['messages'],
+          'updated_at_ms': DateTime.now().millisecondsSinceEpoch,
+        });
+
+    return context;
+  }
+
+  Future<String?> _generateWithSilentRetries(
+    http.Client client, {
+    required String token,
+    required int turnId,
+    required Map<String, dynamic> context,
+  }) async {
+    Object? lastError;
+    for (var attempt = 0; attempt < 5; attempt++) {
+      if (attempt > 0) {
+        final delay =
+            math.min(25, 1 << attempt) + math.Random().nextInt(750) / 1000.0;
+        await Future<void>.delayed(
+          Duration(milliseconds: (delay * 1000).round()),
+        );
+      }
+
+      try {
+        final generated = await _callRelay(
+          client,
+          token: token,
+          turnId: turnId,
+          context: context,
+        );
+        if (generated != null && generated.trim().isNotEmpty) {
+          return generated;
+        }
+      } on _RetryableGeminiException catch (error) {
+        lastError = error;
+      } on SocketException catch (error) {
+        lastError = error;
+      } on TimeoutException catch (error) {
+        lastError = error;
+      }
+    }
+
+    await _deferLocalTurn(context, error: lastError?.toString() ?? 'retryable');
+    return null;
+  }
+
+  Future<String?> _callRelay(
+    http.Client client, {
+    required String token,
+    required int turnId,
+    required Map<String, dynamic> context,
+  }) async {
+    final modelConfig = _asMap(context['model_config']) ?? const {};
+    final request =
+        http.Request('POST', AppApi.uri(AppApi.mobileAiGeminiStreamPath))
+          ..headers.addAll({
+            'Accept': 'text/event-stream',
+            'Authorization': 'Bearer $token',
+            'Content-Type': 'application/json',
+          })
+          ..body = jsonEncode({
+            'turn_id': turnId,
+            'model':
+                modelConfig['model_name']?.toString() ?? 'gemini-2.5-flash',
+            'payload': _geminiPayload(context),
+          });
+
+    final streamed = await client
+        .send(request)
+        .timeout(const Duration(seconds: 55));
+    if (streamed.statusCode == 429 || streamed.statusCode == 503) {
+      throw _RetryableGeminiException(streamed.statusCode);
+    }
+    if (streamed.statusCode >= 500) {
+      throw _RetryableGeminiException(streamed.statusCode);
+    }
+    if (streamed.statusCode >= 400) {
+      return null;
+    }
+
+    return _readGeminiSse(streamed.stream);
+  }
+
+  Map<String, dynamic> _geminiPayload(Map<String, dynamic> context) {
+    final modelConfig = _asMap(context['model_config']) ?? const {};
+    final prompt = _asMap(context['global_prompt']);
+    final character = _asMap(context['character']) ?? const {};
+    final runtimeContext = _asMap(context['runtime_context']) ?? const {};
+    final messages = _mapsFromValue(context['messages']);
+
+    return {
+      'systemInstruction': {
+        'parts': [
+          {
+            'text': [
+              prompt?['prompt_xml']?.toString() ?? '',
+              'Character JSON:',
+              jsonEncode(character),
+              'Runtime context:',
+              jsonEncode(runtimeContext),
+            ].where((part) => part.trim().isNotEmpty).join('\n\n'),
+          },
+        ],
+      },
+      'contents': messages.map((message) {
+        final isAi = message['is_ai'] == true;
+        final text = message['text']?.toString().trim();
+        final fileUrl = message['file_url']?.toString().trim();
+        return {
+          'role': isAi ? 'model' : 'user',
+          'parts': [
+            {
+              'text': [
+                if (text != null && text.isNotEmpty) text,
+                if (fileUrl != null && fileUrl.isNotEmpty)
+                  '[media:${message['type']}] $fileUrl',
+              ].join('\n'),
+            },
+          ],
+        };
+      }).toList(),
+      'generationConfig': {
+        'temperature': (modelConfig['temperature'] as num?)?.toDouble() ?? 0.8,
+        'topP': (modelConfig['top_p'] as num?)?.toDouble() ?? 0.9,
+        'maxOutputTokens':
+            (modelConfig['max_output_tokens'] as num?)?.toInt() ?? 1024,
+      },
+    };
+  }
+
+  Future<String> _readGeminiSse(Stream<List<int>> stream) async {
+    final buffer = StringBuffer();
+    var pending = '';
+    await for (final chunk in stream.transform(utf8.decoder)) {
+      pending += chunk;
+      final lines = pending.split('\n');
+      pending = lines.removeLast();
+      for (final line in lines) {
+        final trimmed = line.trim();
+        if (!trimmed.startsWith('data:')) {
+          continue;
+        }
+        final data = trimmed.substring(5).trim();
+        if (data.isEmpty || data == '[DONE]') {
+          continue;
+        }
+        final payload = jsonDecode(data);
+        final candidates = payload is Map ? payload['candidates'] : null;
+        if (candidates is! List || candidates.isEmpty) {
+          continue;
+        }
+        final content = _asMap(_asMap(candidates.first)?['content']);
+        final parts = content?['parts'];
+        if (parts is! List) {
+          continue;
+        }
+        for (final part in parts.whereType<Map>()) {
+          final text = part['text']?.toString();
+          if (text != null) {
+            buffer.write(text);
+          }
+        }
+      }
+    }
+
+    return buffer.toString();
+  }
+
+  Future<String> _handleBlockTags(
+    http.Client client, {
+    required String token,
+    required int aiUserId,
+    required String text,
+  }) async {
+    var cleaned = text;
+    final matches = RegExp(r'\[BLOCK_USER:([^\]]+)\]').allMatches(text);
+    for (final match in matches) {
+      final category = match.group(1)?.trim();
+      if (category == null || category.isEmpty) {
+        continue;
+      }
+      unawaited(
+        client.post(
+          AppApi.uri(AppApi.mobileAiViolationsPath),
+          headers: {
+            'Accept': 'application/json',
+            'Authorization': 'Bearer $token',
+            'Content-Type': 'application/json',
+          },
+          body: jsonEncode({'ai_user_id': aiUserId, 'category': category}),
+        ),
+      );
+    }
+
+    cleaned = cleaned.replaceAll(RegExp(r'\[BLOCK_USER:[^\]]+\]'), '');
+    return cleaned.trim();
+  }
+
+  Future<List<AppConversationMessage>> _persistReply(
+    http.Client client, {
+    required String token,
+    required int conversationId,
+    required int turnId,
+    required List<String> parts,
+  }) async {
+    final response = await client.post(
+      AppApi.uri(AppApi.mobileAiReplyPath(conversationId)),
+      headers: {
+        'Accept': 'application/json',
+        'Authorization': 'Bearer $token',
+        'Content-Type': 'application/json',
+      },
+      body: jsonEncode({
+        'turn_id': turnId,
+        'parts': parts,
+        'client_message_id': 'ai-turn-$turnId',
+      }),
+    );
+    if (response.statusCode >= 400 || response.bodyBytes.isEmpty) {
+      return const [];
+    }
+
+    final payload = _decodeMap(response.bodyBytes);
+    return _mapsFromValue(payload['data'])
+        .map(AppAuthApi.conversationMessageFromJson)
+        .whereType<AppConversationMessage>()
+        .toList(growable: false);
+  }
+
+  Future<void> _storePendingTurn(
+    Map<String, dynamic> turn, {
+    required int ownerUserId,
+  }) async {
+    final turnId = (turn['id'] as num?)?.toInt();
+    if (turnId == null) {
+      return;
+    }
+    await (await AppHiveBoxes.pendingAiTurns()).put('$ownerUserId:$turnId', {
+      ...turn,
+      'owner_user_id': ownerUserId,
+      'updated_at_ms': DateTime.now().millisecondsSinceEpoch,
+    });
+  }
+
+  Future<void> _removePendingTurn({
+    required int ownerUserId,
+    required int turnId,
+  }) async {
+    await (await AppHiveBoxes.pendingAiTurns()).delete('$ownerUserId:$turnId');
+  }
+
+  Future<void> _deferLocalTurn(
+    Map<String, dynamic> context, {
+    required String error,
+  }) async {
+    final turn = _asMap(context['turn']);
+    final turnId = (turn?['id'] as num?)?.toInt();
+    if (turnId == null) {
+      return;
+    }
+    final ownerUserId = await AppSessionStorage.readOwnerUserId();
+    if (ownerUserId == null) {
+      return;
+    }
+    final retryAfter = DateTime.now().add(const Duration(minutes: 5));
+    await (await AppHiveBoxes.pendingAiTurns()).put('$ownerUserId:$turnId', {
+      ...?turn,
+      'owner_user_id': ownerUserId,
+      'status': 'deferred',
+      'retry_after': retryAfter.toIso8601String(),
+      'last_error': error,
+      'updated_at_ms': DateTime.now().millisecondsSinceEpoch,
+    });
+  }
+
+  Future<void> _scheduleNextLocalDeferred({
+    required String token,
+    required int ownerUserId,
+  }) async {
+    _deferredTimer?.cancel();
+    final box = await AppHiveBoxes.pendingAiTurns();
+    DateTime? nextRetry;
+    for (final row
+        in box.values.map(_asMap).whereType<Map<String, dynamic>>()) {
+      if ((row['owner_user_id'] as num?)?.toInt() != ownerUserId) {
+        continue;
+      }
+      final retryAt = DateTime.tryParse(row['retry_after']?.toString() ?? '');
+      if (retryAt == null) {
+        continue;
+      }
+      if (nextRetry == null || retryAt.isBefore(nextRetry)) {
+        nextRetry = retryAt;
+      }
+    }
+    if (nextRetry == null) {
+      return;
+    }
+    final delay = nextRetry.difference(DateTime.now());
+    _deferredTimer = Timer(delay.isNegative ? Duration.zero : delay, () {
+      unawaited(run(token: token, ownerUserId: ownerUserId));
+    });
+  }
+
+  Map<String, dynamic> _decodeMap(List<int> bytes) {
+    final decoded = jsonDecode(utf8.decode(bytes));
+    return _asMap(decoded) ?? const <String, dynamic>{};
+  }
+
+  Map<String, dynamic>? _asMap(Object? value) {
+    if (value is Map<String, dynamic>) {
+      return value;
+    }
+    if (value is Map) {
+      return value.map((key, val) => MapEntry(key.toString(), val));
+    }
+    return null;
+  }
+
+  List<Map<String, dynamic>> _mapsFromValue(Object? value) {
+    if (value is! List) {
+      return const [];
+    }
+    return value
+        .whereType<Map>()
+        .map((item) => item.map((key, val) => MapEntry(key.toString(), val)))
+        .toList(growable: false);
+  }
+}
+
+class _RetryableGeminiException implements Exception {
+  final int statusCode;
+
+  const _RetryableGeminiException(this.statusCode);
+
+  @override
+  String toString() => 'Gemini retryable $statusCode';
+}

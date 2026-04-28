@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter/services.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
+import 'package:hive_flutter/hive_flutter.dart';
 import 'package:magmug/l10n/app_localizations.dart';
 
 import 'package:magmug/app_bootstrap.dart';
@@ -19,6 +20,7 @@ Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await Hive.initFlutter('magmug_hive');
   if (AppPushSupport.isSupported) {
     await Firebase.initializeApp(
       options: DefaultFirebaseOptions.currentPlatform,

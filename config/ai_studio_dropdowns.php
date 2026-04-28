@@ -1,10 +1,8 @@
 <?php
 
-use App\Services\YapayZeka\GeminiModelPolicy;
-
 return [
     'models' => [
-        GeminiModelPolicy::AUTO_QUALITY => 'Gemini 3.1 Auto (Kalite Oncelikli)',
+        'gemini-2.5-flash' => 'Gemini 2.5 Flash',
     ],
 
     'account_statuses' => [

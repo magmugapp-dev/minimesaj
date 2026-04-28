@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
+import 'package:magmug/core/ai/flutter_ai_turn_processor.dart';
 import 'package:magmug/core/i18n/app_runtime_text.dart';
 import 'package:magmug/core/models/auth_models.dart';
 import 'package:magmug/core/models/communication_models.dart';
@@ -86,6 +87,12 @@ class AppBootstrapCoordinator {
       );
       unawaited(
         AppSyncEngine.instance.flushOutbox(
+          token: token,
+          ownerUserId: payload.user.id,
+        ),
+      );
+      unawaited(
+        FlutterAiTurnProcessor.instance.run(
           token: token,
           ownerUserId: payload.user.id,
         ),

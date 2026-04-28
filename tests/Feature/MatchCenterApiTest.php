@@ -236,38 +236,6 @@ it('starts a conversation from a match candidate without requiring likes', funct
     ]);
 });
 
-it('returns only active influencer profiles from the profile id lookup endpoint', function () {
-    $kullanici = User::factory()->create([
-        'hesap_durumu' => 'aktif',
-    ]);
-    $aktifInfluencer = User::factory()->aiKullanici()->create([
-        'hesap_durumu' => 'aktif',
-        'is_admin' => false,
-    ]);
-    $normalKullanici = User::factory()->create([
-        'hesap_durumu' => 'aktif',
-        'is_admin' => false,
-    ]);
-    $pasifInfluencer = User::factory()->aiKullanici()->create([
-        'hesap_durumu' => 'pasif',
-        'is_admin' => false,
-    ]);
-
-    Sanctum::actingAs($kullanici);
-
-    $this->getJson("/api/dating/influencer-profile/{$aktifInfluencer->id}")
-        ->assertOk()
-        ->assertJsonPath('data.id', $aktifInfluencer->id)
-        ->assertJsonPath('data.hesap_tipi', 'ai')
-        ->assertJsonPath('data.hesap_durumu', 'aktif');
-
-    $this->getJson("/api/dating/influencer-profile/{$normalKullanici->id}")
-        ->assertNotFound();
-
-    $this->getJson("/api/dating/influencer-profile/{$pasifInfluencer->id}")
-        ->assertNotFound();
-});
-
 it('reuses an existing active match conversation when starting direct messaging', function () {
     $kullanici = User::factory()->create([
         'hesap_durumu' => 'aktif',

@@ -4,10 +4,27 @@ import 'dart:math';
 import 'package:flutter/cupertino.dart';
 import 'package:crypto/crypto.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:hive/hive.dart';
 import 'package:magmug/core/models/app_content_models.dart';
 import 'package:magmug/core/models/auth_models.dart';
 import 'package:magmug/core/models/user_models.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+
+class AppHiveBoxes {
+  AppHiveBoxes._();
+
+  static Future<Box<dynamic>> session() => Hive.openBox<dynamic>('app_session');
+  static Future<Box<dynamic>> preferences() =>
+      Hive.openBox<dynamic>('app_preferences');
+  static Future<Box<dynamic>> content() => Hive.openBox<dynamic>('app_content');
+  static Future<Box<dynamic>> publicSettings() =>
+      Hive.openBox<dynamic>('app_public_settings');
+  static Future<Box<dynamic>> aiPrompt() => Hive.openBox<dynamic>('ai_prompt');
+  static Future<Box<dynamic>> aiCharacters() =>
+      Hive.openBox<dynamic>('ai_characters');
+  static Future<Box<dynamic>> aiMemory() => Hive.openBox<dynamic>('ai_memory');
+  static Future<Box<dynamic>> pendingAiTurns() =>
+      Hive.openBox<dynamic>('ai_pending_turns');
+}
 
 class AppSessionStorage {
   AppSessionStorage._();
@@ -22,34 +39,34 @@ class AppSessionStorage {
   static const String _mobileLastSyncAtPrefix = 'mobile.last_sync_at.';
 
   static Future<void> saveSession(AuthenticatedSession session) async {
-    final prefs = await SharedPreferences.getInstance();
+    final box = await AppHiveBoxes.session();
     await _secureStorage.write(key: _secureTokenKey, value: session.token);
-    await prefs.remove(_legacyTokenKey);
+    await box.delete(_legacyTokenKey);
     if (session.user != null) {
-      await prefs.setString(_userKey, jsonEncode(session.user!.toJson()));
-      await prefs.setInt(_ownerUserIdKey, session.user!.id);
+      await box.put(_userKey, jsonEncode(session.user!.toJson()));
+      await box.put(_ownerUserIdKey, session.user!.id);
     } else {
-      await prefs.remove(_userKey);
-      await prefs.remove(_ownerUserIdKey);
+      await box.delete(_userKey);
+      await box.delete(_ownerUserIdKey);
     }
   }
 
   static Future<AuthenticatedSession?> readSession() async {
-    final prefs = await SharedPreferences.getInstance();
+    final box = await AppHiveBoxes.session();
     var token = await _secureStorage.read(key: _secureTokenKey);
-    final legacyToken = prefs.getString(_legacyTokenKey);
+    final legacyToken = box.get(_legacyTokenKey)?.toString();
     if ((token == null || token.trim().isEmpty) &&
         legacyToken != null &&
         legacyToken.trim().isNotEmpty) {
       token = legacyToken;
       await _secureStorage.write(key: _secureTokenKey, value: legacyToken);
-      await prefs.remove(_legacyTokenKey);
+      await box.delete(_legacyTokenKey);
     }
     if (token == null || token.trim().isEmpty) {
       return null;
     }
 
-    final rawUser = prefs.getString(_userKey);
+    final rawUser = box.get(_userKey)?.toString();
     AppUser? user;
     if (rawUser != null && rawUser.trim().isNotEmpty) {
       final decoded = jsonDecode(rawUser);
@@ -70,24 +87,25 @@ class AppSessionStorage {
   }
 
   static Future<int?> readOwnerUserId() async {
-    final prefs = await SharedPreferences.getInstance();
-    return prefs.getInt(_ownerUserIdKey);
+    final box = await AppHiveBoxes.session();
+    final value = box.get(_ownerUserIdKey);
+    return value is num ? value.toInt() : null;
   }
 
   static Future<void> saveMobileSyncToken(String? syncToken) async {
-    final prefs = await SharedPreferences.getInstance();
+    final box = await AppHiveBoxes.session();
     final normalized = syncToken?.trim();
     if (normalized == null || normalized.isEmpty) {
-      await prefs.remove(_mobileSyncTokenKey);
+      await box.delete(_mobileSyncTokenKey);
       return;
     }
 
-    await prefs.setString(_mobileSyncTokenKey, normalized);
+    await box.put(_mobileSyncTokenKey, normalized);
   }
 
   static Future<String?> readMobileSyncToken() async {
-    final prefs = await SharedPreferences.getInstance();
-    return prefs.getString(_mobileSyncTokenKey);
+    final box = await AppHiveBoxes.session();
+    return box.get(_mobileSyncTokenKey)?.toString();
   }
 
   static Future<void> saveMobileLastSyncAt(
@@ -98,8 +116,8 @@ class AppSessionStorage {
       return;
     }
 
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setInt(
+    final box = await AppHiveBoxes.session();
+    await box.put(
       '$_mobileLastSyncAtPrefix$ownerUserId',
       value.millisecondsSinceEpoch,
     );
@@ -110,41 +128,44 @@ class AppSessionStorage {
       return null;
     }
 
-    final prefs = await SharedPreferences.getInstance();
-    final millis = prefs.getInt('$_mobileLastSyncAtPrefix$ownerUserId');
-    if (millis == null || millis <= 0) {
+    final box = await AppHiveBoxes.session();
+    final millis = box.get('$_mobileLastSyncAtPrefix$ownerUserId');
+    if (millis is! num) {
+      return null;
+    }
+    if (millis <= 0) {
       return null;
     }
 
-    return DateTime.fromMillisecondsSinceEpoch(millis);
+    return DateTime.fromMillisecondsSinceEpoch(millis.toInt());
   }
 
   static Future<String> cacheNamespaceForUser(int userId) async {
-    final prefs = await SharedPreferences.getInstance();
-    var salt = prefs.getString(_installSaltKey);
+    final box = await AppHiveBoxes.session();
+    var salt = box.get(_installSaltKey)?.toString();
     if (salt == null || salt.trim().isEmpty) {
       final random = Random.secure();
       final bytes = List<int>.generate(32, (_) => random.nextInt(256));
       salt = base64UrlEncode(bytes);
-      await prefs.setString(_installSaltKey, salt);
+      await box.put(_installSaltKey, salt);
     }
 
     return sha256.convert(utf8.encode('$salt:$userId')).toString();
   }
 
   static Future<void> clear() async {
-    final prefs = await SharedPreferences.getInstance();
+    final box = await AppHiveBoxes.session();
     await _secureStorage.delete(key: _secureTokenKey);
-    await prefs.remove(_legacyTokenKey);
-    await prefs.remove(_userKey);
-    await prefs.remove(_ownerUserIdKey);
-    await prefs.remove(_mobileSyncTokenKey);
-    final lastSyncKeys = prefs
-        .getKeys()
+    await box.delete(_legacyTokenKey);
+    await box.delete(_userKey);
+    await box.delete(_ownerUserIdKey);
+    await box.delete(_mobileSyncTokenKey);
+    final lastSyncKeys = box.keys
+        .map((key) => key.toString())
         .where((key) => key.startsWith(_mobileLastSyncAtPrefix))
         .toList(growable: false);
     for (final key in lastSyncKeys) {
-      await prefs.remove(key);
+      await box.delete(key);
     }
   }
 }
@@ -160,8 +181,8 @@ class AppPreferencesStorage {
   }
 
   static Future<AppLanguage> readAppLanguage() async {
-    final prefs = await SharedPreferences.getInstance();
-    final rawCode = prefs.getString(_languageKey);
+    final box = await AppHiveBoxes.preferences();
+    final rawCode = box.get(_languageKey)?.toString();
     if (rawCode != null && rawCode.trim().isNotEmpty) {
       return appLanguageFromCode(rawCode);
     }
@@ -176,8 +197,8 @@ class AppPreferencesStorage {
   }
 
   static Future<void> saveAppLanguage(AppLanguage language) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_languageKey, language.code);
+    final box = await AppHiveBoxes.preferences();
+    await box.put(_languageKey, language.code);
   }
 }
 
@@ -188,8 +209,8 @@ class AppContentStorage {
   static const String _lastLanguageKey = 'app.content.last_language';
 
   static Future<AppContent?> read(String languageCode) async {
-    final prefs = await SharedPreferences.getInstance();
-    final raw = prefs.getString(_contentKey(languageCode));
+    final box = await AppHiveBoxes.content();
+    final raw = box.get(_contentKey(languageCode))?.toString();
     if (raw == null || raw.trim().isEmpty) {
       return null;
     }
@@ -205,15 +226,15 @@ class AppContentStorage {
         ).copyWith(fromCache: true);
       }
     } catch (_) {
-      await prefs.remove(_contentKey(languageCode));
+      await box.delete(_contentKey(languageCode));
     }
 
     return null;
   }
 
   static Future<AppContent?> readLast() async {
-    final prefs = await SharedPreferences.getInstance();
-    final lastLanguage = prefs.getString(_lastLanguageKey);
+    final box = await AppHiveBoxes.content();
+    final lastLanguage = box.get(_lastLanguageKey)?.toString();
     if (lastLanguage != null && lastLanguage.trim().isNotEmpty) {
       final lastContent = await read(lastLanguage);
       if (lastContent != null) {
@@ -221,7 +242,8 @@ class AppContentStorage {
       }
     }
 
-    for (final key in prefs.getKeys()) {
+    for (final rawKey in box.keys) {
+      final key = rawKey.toString();
       if (!key.startsWith(_contentKeyPrefix) || key == _lastLanguageKey) {
         continue;
       }
@@ -237,12 +259,12 @@ class AppContentStorage {
   }
 
   static Future<void> save(AppContent content) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(
+    final box = await AppHiveBoxes.content();
+    await box.put(
       _contentKey(content.selectedLanguageCode),
       jsonEncode(content.toJson()),
     );
-    await prefs.setString(_lastLanguageKey, content.selectedLanguageCode);
+    await box.put(_lastLanguageKey, content.selectedLanguageCode);
   }
 
   static String _contentKey(String languageCode) {

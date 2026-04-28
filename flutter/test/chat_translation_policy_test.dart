@@ -27,16 +27,19 @@ void main() {
     languageCode: 'tr',
   );
 
-  test('shows inline translate action for incoming text when languages differ', () {
-    final result = shouldShowInlineTranslateAction(
-      message: incomingEnglish,
-      currentUserId: 7,
-      viewerLanguageCode: 'tr',
-      peerLanguageCode: 'en',
-    );
+  test(
+    'shows inline translate action for incoming text when languages differ',
+    () {
+      final result = shouldShowInlineTranslateAction(
+        message: incomingEnglish,
+        currentUserId: 7,
+        viewerLanguageCode: 'tr',
+        peerLanguageCode: 'en',
+      );
 
-    expect(result, isTrue);
-  });
+      expect(result, isTrue);
+    },
+  );
 
   test('hides inline translate action when languages are the same', () {
     final result = shouldShowInlineTranslateAction(

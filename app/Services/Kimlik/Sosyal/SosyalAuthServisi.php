@@ -37,7 +37,7 @@ class SosyalAuthServisi
 
             return [
                 'durum' => 'authenticated',
-                'user' => $user->fresh()->load('fotograflar', 'aiAyar'),
+                'user' => $user->fresh()->load('fotograflar', 'aiCharacter'),
                 'token' => $token->plainTextToken,
             ];
         }
@@ -93,7 +93,7 @@ class SosyalAuthServisi
 
             return [
                 'durum' => 'authenticated',
-                'user' => $user->fresh()->load('fotograflar', 'aiAyar'),
+                'user' => $user->fresh()->load('fotograflar', 'aiCharacter'),
                 'token' => $token->plainTextToken,
                 'status' => 200,
             ];
@@ -145,7 +145,7 @@ class SosyalAuthServisi
 
         return [
             'durum' => 'authenticated',
-            'user' => $user->fresh()->load('fotograflar', 'aiAyar'),
+            'user' => $user->fresh()->load('fotograflar', 'aiCharacter'),
             'token' => $token->plainTextToken,
             'status' => 201,
         ];

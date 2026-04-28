@@ -1,6 +1,8 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:magmug/app_core.dart';
+import 'package:magmug/core/ai/flutter_ai_turn_processor.dart';
 import 'package:magmug/features/chat/chat_local_store.dart';
 import 'package:magmug/features/chat/chat_flow.dart';
 import 'package:magmug/features/match/match_flow.dart';
@@ -13,6 +15,13 @@ Future<void> handlePendingPushPayload(
   required String authToken,
   required int currentUserId,
 }) async {
+  unawaited(
+    FlutterAiTurnProcessor.instance.run(
+      token: authToken,
+      ownerUserId: currentUserId,
+    ),
+  );
+
   final route = payload['rota']?.trim().toLowerCase();
   if (route == 'chat') {
     final conversationId = extractPushConversationId(payload);

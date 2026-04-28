@@ -92,7 +92,7 @@ class KimlikController extends Controller
         $user = $request->user();
         $this->authPuanServisi->gunlukGirisBonusuUygula($user);
 
-        return new KullaniciResource($user->fresh()->load('aiAyar', 'fotograflar'));
+        return new KullaniciResource($user->fresh()->load('aiCharacter', 'fotograflar'));
     }
 
     public function hesapSil(Request $request): JsonResponse

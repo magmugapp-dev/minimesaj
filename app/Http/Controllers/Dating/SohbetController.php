@@ -20,13 +20,9 @@ class SohbetController extends Controller
             ->where('durum', 'aktif')
             ->with([
                 'eslesme.user:id,ad,kullanici_adi,profil_resmi,cevrim_ici_mi,dil,hesap_tipi',
-                'eslesme.user.aiPersonaProfile:ai_user_id,ana_dil_kodu,ana_dil_adi',
-                'eslesme.user.aiAyar:id,user_id,aktif_mi,saat_dilimi,uyku_baslangic,uyku_bitis,hafta_sonu_uyku_baslangic,hafta_sonu_uyku_bitis',
-                'eslesme.user.availabilitySchedules:id,user_id,recurrence_type,specific_date,day_of_week,starts_at,ends_at,status',
+                'eslesme.user.aiCharacter:id,user_id,character_id,character_version,schema_version,active,display_name,primary_language_code,primary_language_name,model_name,character_json',
                 'eslesme.eslesenUser:id,ad,kullanici_adi,profil_resmi,cevrim_ici_mi,dil,hesap_tipi',
-                'eslesme.eslesenUser.aiPersonaProfile:ai_user_id,ana_dil_kodu,ana_dil_adi',
-                'eslesme.eslesenUser.aiAyar:id,user_id,aktif_mi,saat_dilimi,uyku_baslangic,uyku_bitis,hafta_sonu_uyku_baslangic,hafta_sonu_uyku_bitis',
-                'eslesme.eslesenUser.availabilitySchedules:id,user_id,recurrence_type,specific_date,day_of_week,starts_at,ends_at,status',
+                'eslesme.eslesenUser.aiCharacter:id,user_id,character_id,character_version,schema_version,active,display_name,primary_language_code,primary_language_name,model_name,character_json',
                 'sonMesaj',
             ])
             ->withCount([

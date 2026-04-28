@@ -943,34 +943,11 @@ class AppAuthApi {
     return AppMatchCandidate.fromJson(_unwrapDataMap(payload));
   }
 
-  Future<AppMatchCandidate> fetchInfluencerProfile(
+  Future<AppMatchCandidate> fetchAiProfile(
     String token, {
     required int userId,
   }) async {
-    final response = await _client.get(
-      AppApi.uri(AppApi.influencerProfilePath(userId)),
-      headers: {'Accept': 'application/json', 'Authorization': 'Bearer $token'},
-    );
-
-    final payload = _decodeJsonMap(response);
-    if (response.statusCode == 401 || response.statusCode == 403) {
-      throw UnauthorizedApiException(
-        _text('apiErrorSessionExpired', 'Oturum suresi doldu.'),
-      );
-    }
-    if (response.statusCode == 404) {
-      throw ApiException(
-        _text(
-          'home.search.influencer_not_found',
-          'Bu profil ID ile aktif influencer bulunamadi.',
-        ),
-      );
-    }
-    if (response.statusCode >= 400) {
-      throw ApiException(_extractErrorMessage(payload));
-    }
-
-    return AppMatchCandidate.fromJson(_unwrapDataMap(payload));
+    return fetchDatingPeerProfile(token, userId: userId);
   }
 
   Future<AppProfilePhoto> updateProfileMedia(
@@ -1251,29 +1228,62 @@ class AppAuthApi {
     String token, {
     required AppConversationMessage message,
   }) async {
-    final response = await _client.post(
-      AppApi.uri(
-        AppApi.datingChatMessageTranslationPath(
-          message.conversationId,
-          message.id,
-        ),
-      ),
-      headers: {'Accept': 'application/json', 'Authorization': 'Bearer $token'},
-    );
+    final sourceText = ChatTextSanitizer.sanitize(message.text);
+    if (sourceText == null || sourceText.trim().isEmpty) {
+      throw ApiException(
+        _text('apiErrorTranslationTextUnreadable', 'Cevrilecek metin yok.'),
+      );
+    }
 
-    final payload = _decodeJsonMap(response);
+    final request =
+        http.Request('POST', AppApi.uri(AppApi.mobileAiGeminiStreamPath))
+          ..headers.addAll({
+            'Accept': 'text/event-stream',
+            'Authorization': 'Bearer $token',
+            'Content-Type': 'application/json',
+          })
+          ..body = jsonEncode({
+            'translation': true,
+            'model': 'gemini-2.5-flash',
+            'payload': {
+              'systemInstruction': {
+                'parts': [
+                  {
+                    'text':
+                        'Translate the user message into the recipient language. Return only the translated text.',
+                  },
+                ],
+              },
+              'contents': [
+                {
+                  'role': 'user',
+                  'parts': [
+                    {'text': sourceText},
+                  ],
+                },
+              ],
+              'generationConfig': {
+                'temperature': 0.2,
+                'topP': 0.9,
+                'maxOutputTokens': 512,
+              },
+            },
+          });
+
+    final response = await _client
+        .send(request)
+        .timeout(const Duration(seconds: 45));
     if (response.statusCode == 401 || response.statusCode == 403) {
       throw UnauthorizedApiException(
         _text('apiErrorSessionExpired', 'Oturum suresi doldu.'),
       );
     }
     if (response.statusCode >= 400) {
-      throw _extractApiException(payload);
+      throw ApiException(_text('apiErrorConnection', 'Ceviri alinamadi.'));
     }
 
-    final translation = _asMap(payload['ceviri']);
     final translatedText = _nullableString(
-      translation?['metin']?.toString() ?? payload['ceviri_metni']?.toString(),
+      await _readGeminiSseText(response.stream),
     );
     if (translatedText == null) {
       throw ApiException(
@@ -1284,15 +1294,7 @@ class AppAuthApi {
       );
     }
 
-    return message.copyWith(
-      translatedText: translatedText,
-      translationTargetLanguageCode: _nullableString(
-        translation?['hedef_dil_kodu']?.toString(),
-      ),
-      translationTargetLanguageName: _nullableString(
-        translation?['hedef_dil_adi']?.toString(),
-      ),
-    );
+    return message.copyWith(translatedText: translatedText);
   }
 
   Future<void> markConversationRead(
@@ -1894,6 +1896,45 @@ class AppAuthApi {
       final payload = _decodeJsonMap(response);
       throw ApiException(_extractErrorMessage(payload));
     }
+  }
+
+  Future<String> _readGeminiSseText(Stream<List<int>> stream) async {
+    final buffer = StringBuffer();
+    var pending = '';
+    await for (final chunk in stream.transform(utf8.decoder)) {
+      pending += chunk;
+      final lines = pending.split('\n');
+      pending = lines.removeLast();
+      for (final line in lines) {
+        final trimmed = line.trim();
+        if (!trimmed.startsWith('data:')) {
+          continue;
+        }
+        final data = trimmed.substring(5).trim();
+        if (data.isEmpty || data == '[DONE]') {
+          continue;
+        }
+        final decoded = jsonDecode(data);
+        final candidates = decoded is Map ? decoded['candidates'] : null;
+        if (candidates is! List || candidates.isEmpty) {
+          continue;
+        }
+        final candidate = _asMap(candidates.first);
+        final content = _asMap(candidate?['content']);
+        final parts = content?['parts'];
+        if (parts is! List) {
+          continue;
+        }
+        for (final part in parts.whereType<Map>()) {
+          final text = part['text']?.toString();
+          if (text != null) {
+            buffer.write(text);
+          }
+        }
+      }
+    }
+
+    return buffer.toString();
   }
 
   void close() {

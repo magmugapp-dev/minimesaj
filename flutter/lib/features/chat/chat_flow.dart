@@ -14,7 +14,6 @@ import 'package:magmug/features/profile/widgets/profile_overview_widgets.dart'
 import 'package:path/path.dart' as path;
 import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 const Duration _conversationReadReceiptCooldown = Duration(seconds: 5);
 const int _conversationMessagePageSize = 50;
@@ -423,8 +422,9 @@ Future<int> _loadChatThemeIndex(int peerId) async {
     return cached;
   }
 
-  final prefs = await SharedPreferences.getInstance();
-  final stored = prefs.getInt(_chatThemePreferenceKey(peerId));
+  final box = await AppHiveBoxes.preferences();
+  final storedRaw = box.get(_chatThemePreferenceKey(peerId));
+  final stored = storedRaw is num ? storedRaw.toInt() : null;
   final value = stored != null && stored >= 0 && stored < _chatThemes.length
       ? stored
       : _defaultChatThemeIndex(peerId);
@@ -437,8 +437,8 @@ Future<void> _saveChatThemeIndex(int peerId, int index) async {
     return;
   }
   _chatThemeSelectionCache[peerId] = index;
-  final prefs = await SharedPreferences.getInstance();
-  await prefs.setInt(_chatThemePreferenceKey(peerId), index);
+  final box = await AppHiveBoxes.preferences();
+  await box.put(_chatThemePreferenceKey(peerId), index);
 }
 
 List<AppProfilePhoto> _galleryMediaForProfile(

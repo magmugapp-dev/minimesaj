@@ -112,11 +112,11 @@ class _HomeSearchScreenState extends ConsumerState<HomeSearchScreen> {
     if (RegExp(r'^\d+$').hasMatch(query)) {
       final api = AppAuthApi();
       try {
-        final profile = await api.fetchInfluencerProfile(
+        final profile = await api.fetchAiProfile(
           token,
           userId: int.parse(query),
         );
-        return _SearchPayload.influencer(profile);
+        return _SearchPayload.aiProfile(profile);
       } on ApiException catch (error) {
         return _SearchPayload.empty(error.message);
       } finally {
@@ -238,7 +238,7 @@ class _HomeSearchScreenState extends ConsumerState<HomeSearchScreen> {
         ),
         subtitle: AppRuntimeText.instance.t(
           'home.search.idle.subtitle',
-          'Profil ID ile influencer profili, metin ile kendi sohbet mesajlarini ara.',
+          'Profil ID ile AI profili, metin ile kendi sohbet mesajlarini ara.',
         ),
       );
     }
@@ -293,7 +293,7 @@ class _HomeSearchScreenState extends ConsumerState<HomeSearchScreen> {
             ),
             subtitle: AppRuntimeText.instance.t(
               'home.search.empty.subtitle',
-              '"{query}" icin eslesen influencer ID veya mesaj yok.',
+              '"{query}" icin eslesen AI profil ID veya mesaj yok.',
               args: {'query': query},
             ),
           );
@@ -307,20 +307,20 @@ class _HomeSearchScreenState extends ConsumerState<HomeSearchScreen> {
 
 @immutable
 class _SearchPayload {
-  final AppMatchCandidate? influencer;
+  final AppMatchCandidate? aiProfile;
   final List<ChatLocalMessageSearchResult> messages;
   final String? errorMessage;
   final String? emptyMessage;
 
   const _SearchPayload({
-    this.influencer,
+    this.aiProfile,
     this.messages = const <ChatLocalMessageSearchResult>[],
     this.errorMessage,
     this.emptyMessage,
   });
 
-  factory _SearchPayload.influencer(AppMatchCandidate profile) {
-    return _SearchPayload(influencer: profile);
+  factory _SearchPayload.aiProfile(AppMatchCandidate profile) {
+    return _SearchPayload(aiProfile: profile);
   }
 
   factory _SearchPayload.messages(List<ChatLocalMessageSearchResult> messages) {
@@ -337,7 +337,7 @@ class _SearchPayload {
 
   bool get isEmpty =>
       errorMessage == null &&
-      influencer == null &&
+      aiProfile == null &&
       messages.isEmpty &&
       emptyMessage == null;
 }
@@ -351,7 +351,7 @@ class _SearchResultsList extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final itemCount =
-        (payload.influencer == null ? 0 : 1) + payload.messages.length;
+        (payload.aiProfile == null ? 0 : 1) + payload.messages.length;
 
     return ListView.separated(
       physics: const BouncingScrollPhysics(),
@@ -379,12 +379,12 @@ class _SearchResultsList extends StatelessWidget {
         }
 
         final resultIndex = index - 1;
-        final influencer = payload.influencer;
-        if (influencer != null && resultIndex == 0) {
-          return _InfluencerResultRow(profile: influencer);
+        final aiProfile = payload.aiProfile;
+        if (aiProfile != null && resultIndex == 0) {
+          return _AiProfileResultRow(profile: aiProfile);
         }
 
-        final messageIndex = resultIndex - (influencer == null ? 0 : 1);
+        final messageIndex = resultIndex - (aiProfile == null ? 0 : 1);
         return _MessageResultRow(
           result: payload.messages[messageIndex],
           query: query,
@@ -394,10 +394,10 @@ class _SearchResultsList extends StatelessWidget {
   }
 }
 
-class _InfluencerResultRow extends StatelessWidget {
+class _AiProfileResultRow extends StatelessWidget {
   final AppMatchCandidate profile;
 
-  const _InfluencerResultRow({required this.profile});
+  const _AiProfileResultRow({required this.profile});
 
   @override
   Widget build(BuildContext context) {
@@ -426,8 +426,8 @@ class _InfluencerResultRow extends StatelessWidget {
         leading: HomeAvatarCircle(name: profile.displayName, size: 44),
         title: profile.displayName,
         badge: AppRuntimeText.instance.t(
-          'home.search.result.influencer',
-          'Influencer profil sonucu',
+          'home.search.result.ai_profile',
+          'AI profil sonucu',
         ),
         subtitle: handle.isEmpty
             ? AppRuntimeText.instance.t(

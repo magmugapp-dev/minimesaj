@@ -28,10 +28,6 @@ Route::prefix('mobile')->middleware('throttle:api')->group(function () {
     Route::get('config', [\App\Http\Controllers\Mobile\MobileController::class, 'config']);
 });
 
-if (app()->environment('testing')) {
-    Route::get('hesaplar/{hesap}/giden-kuyruk', [\App\Http\Controllers\Instagram\MesajController::class, 'gidenKuyruk']);
-}
-
 // ── Kimlik Doğrulama (Public) ────────────────────────────────────────
 Route::prefix('auth')->middleware('throttle:auth')->group(function () {
     Route::post('kayit', [\App\Http\Controllers\Kimlik\KimlikController::class, 'kayit']);
@@ -59,6 +55,12 @@ Route::middleware(['auth:sanctum', 'throttle:api'])->group(function () {
         Route::post('sync', [\App\Http\Controllers\Mobile\MobileController::class, 'sync']);
         Route::get('conversations/{conversation}/messages', [\App\Http\Controllers\Mobile\MobileController::class, 'messages']);
         Route::post('conversations/{conversation}/messages', [\App\Http\Controllers\Mobile\MobileController::class, 'sendMessage']);
+        Route::get('ai/bootstrap', [\App\Http\Controllers\Mobile\AiMobileController::class, 'bootstrap']);
+        Route::get('ai/pending-turns', [\App\Http\Controllers\Mobile\AiMobileController::class, 'pendingTurns']);
+        Route::get('ai/conversations/{conversation}/turn-context', [\App\Http\Controllers\Mobile\AiMobileController::class, 'turnContext']);
+        Route::post('ai/gemini/stream', [\App\Http\Controllers\Mobile\AiMobileController::class, 'geminiStream'])->middleware('throttle:ai');
+        Route::post('ai/conversations/{conversation}/reply', [\App\Http\Controllers\Mobile\AiMobileController::class, 'reply']);
+        Route::post('ai/violations', [\App\Http\Controllers\Mobile\AiMobileController::class, 'violation']);
         Route::post('uploads', [\App\Http\Controllers\Dating\MedyaController::class, 'yukle']);
     });
 
@@ -71,7 +73,6 @@ Route::middleware(['auth:sanctum', 'throttle:api'])->group(function () {
         Route::post('eslesme-gec/{kullanici}', [\App\Http\Controllers\Dating\EslesmeMerkeziController::class, 'gec']);
         Route::post('eslesme-sohbet/{kullanici}', [\App\Http\Controllers\Dating\EslesmeMerkeziController::class, 'sohbetBaslat']);
         Route::get('profil', [\App\Http\Controllers\Dating\ProfilController::class, 'goster']);
-        Route::get('influencer-profile/{kullanici}', [\App\Http\Controllers\Dating\ProfilController::class, 'influencer']);
         Route::get('profil/{kullanici}', [\App\Http\Controllers\Dating\ProfilController::class, 'kullanici']);
         Route::patch('profil', [\App\Http\Controllers\Dating\ProfilController::class, 'guncelle']);
 
@@ -107,26 +108,6 @@ Route::middleware(['auth:sanctum', 'throttle:api'])->group(function () {
         Route::patch('bildirimler/{bildirim}/oku', [\App\Http\Controllers\Dating\BildirimController::class, 'tekOku']);
     });
 
-    // ── Instagram (Chrome Eklentisi) ─────────────────────────────────
-    Route::prefix('instagram')->group(function () {
-        Route::get('hesaplar', [\App\Http\Controllers\Instagram\HesapController::class, 'listele']);
-        Route::post('hesaplar', [\App\Http\Controllers\Instagram\HesapController::class, 'bagla']);
-        Route::delete('hesaplar/{hesap}', [\App\Http\Controllers\Instagram\HesapController::class, 'kaldir']);
-
-        Route::get('hesaplar/{hesap}/kisiler', [\App\Http\Controllers\Instagram\KisiController::class, 'listele']);
-        Route::post('hesaplar/{hesap}/kisiler/senkronize', [\App\Http\Controllers\Instagram\KisiController::class, 'senkronize']);
-
-        Route::post('hesaplar/{hesap}/mesajlar', [\App\Http\Controllers\Instagram\MesajController::class, 'alVeKaydet']);
-        Route::get('hesaplar/{hesap}/giden-kuyruk', [\App\Http\Controllers\Instagram\MesajController::class, 'gidenKuyruk']);
-        Route::patch('mesajlar/{mesaj}/gonderildi', [\App\Http\Controllers\Instagram\MesajController::class, 'gonderildiIsaretle']);
-    });
-
-    // ── Yapay Zeka ───────────────────────────────────────────────────
-    Route::prefix('ai')->middleware('throttle:ai')->group(function () {
-        Route::get('ayarlar', [\App\Http\Controllers\YapayZeka\AiAyarController::class, 'goster']);
-        Route::put('ayarlar', [\App\Http\Controllers\YapayZeka\AiAyarController::class, 'guncelle']);
-    });
-
     // ── Ödeme & Puan ─────────────────────────────────────────────────
     Route::prefix('odeme')->group(function () {
         Route::get('bakiye', [\App\Http\Controllers\Odeme\PuanController::class, 'bakiye']);
@@ -149,3 +130,4 @@ Route::middleware(['auth:sanctum', 'throttle:api'])->group(function () {
         Route::patch('sikayetler/{sikayet}', [\App\Http\Controllers\Yonetim\SikayetYonetimController::class, 'guncelle']);
     });
 });
+

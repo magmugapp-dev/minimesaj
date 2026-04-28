@@ -4,7 +4,6 @@ namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Models\Eslesme;
-use App\Models\InstagramHesap;
 use App\Models\Mesaj;
 use App\Models\Odeme;
 use App\Models\Sikayet;
@@ -24,7 +23,6 @@ class PanoController extends Controller
             'toplam_gelir' => Odeme::where('durum', 'basarili')->sum('tutar'),
             'cevrimici_gercek' => User::where('cevrim_ici_mi', true)->where('hesap_tipi', 'user')->count(),
             'cevrimici_ai' => User::where('cevrim_ici_mi', true)->where('hesap_tipi', 'ai')->count(),
-            'instagram_hesaplar' => InstagramHesap::count(),
         ];
 
         $sonSikayetler = Sikayet::query()

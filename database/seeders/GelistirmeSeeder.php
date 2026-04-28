@@ -2,7 +2,6 @@
 
 // namespace Database\Seeders;
 
-// use App\Models\AiAyar;
 // use App\Models\Ayar;
 // use App\Models\AbonelikPaketi;
 // use App\Models\Eslesme;
@@ -15,7 +14,6 @@
 // use App\Models\UserFotografi;
 // use App\Notifications\YeniEslesme;
 // use App\Notifications\YeniMesaj;
-// use App\Services\YapayZeka\GeminiSaglayici;
 // use App\Support\MediaUrl;
 // use Illuminate\Database\Seeder;
 // use Illuminate\Support\Collection;
@@ -78,7 +76,6 @@
 //             $ton = fake()->randomElement(['samimi', 'resmi', 'esprili', 'romantik']);
 //             $stil = fake()->randomElement(['kisa', 'orta', 'uzun']);
 
-//             AiAyar::updateOrCreate([
 //                 'user_id' => $ai->id,
 //             ], [
 //                 'aktif_mi' => true,
@@ -149,7 +146,6 @@
 //                 'user_id' => $testUser->id,
 //                 'eslesen_user_id' => $ai->id,
 //                 'eslesme_turu' => 'otomatik',
-//                 'eslesme_kaynagi' => 'yapay_zeka',
 //                 'durum' => 'aktif',
 //                 'baslatan_user_id' => $testUser->id,
 //             ]);

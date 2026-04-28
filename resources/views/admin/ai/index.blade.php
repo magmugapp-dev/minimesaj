@@ -1,228 +1,91 @@
 @extends('admin.layout.ana')
 
-@section('baslik', 'AI Yönetimi')
+@section('baslik', 'AI Karakterler')
 
 @section('icerik')
-    {{-- Özet Kartları --}}
-    <div class="mb-6 grid grid-cols-2 gap-4 sm:grid-cols-4 p-6 ">
-        <div class="rounded-lg bg-white p-4 shadow">
-            <p class="text-2xl font-bold text-gray-900">{{ number_format($istatistikler['toplam']) }}</p>
-            <p class="text-xs text-gray-500">Toplam AI</p>
-        </div>
-        <div class="rounded-lg bg-white p-4 shadow">
-            <p class="text-2xl font-bold text-green-600">{{ number_format($istatistikler['aktif']) }}</p>
-            <p class="text-xs text-gray-500">Aktif AI</p>
-        </div>
-        <div class="rounded-lg bg-white p-4 shadow">
-            <p class="text-2xl font-bold text-blue-600">{{ number_format($istatistikler['gemini']) }}</p>
-            <p class="text-xs text-gray-500">Gemini</p>
-        </div>
-        <div class="rounded-lg bg-white p-4 shadow">
-            <p class="text-2xl font-bold text-purple-600">{{ number_format($istatistikler['openai']) }}</p>
-            <p class="text-xs text-gray-500">OpenAI</p>
-        </div>
-    </div>
-
-    {{-- Filtre + Toplu İşlem --}}
-    <div class="mb-6 rounded-lg bg-white p-4 shadow ">
-        <div class="flex flex-wrap items-center justify-between gap-3">
-            <form method="GET" action="{{ route('admin.ai.index') }}" class="flex flex-1 flex-wrap items-center gap-3">
-                <div class="relative flex-1 min-w-[200px] max-w-sm">
-                    <svg class="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" fill="none"
-                        viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
-                        <path stroke-linecap="round" stroke-linejoin="round"
-                            d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
-                    </svg>
-                    <input type="text" name="arama" value="{{ request('arama') }}" placeholder="AI adı ara..."
-                        class="w-full rounded-lg border border-gray-300 py-2 pl-10 pr-4 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500">
+    <div class="space-y-6">
+        <section class="rounded-lg border border-gray-200 bg-white p-6 shadow">
+            <div class="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                <div>
+                    <div class="text-xs font-semibold uppercase tracking-widest text-indigo-600">Flutter AI</div>
+                    <h1 class="mt-1 text-3xl font-bold text-gray-900">AI karakterler</h1>
+                    <p class="mt-2 text-sm text-gray-500">Laravel karakter, prompt, zamanlama ve relay'i yonetir; cevap uretimi Flutter'da calisir.</p>
                 </div>
-
-                <select name="durum"
-                    class="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500">
-                    <option value="">Tüm Durumlar</option>
-                    <option value="aktif" {{ request('durum') === 'aktif' ? 'selected' : '' }}>Aktif</option>
-                    <option value="pasif" {{ request('durum') === 'pasif' ? 'selected' : '' }}>Pasif</option>
-                    <option value="yasakli" {{ request('durum') === 'yasakli' ? 'selected' : '' }}>Yasaklı</option>
-                </select>
-
-                <select name="aktif"
-                    class="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500">
-                    <option value="">AI Durumu</option>
-                    <option value="1" {{ request('aktif') === '1' ? 'selected' : '' }}>AI Aktif</option>
-                    <option value="0" {{ request('aktif') === '0' ? 'selected' : '' }}>AI Pasif</option>
-                </select>
-
-                <select name="saglayici"
-                    class="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500">
-                    <option value="">Tüm Sağlayıcılar</option>
-                    <option value="gemini" {{ request('saglayici') === 'gemini' ? 'selected' : '' }}>Gemini</option>
-                    <option value="openai" {{ request('saglayici') === 'openai' ? 'selected' : '' }}>OpenAI</option>
-                </select>
-
-                <button type="submit"
-                    class="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700">Filtrele</button>
-                <a href="{{ route('admin.ai.index') }}"
-                    class="rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-600 hover:bg-gray-50">Temizle</a>
-            </form>
-
-            {{-- Toplu işlem --}}
-            <div class="flex flex-wrap gap-2" x-data>
-                <a href="{{ route('admin.ai.ekle') }}"
-                    class="rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white hover:bg-indigo-700">
-                    + Tekli Ekle
-                </a>
-                <a href="{{ route('admin.ai.json-ekle') }}"
-                    class="rounded-lg border border-indigo-200 px-3 py-2 text-sm font-medium text-indigo-600 hover:bg-indigo-50">
-                    JSON Toplu Ekle
-                </a>
-                <form method="POST" action="{{ route('admin.ai.toplu-durum') }}">
-                    @csrf
-                    <input type="hidden" name="islem" value="aktif_et">
-                    <button type="submit"
-                        @click="if(!confirm('Tüm AI kullanıcıları aktifleştirmek istediğinize emin misiniz?')) $event.preventDefault()"
-                        class="rounded-lg border border-green-200 px-3 py-2 text-sm font-medium text-green-600 hover:bg-green-50">
-                        Tümünü Aktifleştir
-                    </button>
-                </form>
-                <form method="POST" action="{{ route('admin.ai.toplu-durum') }}">
-                    @csrf
-                    <input type="hidden" name="islem" value="pasif_et">
-                    <button type="submit"
-                        @click="if(!confirm('Tüm AI kullanıcıları pasifleştirmek istediğinize emin misiniz?')) $event.preventDefault()"
-                        class="rounded-lg border border-red-200 px-3 py-2 text-sm font-medium text-red-600 hover:bg-red-50">
-                        Tümünü Pasifleştir
-                    </button>
-                </form>
+                <div class="flex flex-wrap gap-2">
+                    <a href="{{ route('admin.ai.ekle') }}" class="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white">Yeni karakter</a>
+                    <a href="{{ route('admin.ai.import') }}" class="rounded-lg border border-gray-300 px-4 py-2 text-sm font-semibold text-gray-700">ZIP import</a>
+                </div>
             </div>
-        </div>
-    </div>
+        </section>
 
-    {{-- Tablo --}}
-    <div class="overflow-hidden rounded-lg bg-white shadow">
-        <div class="overflow-x-auto">
-            <table class="min-w-full divide-y divide-gray-200">
-                <thead class="bg-gray-50">
-                    <tr>
-                        <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">AI
-                            Kullanıcı</th>
-                        <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">
-                            Sağlayıcı</th>
-                        <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">Kişilik
-                        </th>
-                        <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">AI
-                            Durumu</th>
-                        <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">Model
-                        </th>
-                        <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">Hesap
-                        </th>
-                        <th class="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider text-gray-500">İşlem
-                        </th>
-                    </tr>
-                </thead>
-                <tbody class="divide-y divide-gray-100">
-                    @forelse ($aiKullanicilar as $ai)
-                        <tr class="hover:bg-gray-50 transition-colors">
-                            <td class="whitespace-nowrap px-4 py-3">
-                                <div class="flex items-center gap-3">
-                                    <div
-                                        class="flex h-9 w-9 items-center justify-center rounded-full bg-purple-100 text-sm font-bold text-purple-700">
-                                        {{ mb_substr($ai->ad, 0, 1) }}
-                                    </div>
-                                    <div>
-                                        <p class="text-sm font-medium text-gray-900">{{ $ai->ad }}
-                                            {{ $ai->soyad }}</p>
-                                        <p class="text-xs text-gray-500">{{ '@' . $ai->kullanici_adi }}</p>
-                                    </div>
-                                </div>
-                            </td>
-                            <td class="whitespace-nowrap px-4 py-3">
-                                @if ($ai->aiAyar?->saglayici_tipi === 'gemini')
-                                    <span
-                                        class="inline-flex items-center rounded-full bg-blue-100 px-2.5 py-0.5 text-xs font-medium text-blue-700">Gemini</span>
-                                @elseif ($ai->aiAyar?->saglayici_tipi === 'openai')
-                                    <span
-                                        class="inline-flex items-center rounded-full bg-green-100 px-2.5 py-0.5 text-xs font-medium text-green-700">OpenAI</span>
-                                @else
-                                    <span class="text-xs text-gray-400">—</span>
-                                @endif
-                            </td>
-                            <td class="whitespace-nowrap px-4 py-3 text-sm text-gray-700">
-                                {{ $ai->aiAyar?->kisilik_tipi ?? '—' }}
-                            </td>
-                            <td class="whitespace-nowrap px-4 py-3">
-                                @if ($ai->aiAyar?->aktif_mi)
-                                    <span
-                                        class="inline-flex items-center gap-1 rounded-full bg-green-100 px-2.5 py-0.5 text-xs font-medium text-green-700">
-                                        <span class="h-1.5 w-1.5 rounded-full bg-green-500"></span> Aktif
-                                    </span>
-                                @else
-                                    <span
-                                        class="inline-flex items-center gap-1 rounded-full bg-gray-100 px-2.5 py-0.5 text-xs font-medium text-gray-500">
-                                        <span class="h-1.5 w-1.5 rounded-full bg-gray-400"></span> Pasif
-                                    </span>
-                                @endif
-                            </td>
-                            <td class="whitespace-nowrap px-4 py-3 text-xs font-mono text-gray-500">
-                                {{ $ai->aiAyar?->model_adi ?? '—' }}
-                            </td>
-                            <td class="whitespace-nowrap px-4 py-3">
-                                @if ($ai->hesap_durumu === 'aktif')
-                                    <span class="text-xs font-medium text-green-600">Aktif</span>
-                                @elseif ($ai->hesap_durumu === 'pasif')
-                                    <span class="text-xs font-medium text-yellow-600">Pasif</span>
-                                @else
-                                    <span class="text-xs font-medium text-red-600">Yasaklı</span>
-                                @endif
-                            </td>
-                            <td class="whitespace-nowrap px-4 py-3 text-right">
-                                <div class="flex items-center justify-end gap-1">
-                                    <a href="{{ route('admin.ai.goster', $ai) }}"
-                                        class="rounded-lg p-1.5 text-gray-400 hover:bg-gray-100 hover:text-indigo-600"
-                                        title="Detay">
-                                        <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke-width="2"
-                                            stroke="currentColor">
-                                            <path stroke-linecap="round" stroke-linejoin="round"
-                                                d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" />
-                                            <path stroke-linecap="round" stroke-linejoin="round"
-                                                d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                                        </svg>
-                                    </a>
-                                    <a href="{{ route('admin.ai.duzenle', $ai) }}"
-                                        class="rounded-lg p-1.5 text-gray-400 hover:bg-gray-100 hover:text-indigo-600"
-                                        title="Düzenle">
-                                        <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke-width="2"
-                                            stroke="currentColor">
-                                            <path stroke-linecap="round" stroke-linejoin="round"
-                                                d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10" />
-                                        </svg>
-                                    </a>
-                                </div>
-                            </td>
-                        </tr>
-                    @empty
-                        <tr>
-                            <td colspan="7" class="px-4 py-12 text-center text-sm text-gray-500">
-                                <svg class="mx-auto mb-3 h-10 w-10 text-gray-300" fill="none" viewBox="0 0 24 24"
-                                    stroke-width="1.5" stroke="currentColor">
-                                    <path stroke-linecap="round" stroke-linejoin="round"
-                                        d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z" />
-                                </svg>
-                                AI kullanıcı bulunamadı.
-                            </td>
-                        </tr>
-                    @endforelse
-                </tbody>
-            </table>
-        </div>
-
-        @if ($aiKullanicilar->hasPages())
-            <div class="border-t border-gray-200 px-4 py-3">
-                {{ $aiKullanicilar->links() }}
-            </div>
+        @if (session('basari'))
+            <div class="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-700">{{ session('basari') }}</div>
         @endif
 
-        <div class="border-t border-gray-100 bg-gray-50 px-4 py-2.5 text-xs text-gray-500">
-            Toplam {{ number_format($aiKullanicilar->total()) }} AI kullanıcı
-        </div>
+        <section class="rounded-lg border border-gray-200 bg-white shadow">
+            <div class="border-b border-gray-200 px-5 py-4">
+                <h2 class="text-lg font-semibold text-gray-900">Karakter listesi</h2>
+            </div>
+            <div class="overflow-x-auto">
+                <table class="min-w-full divide-y divide-gray-200 text-sm">
+                    <thead class="bg-gray-50 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">
+                        <tr>
+                            <th class="px-5 py-3">Karakter</th>
+                            <th class="px-5 py-3">Dil</th>
+                            <th class="px-5 py-3">Model</th>
+                            <th class="px-5 py-3">Durum</th>
+                            <th class="px-5 py-3"></th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-gray-100 bg-white">
+                        @forelse ($characters as $character)
+                            <tr>
+                                <td class="px-5 py-4">
+                                    <div class="font-semibold text-gray-900">{{ $character->display_name ?: $character->character_id }}</div>
+                                    <div class="text-xs text-gray-500">{{ $character->character_id }} · v{{ $character->character_version }}</div>
+                                </td>
+                                <td class="px-5 py-4">{{ $character->primary_language_name }} ({{ $character->primary_language_code }})</td>
+                                <td class="px-5 py-4">{{ $character->model_name }}</td>
+                                <td class="px-5 py-4">
+                                    <span class="rounded-full px-3 py-1 text-xs font-semibold {{ $character->active ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-100 text-gray-600' }}">
+                                        {{ $character->active ? 'Aktif' : 'Pasif' }}
+                                    </span>
+                                </td>
+                                <td class="px-5 py-4 text-right">
+                                    <a href="{{ route('admin.ai.duzenle', $character) }}" class="text-sm font-semibold text-indigo-600">Duzenle</a>
+                                </td>
+                            </tr>
+                        @empty
+                            <tr><td colspan="5" class="px-5 py-8 text-center text-gray-500">Henüz AI karakter yok.</td></tr>
+                        @endforelse
+                    </tbody>
+                </table>
+            </div>
+            <div class="px-5 py-4">{{ $characters->links() }}</div>
+        </section>
+
+        <section class="grid gap-6 lg:grid-cols-2">
+            <form method="POST" action="{{ route('admin.ai.prompt.update') }}" class="rounded-lg border border-gray-200 bg-white p-5 shadow">
+                @csrf
+                <h2 class="text-lg font-semibold text-gray-900">Global prompt</h2>
+                <input name="version" value="{{ old('version', $prompt?->version ?? 'global-v1') }}" class="mt-4 w-full rounded-lg border-gray-300 text-sm" placeholder="Versiyon">
+                <textarea name="prompt_xml" rows="12" class="mt-3 w-full rounded-lg border-gray-300 font-mono text-xs">{{ old('prompt_xml', $prompt?->prompt_xml ?? '') }}</textarea>
+                <button class="mt-3 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white">Prompt kaydet</button>
+            </form>
+
+            <form method="POST" action="{{ route('admin.ai.thresholds.update') }}" class="rounded-lg border border-gray-200 bg-white p-5 shadow">
+                @csrf
+                <h2 class="text-lg font-semibold text-gray-900">Blok esikleri</h2>
+                @php($defaults = ['absolute_violation' => 1, 'underage_user' => 1, 'abuse' => 2, 'harassment' => 3, 'escalation_max' => 3])
+                @foreach ($defaults as $category => $fallback)
+                    @php($current = $thresholds->firstWhere('category', $category)?->threshold ?? $fallback)
+                    <label class="mt-4 block text-sm font-medium text-gray-700">
+                        {{ $category }}
+                        <input type="number" name="thresholds[{{ $category }}]" value="{{ $current }}" min="1" max="99" class="mt-1 w-full rounded-lg border-gray-300 text-sm">
+                    </label>
+                @endforeach
+                <button class="mt-4 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white">Esikleri kaydet</button>
+            </form>
+        </section>
     </div>
 @endsection

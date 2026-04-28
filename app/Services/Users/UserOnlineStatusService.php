@@ -2,13 +2,10 @@
 
 namespace App\Services\Users;
 
-use App\Models\AiAyar;
 use App\Models\User;
-use App\Models\UserAvailabilitySchedule;
 use Carbon\CarbonInterface;
 use DateTimeZone;
 use Illuminate\Support\Carbon;
-use Illuminate\Support\Collection;
 use Traversable;
 
 class UserOnlineStatusService
@@ -19,16 +16,50 @@ class UserOnlineStatusService
         bool $withNextActiveAt = true,
     ): array {
         $reference = $at ? Carbon::instance($at) : now();
-        $context = $this->context($user);
-        $state = $this->resolveFromContext($context, $reference);
+        $character = $user->relationLoaded('aiCharacter')
+            ? $user->aiCharacter
+            : ($user->hesap_tipi === 'ai' ? $user->aiCharacter()->first() : null);
 
-        $state['timezone'] = $context['timezone'];
-        $state['local_now'] = Carbon::instance($reference)->setTimezone($context['timezone']);
-        $state['next_active_at'] = $withNextActiveAt && !$state['is_online']
-            ? $this->nextActiveAtFromContext($context, $reference)
-            : null;
+        if ($user->hesap_tipi !== 'ai' || !$character) {
+            return [
+                'is_online' => (bool) $user->cevrim_ici_mi,
+                'reason' => 'default',
+                'active_time' => (bool) $user->cevrim_ici_mi,
+                'timezone' => config('app.timezone'),
+                'local_now' => Carbon::instance($reference),
+                'next_active_at' => null,
+            ];
+        }
 
-        return $state;
+        $json = $character->character_json ?? [];
+        $schedule = is_array($json) ? ($json['schedule'] ?? []) : [];
+        $timezone = $this->safeTimezone((string) ($schedule['timezone'] ?? config('app.timezone')));
+        $local = Carbon::instance($reference)->setTimezone($timezone);
+        $active = (bool) $character->active && $user->hesap_durumu === 'aktif';
+        $reason = 'default';
+
+        if ($active && $this->insideSleepWindow($schedule, $local)) {
+            $active = false;
+            $reason = 'sleep';
+        }
+
+        $windowState = $this->availabilityState($schedule['availability_schedules'] ?? [], $local);
+        if ($windowState === 'passive') {
+            $active = false;
+            $reason = 'passive_schedule';
+        } elseif ($windowState === 'active' && $character->active && $user->hesap_durumu === 'aktif') {
+            $active = true;
+            $reason = 'active_schedule';
+        }
+
+        return [
+            'is_online' => $active,
+            'reason' => $reason,
+            'active_time' => $active,
+            'timezone' => $timezone,
+            'local_now' => $local,
+            'next_active_at' => $withNextActiveAt && !$active ? $this->nextActiveAt($schedule, $local) : null,
+        ];
     }
 
     public function sync(User $user, ?CarbonInterface $at = null): array
@@ -44,20 +75,16 @@ class UserOnlineStatusService
         array $state,
         ?CarbonInterface $at = null,
     ): void {
-        if ($user->hesap_tipi !== 'ai' && !$user->relationLoaded('availabilitySchedules')) {
+        if ($user->hesap_tipi !== 'ai') {
             return;
         }
 
         $online = (bool) ($state['is_online'] ?? false);
-
         if ((bool) $user->cevrim_ici_mi === $online) {
             return;
         }
 
-        $payload = [
-            'cevrim_ici_mi' => $online,
-        ];
-
+        $payload = ['cevrim_ici_mi' => $online];
         if (!$online && $user->cevrim_ici_mi) {
             $payload['son_gorulme_tarihi'] = $at ? Carbon::instance($at) : now();
         }
@@ -78,236 +105,95 @@ class UserOnlineStatusService
         }
     }
 
-    private function context(User $user): array
+    private function insideSleepWindow(array $schedule, Carbon $local): bool
     {
-        $aiAyar = $user->relationLoaded('aiAyar')
-            ? $user->aiAyar
-            : $user->aiAyar()->first();
+        $start = $local->isWeekend()
+            ? ($schedule['sleep_start_weekend'] ?? $schedule['sleep_start_weekday'] ?? null)
+            : ($schedule['sleep_start_weekday'] ?? null);
+        $end = $local->isWeekend()
+            ? ($schedule['sleep_end_weekend'] ?? $schedule['sleep_end_weekday'] ?? null)
+            : ($schedule['sleep_end_weekday'] ?? null);
 
-        $schedules = $user->relationLoaded('availabilitySchedules')
-            ? $user->availabilitySchedules
-            : $user->availabilitySchedules()->get();
-
-        return [
-            'user' => $user,
-            'ai_ayar' => $aiAyar,
-            'schedules' => $schedules instanceof Collection ? $schedules : collect($schedules),
-            'timezone' => $this->resolveTimezone($aiAyar),
-        ];
-    }
-
-    private function resolveFromContext(array $context, CarbonInterface $reference): array
-    {
-        /** @var User $user */
-        $user = $context['user'];
-        /** @var AiAyar|null $aiAyar */
-        $aiAyar = $context['ai_ayar'];
-        /** @var Collection<int, UserAvailabilitySchedule> $schedules */
-        $schedules = $context['schedules'];
-        $timezone = $context['timezone'];
-
-        if ($user->hesap_durumu !== 'aktif') {
-            return $this->statusPayload(false, 'default', false);
+        if (!$this->validTime($start) || !$this->validTime($end)) {
+            return false;
         }
 
-        $defaultState = $this->defaultState($user, $aiAyar, $reference, $timezone);
-        $localNow = Carbon::instance($reference)->setTimezone($timezone);
-        $matchingSchedules = $this->matchingSchedules($schedules, $localNow);
-
-        if ($matchingSchedules->contains(fn (UserAvailabilitySchedule $schedule) => $schedule->status === 'passive')) {
-            return $this->statusPayload(false, 'passive_schedule', false);
-        }
-
-        if ($matchingSchedules->contains(fn (UserAvailabilitySchedule $schedule) => $schedule->status === 'active')
-            && $this->canScheduleActivate($user, $aiAyar)) {
-            return $this->statusPayload(true, 'active_schedule', true);
-        }
-
-        return $defaultState;
-    }
-
-    private function defaultState(
-        User $user,
-        ?AiAyar $aiAyar,
-        CarbonInterface $reference,
-        string $timezone,
-    ): array {
-        if ($user->hesap_tipi !== 'ai') {
-            return $this->statusPayload((bool) $user->cevrim_ici_mi, 'default', (bool) $user->cevrim_ici_mi);
-        }
-
-        if (!$aiAyar) {
-            return $this->statusPayload((bool) $user->cevrim_ici_mi, 'default', (bool) $user->cevrim_ici_mi);
-        }
-
-        if (!$aiAyar->aktif_mi) {
-            return $this->statusPayload(false, 'default', false);
-        }
-
-        $sleepWindow = $this->currentSleepWindow($aiAyar, $reference, $timezone);
-
-        return $this->statusPayload($sleepWindow === null, 'default', $sleepWindow === null);
-    }
-
-    private function statusPayload(bool $isOnline, string $reason, bool $activeTime): array
-    {
-        return [
-            'is_online' => $isOnline,
-            'reason' => $reason,
-            'active_time' => $activeTime,
-        ];
-    }
-
-    private function matchingSchedules(Collection $schedules, CarbonInterface $localNow): Collection
-    {
-        return $schedules->filter(function (UserAvailabilitySchedule $schedule) use ($localNow): bool {
-            if ($schedule->recurrence_type === 'date') {
-                if (!$schedule->specific_date || $schedule->specific_date->toDateString() !== $localNow->toDateString()) {
-                    return false;
-                }
-            } elseif ($schedule->recurrence_type === 'weekly') {
-                if ($schedule->day_of_week === null || (int) $schedule->day_of_week !== (int) $localNow->dayOfWeekIso) {
-                    return false;
-                }
-            } else {
-                return false;
+        foreach ([$local->copy()->subDay(), $local->copy()] as $day) {
+            $sleepStart = $day->copy()->setTimeFromTimeString($start);
+            $sleepEnd = $day->copy()->setTimeFromTimeString($end);
+            if ($sleepEnd->lessThanOrEqualTo($sleepStart)) {
+                $sleepEnd->addDay();
             }
-
-            if (!$schedule->starts_at || !$schedule->ends_at) {
-                return false;
+            if ($local->greaterThanOrEqualTo($sleepStart) && $local->lessThan($sleepEnd)) {
+                return true;
             }
-
-            $start = $localNow->copy()->setTimeFromTimeString($schedule->starts_at);
-            $end = $localNow->copy()->setTimeFromTimeString($schedule->ends_at);
-
-            return $localNow->greaterThanOrEqualTo($start) && $localNow->lessThan($end);
-        })->values();
-    }
-
-    private function canScheduleActivate(User $user, ?AiAyar $aiAyar): bool
-    {
-        if ($user->hesap_tipi !== 'ai') {
-            return true;
         }
 
-        return (bool) $aiAyar?->aktif_mi;
+        return false;
     }
 
-    private function currentSleepWindow(
-        AiAyar $ayar,
-        CarbonInterface $reference,
-        string $timezone,
-    ): ?array {
-        $localNow = Carbon::instance($reference)->setTimezone($timezone);
+    private function availabilityState(mixed $windows, Carbon $local): ?string
+    {
+        if (!is_array($windows)) {
+            return null;
+        }
 
-        foreach ([$localNow->copy()->subDay(), $localNow->copy()] as $day) {
-            [$sleepStart, $sleepEnd] = $this->sleepHoursFor($ayar, $day);
-
-            if (!$sleepStart || !$sleepEnd) {
+        foreach ($windows as $window) {
+            if (!is_array($window) || ($window['date'] ?? null) !== $local->toDateString()) {
                 continue;
             }
-
-            $start = $day->copy()->setTimeFromTimeString($sleepStart);
-            $end = $day->copy()->setTimeFromTimeString($sleepEnd);
-
-            if ($end->lessThanOrEqualTo($start)) {
-                $end->addDay();
+            $start = $window['start_time'] ?? null;
+            $end = $window['end_time'] ?? null;
+            if (!$this->validTime($start) || !$this->validTime($end)) {
+                continue;
             }
-
-            if ($localNow->greaterThanOrEqualTo($start) && $localNow->lessThan($end)) {
-                return [
-                    'baslangic' => $start->copy()->setTimezone(config('app.timezone')),
-                    'bitis' => $end->copy()->setTimezone(config('app.timezone')),
-                ];
+            $rangeStart = $local->copy()->setTimeFromTimeString($start);
+            $rangeEnd = $local->copy()->setTimeFromTimeString($end);
+            if ($local->greaterThanOrEqualTo($rangeStart) && $local->lessThan($rangeEnd)) {
+                return in_array($window['status'] ?? '', ['active', 'passive'], true)
+                    ? $window['status']
+                    : null;
             }
         }
 
         return null;
     }
 
-    private function sleepHoursFor(AiAyar $ayar, CarbonInterface $day): array
+    private function nextActiveAt(array $schedule, Carbon $local): ?Carbon
     {
-        $isWeekend = $day->isWeekend();
-        $start = $isWeekend
-            ? ($ayar->hafta_sonu_uyku_baslangic ?: $ayar->uyku_baslangic)
-            : $ayar->uyku_baslangic;
-        $end = $isWeekend
-            ? ($ayar->hafta_sonu_uyku_bitis ?: $ayar->uyku_bitis)
-            : $ayar->uyku_bitis;
-
-        return [$start, $end];
-    }
-
-    private function nextActiveAtFromContext(array $context, CarbonInterface $reference): ?Carbon
-    {
-        /** @var User $user */
-        $user = $context['user'];
-        /** @var AiAyar|null $aiAyar */
-        $aiAyar = $context['ai_ayar'];
-        /** @var Collection<int, UserAvailabilitySchedule> $schedules */
-        $schedules = $context['schedules'];
-        $timezone = $context['timezone'];
-
-        $candidates = collect();
-
-        if ($user->hesap_tipi === 'ai' && $aiAyar?->aktif_mi) {
-            $sleepWindow = $this->currentSleepWindow($aiAyar, $reference, $timezone);
-
-            if ($sleepWindow !== null) {
-                $candidates->push(Carbon::instance($sleepWindow['bitis']));
-            }
+        $windows = $schedule['availability_schedules'] ?? [];
+        if (!is_array($windows)) {
+            return null;
         }
 
-        $localNow = Carbon::instance($reference)->setTimezone($timezone)->startOfDay();
-
-        foreach ($schedules as $schedule) {
-            if ($schedule->recurrence_type === 'date' && $schedule->specific_date) {
-                $day = Carbon::createFromFormat(
-                    'Y-m-d',
-                    $schedule->specific_date->toDateString(),
-                    $timezone,
-                )->startOfDay();
-                $candidates->push($day->copy()->setTimeFromTimeString($schedule->starts_at)->setTimezone(config('app.timezone')));
-                $candidates->push($day->copy()->setTimeFromTimeString($schedule->ends_at)->setTimezone(config('app.timezone')));
-                continue;
-            }
-
-            if ($schedule->recurrence_type === 'weekly' && $schedule->day_of_week !== null) {
-                foreach (range(0, 35) as $offset) {
-                    $day = $localNow->copy()->addDays($offset);
-
-                    if ((int) $day->dayOfWeekIso !== (int) $schedule->day_of_week) {
-                        continue;
-                    }
-
-                    $candidates->push($day->copy()->setTimeFromTimeString($schedule->starts_at)->setTimezone(config('app.timezone')));
-                    $candidates->push($day->copy()->setTimeFromTimeString($schedule->ends_at)->setTimezone(config('app.timezone')));
+        return collect($windows)
+            ->filter(fn ($window) => is_array($window)
+                && ($window['status'] ?? null) === 'active'
+                && $this->validTime($window['start_time'] ?? null)
+                && isset($window['date']))
+            ->map(function (array $window) use ($local): ?Carbon {
+                try {
+                    return Carbon::createFromFormat(
+                        'Y-m-d H:i',
+                        $window['date'].' '.substr((string) $window['start_time'], 0, 5),
+                        $local->timezone,
+                    )->setTimezone(config('app.timezone'));
+                } catch (\Throwable) {
+                    return null;
                 }
-            }
-        }
-
-        $sortedCandidates = $candidates
-            ->filter(fn ($candidate) => $candidate instanceof CarbonInterface && Carbon::instance($candidate)->greaterThan($reference))
-            ->map(fn (CarbonInterface $candidate) => Carbon::instance($candidate))
-            ->unique(fn (Carbon $candidate) => $candidate->toIso8601String())
+            })
+            ->filter(fn ($candidate) => $candidate instanceof Carbon && $candidate->greaterThan(now()))
             ->sortBy(fn (Carbon $candidate) => $candidate->getTimestamp())
-            ->values();
-
-        foreach ($sortedCandidates as $candidate) {
-            $state = $this->resolveFromContext($context, $candidate);
-
-            if ($state['is_online']) {
-                return $candidate;
-            }
-        }
-
-        return null;
+            ->first();
     }
 
-    private function resolveTimezone(?AiAyar $aiAyar): string
+    private function validTime(mixed $value): bool
     {
-        $timezone = $aiAyar?->saat_dilimi ?: config('app.timezone');
+        return is_string($value) && preg_match('/^\d{2}:\d{2}(:\d{2})?$/', $value) === 1;
+    }
 
+    private function safeTimezone(string $timezone): string
+    {
         try {
             return (new DateTimeZone($timezone))->getName();
         } catch (\Throwable) {

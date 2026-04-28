@@ -140,11 +140,8 @@ it('renders the language text management spa shell', function () {
     $this->actingAs($admin)
         ->get(route('admin.dil-metin.index'))
         ->assertOk()
-        ->assertSeeText('SPA Workspace')
-        ->assertSeeText('Keyler')
-        ->assertSeeText('Diller')
-        ->assertSeeText('Yasal Metinler')
-        ->assertSeeText('FAQ')
+        ->assertSee('Global ara...')
+        ->assertSee('dilMetinSpa')
         ->assertSeeText('Workspace bos');
 });
 

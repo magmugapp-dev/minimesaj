@@ -9,7 +9,6 @@ use App\Services\Kimlik\Sosyal\GoogleSosyalKimlikSaglayici;
 use App\Services\MesajServisi;
 use App\Services\Notifications\FcmService;
 use App\Services\PuanServisi;
-use App\Services\YapayZeka\AiServisi;
 use Illuminate\Support\ServiceProvider;
 use Illuminate\Support\Facades\View;
 
@@ -20,7 +19,6 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
-        $this->app->singleton(AiServisi::class);
         $this->app->singleton(EslesmeServisi::class);
         $this->app->singleton(MesajServisi::class);
         $this->app->singleton(FcmService::class);

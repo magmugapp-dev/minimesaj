@@ -72,7 +72,7 @@ class MobileController extends Controller
                 'discover_ttl_seconds' => 300,
                 'notification_ttl_seconds' => 60,
             ],
-            'user' => KullaniciResource::make($user->fresh()->load('aiAyar', 'availabilitySchedules', 'fotograflar'))->resolve($request),
+            'user' => KullaniciResource::make($user->fresh()->load('aiCharacter', 'fotograflar'))->resolve($request),
             'public_settings' => $this->publicSettingsPayload(),
             'match_summary' => $this->eslesmeServisi->merkez($user),
             'conversations' => SohbetResource::collection(
@@ -168,7 +168,7 @@ class MobileController extends Controller
             'server_time' => $now->toISOString(),
             'sync_token' => $hasMore ? $this->encodeSyncToken($nextState) : $checkpoint->toISOString(),
             'has_more' => $hasMore,
-            'user' => KullaniciResource::make($user->fresh()->load('aiAyar', 'availabilitySchedules', 'fotograflar'))->resolve($request),
+            'user' => KullaniciResource::make($user->fresh()->load('aiCharacter', 'fotograflar'))->resolve($request),
             'match_summary' => $this->eslesmeServisi->merkez($user),
             'conversations' => SohbetResource::collection($conversations)->resolve($request),
             'messages' => MesajResource::collection($messages)->resolve($request),
@@ -254,13 +254,9 @@ class MobileController extends Controller
             ->where('durum', 'aktif')
             ->with([
                 'eslesme.user:id,ad,kullanici_adi,profil_resmi,cevrim_ici_mi,dil,hesap_tipi',
-                'eslesme.user.aiPersonaProfile:ai_user_id,ana_dil_kodu,ana_dil_adi',
-                'eslesme.user.aiAyar:id,user_id,aktif_mi,saat_dilimi,uyku_baslangic,uyku_bitis,hafta_sonu_uyku_baslangic,hafta_sonu_uyku_bitis',
-                'eslesme.user.availabilitySchedules:id,user_id,recurrence_type,specific_date,day_of_week,starts_at,ends_at,status',
+                'eslesme.user.aiCharacter:id,user_id,character_id,character_version,schema_version,active,display_name,primary_language_code,primary_language_name,model_name,character_json',
                 'eslesme.eslesenUser:id,ad,kullanici_adi,profil_resmi,cevrim_ici_mi,dil,hesap_tipi',
-                'eslesme.eslesenUser.aiPersonaProfile:ai_user_id,ana_dil_kodu,ana_dil_adi',
-                'eslesme.eslesenUser.aiAyar:id,user_id,aktif_mi,saat_dilimi,uyku_baslangic,uyku_bitis,hafta_sonu_uyku_baslangic,hafta_sonu_uyku_bitis',
-                'eslesme.eslesenUser.availabilitySchedules:id,user_id,recurrence_type,specific_date,day_of_week,starts_at,ends_at,status',
+                'eslesme.eslesenUser.aiCharacter:id,user_id,character_id,character_version,schema_version,active,display_name,primary_language_code,primary_language_name,model_name,character_json',
                 'sonMesaj.gonderen:id,ad,kullanici_adi,profil_resmi,dil',
             ])
             ->withCount([
@@ -307,8 +303,7 @@ class MobileController extends Controller
             ->whereNotIn('id', $excludedIds)
             ->with([
                 'fotograflar',
-                'aiAyar:id,user_id,aktif_mi,saat_dilimi,uyku_baslangic,uyku_bitis,hafta_sonu_uyku_baslangic,hafta_sonu_uyku_bitis',
-                'availabilitySchedules:id,user_id,recurrence_type,specific_date,day_of_week,starts_at,ends_at,status',
+                'aiCharacter:id,user_id,character_id,character_version,schema_version,active,display_name,primary_language_code,primary_language_name,model_name,character_json',
             ])
             ->orderByRaw("CASE WHEN hesap_tipi = 'user' THEN 0 ELSE 1 END")
             ->inRandomOrder()
@@ -323,8 +318,7 @@ class MobileController extends Controller
             ->where('hesap_durumu', 'aktif')
             ->whereNotIn('id', $excludedIds)
             ->with([
-                'aiAyar:id,user_id,aktif_mi,saat_dilimi,uyku_baslangic,uyku_bitis,hafta_sonu_uyku_baslangic,hafta_sonu_uyku_bitis',
-                'availabilitySchedules:id,user_id,recurrence_type,specific_date,day_of_week,starts_at,ends_at,status',
+                'aiCharacter:id,user_id,character_id,character_version,schema_version,active,display_name,primary_language_code,primary_language_name,model_name,character_json',
             ])
             ->get(['id', 'hesap_tipi', 'hesap_durumu', 'cevrim_ici_mi', 'son_gorulme_tarihi']);
 

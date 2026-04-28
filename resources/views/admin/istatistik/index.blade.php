@@ -9,11 +9,11 @@
         $premiumOrani = $kullanici['toplam'] > 0 ? round(($kullanici['premium'] / $kullanici['toplam']) * 100) : 0;
         $eslesmeTamamlanmaOrani = $eslesme['toplam'] > 0 ? round(($eslesme['bitti'] / $eslesme['toplam']) * 100) : 0;
         $aiMesajOrani = $mesaj['toplam'] > 0 ? round(($mesaj['ai_uretilmis'] / $mesaj['toplam']) * 100) : 0;
-        $instagramBaglantiOrani =
-            $instagram['hesap_toplam'] > 0 ? round(($instagram['hesap_bagli'] / $instagram['hesap_toplam']) * 100) : 0;
+        $aiAktiflikOrani =
+            $aiOperasyon['hesap_toplam'] > 0 ? round(($aiOperasyon['hesap_bagli'] / $aiOperasyon['hesap_toplam']) * 100) : 0;
         $aiGorevBasariOrani =
-            $instagram['ai_gorev_toplam'] > 0
-                ? round(($instagram['ai_gorev_basarili'] / $instagram['ai_gorev_toplam']) * 100)
+            $aiOperasyon['ai_gorev_toplam'] > 0
+                ? round(($aiOperasyon['ai_gorev_basarili'] / $aiOperasyon['ai_gorev_toplam']) * 100)
                 : 0;
         $odemeBasariOrani =
             $finansal['toplam_islem'] > 0 ? round(($finansal['basarili_islem'] / $finansal['toplam_islem']) * 100) : 0;
@@ -90,14 +90,14 @@
             ],
             [
                 'avatar' => 'IG',
-                'title' => 'Instagram',
+                'title' => 'AI Operasyon',
                 'sub' =>
-                    number_format($instagram['hesap_bagli']) .
+                    number_format($aiOperasyon['hesap_bagli']) .
                     ' bağlı · ' .
-                    number_format($instagram['mesaj_bugun']) .
+                    number_format($aiOperasyon['mesaj_bugun']) .
                     ' bugün mesaj',
-                'status' => $instagramBaglantiOrani >= 70 ? 'Online' : 'İzle',
-                'class' => $instagramBaglantiOrani >= 70 ? 'board-status--success' : 'board-status--warn',
+                'status' => $aiAktiflikOrani >= 70 ? 'Online' : 'İzle',
+                'class' => $aiAktiflikOrani >= 70 ? 'board-status--success' : 'board-status--warn',
             ],
         ];
     @endphp
@@ -136,9 +136,9 @@
                         <p class="board-mini__meta">Başarılı işlem tutarı</p>
                     </div>
                     <div class="board-mini">
-                        <p class="board-mini__label">Bugün IG Mesaj</p>
-                        <p class="board-mini__value">{{ number_format($instagram['mesaj_bugun']) }}</p>
-                        <p class="board-mini__meta">Instagram günlük hacim</p>
+                        <p class="board-mini__label">Bugun AI Mesaj</p>
+                        <p class="board-mini__value">{{ number_format($aiOperasyon['mesaj_bugun']) }}</p>
+                        <p class="board-mini__meta">AI gunluk hacim</p>
                     </div>
                 </div>
             </section>
@@ -184,11 +184,11 @@
                 </div>
                 <div class="board-ring-card__stats">
                     <div class="board-ring-card__row"><span>Bağlı
-                            hesap</span><strong>{{ number_format($instagram['hesap_bagli']) }}</strong></div>
+                            hesap</span><strong>{{ number_format($aiOperasyon['hesap_bagli']) }}</strong></div>
                     <div class="board-ring-card__row"><span>Oto yanıt
-                            açık</span><strong>{{ number_format($instagram['hesap_oto_yanit']) }}</strong></div>
+                            açık</span><strong>{{ number_format($aiOperasyon['hesap_oto_yanit']) }}</strong></div>
                     <div class="board-ring-card__row"><span>AI görev
-                            toplam</span><strong>{{ number_format($instagram['ai_gorev_toplam']) }}</strong></div>
+                            toplam</span><strong>{{ number_format($aiOperasyon['ai_gorev_toplam']) }}</strong></div>
                 </div>
             </section>
         </div>
@@ -266,10 +266,10 @@
             <div class="board-stat board-stat--sky">
                 <div class="board-stat__top">
                     <div>
-                        <p class="board-stat__label">Instagram Mesaj</p>
-                        <p class="board-stat__value">{{ number_format($instagram['mesaj_toplam']) }}</p>
-                        <p class="board-stat__meta">{{ number_format($instagram['mesaj_bugun']) }} bugün ·
-                            %{{ $instagramBaglantiOrani }} bağlılık</p>
+                        <p class="board-stat__label">AI Mesaj</p>
+                        <p class="board-stat__value">{{ number_format($aiOperasyon['mesaj_toplam']) }}</p>
+                        <p class="board-stat__meta">{{ number_format($aiOperasyon['mesaj_bugun']) }} bugün ·
+                            %{{ $aiAktiflikOrani }} bağlılık</p>
                     </div>
                     <div class="board-stat__icon">
                         <svg style="width: 1.25rem; height: 1.25rem;" fill="currentColor" viewBox="0 0 24 24">
@@ -377,11 +377,11 @@
                     </div>
                     <div class="board-progress-card">
                         <div class="board-progress__top">
-                            <span class="board-progress__label">Instagram bağlılık</span>
-                            <span class="board-progress__value">%{{ $instagramBaglantiOrani }}</span>
+                            <span class="board-progress__label">AI aktiflik</span>
+                            <span class="board-progress__value">%{{ $aiAktiflikOrani }}</span>
                         </div>
                         <div class="board-progress__track">
-                            <div class="board-progress__fill" style="width: {{ $instagramBaglantiOrani }}%"></div>
+                            <div class="board-progress__fill" style="width: {{ $aiAktiflikOrani }}%"></div>
                         </div>
                     </div>
                     <div class="board-progress-card">
@@ -523,11 +523,11 @@
                         </svg>
                     </div>
                     <div>
-                        <p class="board-action__meta">Instagram</p>
+                        <p class="board-action__meta">AI Operasyon</p>
                         <p class="board-action__title">Hesap ve AI görevleri</p>
-                        <p class="board-action__value">{{ number_format($instagram['hesap_toplam']) }}</p>
-                        <p class="board-action__meta">{{ number_format($instagram['mesaj_gelen']) }} gelen ·
-                            {{ number_format($instagram['mesaj_ai']) }} AI mesaj</p>
+                        <p class="board-action__value">{{ number_format($aiOperasyon['hesap_toplam']) }}</p>
+                        <p class="board-action__meta">{{ number_format($aiOperasyon['mesaj_gelen']) }} gelen ·
+                            {{ number_format($aiOperasyon['mesaj_ai']) }} AI mesaj</p>
                     </div>
                 </div>
             </div>

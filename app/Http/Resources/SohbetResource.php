@@ -50,12 +50,12 @@ class SohbetResource extends JsonResource
             return ['code' => null, 'name' => null];
         }
 
-        $persona = $peer->relationLoaded('aiPersonaProfile') ? $peer->aiPersonaProfile : null;
+        $character = $peer->relationLoaded('aiCharacter') ? $peer->aiCharacter : null;
         $code = $peer->hesap_tipi === 'ai'
-            ? Language::normalizeCode($persona?->ana_dil_kodu) ?: Language::normalizeCode($peer->dil)
+            ? Language::normalizeCode($character?->primary_language_code ?: data_get($character?->character_json, 'languages.primary_language_code')) ?: Language::normalizeCode($peer->dil)
             : Language::normalizeCode($peer->dil);
         $name = $peer->hesap_tipi === 'ai'
-            ? ($persona?->ana_dil_adi ?: Language::name($code))
+            ? ($character?->primary_language_name ?: data_get($character?->character_json, 'languages.primary_language_name') ?: Language::name($code))
             : Language::name($code);
 
         return [

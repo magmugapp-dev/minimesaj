@@ -10,7 +10,6 @@ use App\Models\Mesaj;
 use App\Models\Sohbet;
 use App\Services\MesajServisi;
 use App\Services\SohbetTypingService;
-use App\Services\YapayZeka\V2\AiTranslationService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
@@ -19,7 +18,6 @@ class MesajController extends Controller
 {
     public function __construct(
         private MesajServisi $mesajServisi,
-        private AiTranslationService $translationService,
         private SohbetTypingService $typingService,
     ) {}
 
@@ -82,12 +80,10 @@ class MesajController extends Controller
             ], 422);
         }
 
-        $ceviri = $this->translationService->translateIncomingMessage($mesaj, $request->user());
-
         return response()->json([
-            'ceviri' => $ceviri,
-            'ceviri_metni' => $ceviri['metin'] ?? '',
-        ]);
+            'message' => 'Ceviri Flutter Gemini relay uzerinden yapilir.',
+            'relay_endpoint' => '/api/mobile/ai/gemini/stream',
+        ], 410);
     }
 
     public function typing(Request $request, Sohbet $sohbet): JsonResponse

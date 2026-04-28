@@ -1,9 +1,7 @@
 <?php
 
 use App\Http\Controllers\Admin\AbonelikPaketiController;
-use App\Http\Controllers\Admin\AiController;
-use App\Http\Controllers\Admin\AiPhotoController;
-use App\Http\Controllers\Admin\AiStudioController;
+use App\Http\Controllers\Admin\AiCharacterController;
 use App\Http\Controllers\Admin\AyarController;
 use App\Http\Controllers\Admin\DestekTalebiController;
 use App\Http\Controllers\Admin\DilMetinController;
@@ -12,8 +10,6 @@ use App\Http\Controllers\Admin\EslesmeController;
 use App\Http\Controllers\Admin\FinansalController;
 use App\Http\Controllers\Admin\GirisController;
 use App\Http\Controllers\Admin\HediyeController;
-use App\Http\Controllers\Admin\InfluencerController;
-use App\Http\Controllers\Admin\InstagramController;
 use App\Http\Controllers\Admin\IstatistikController;
 use App\Http\Controllers\Admin\KullaniciController;
 use App\Http\Controllers\Admin\PanoController;
@@ -44,25 +40,16 @@ Route::prefix('admin')->group(function () {
         Route::patch('kullanicilar/{kullanici}/durum', [KullaniciController::class, 'durumGuncelle'])->name('admin.kullanicilar.durum');
 
         // AI Yönetimi
-        Route::get('ai', [AiStudioController::class, 'index'])->name('admin.ai.index');
-        Route::post('ai/motor', [AiStudioController::class, 'engineUpdate'])->name('admin.ai.engine.update');
-        Route::get('ai/states', [AiStudioController::class, 'states'])->name('admin.ai.states');
-        Route::get('ai/memories', [AiStudioController::class, 'memories'])->name('admin.ai.memories');
-        Route::get('ai/traces', [AiStudioController::class, 'traces'])->name('admin.ai.traces');
-        Route::get('ai/fotograflar', [AiPhotoController::class, 'index'])->name('admin.ai.fotograflar');
-        Route::post('ai/fotograflar', [AiPhotoController::class, 'store'])->name('admin.ai.fotograflar.store');
-        Route::get('ai/ekle', [AiStudioController::class, 'create'])->name('admin.ai.ekle');
-        Route::post('ai/ekle', [AiStudioController::class, 'store'])->name('admin.ai.kaydet');
-        Route::get('ai/json-ekle', [AiController::class, 'jsonEkle'])->name('admin.ai.json-ekle');
-        Route::post('ai/json-ekle', [AiController::class, 'jsonKaydet'])->name('admin.ai.json-kaydet');
-        Route::post('ai/toplu-durum', [AiController::class, 'topluDurumGuncelle'])->name('admin.ai.toplu-durum');
-        Route::post('ai/{kullanici}/fotograflar', [AiPhotoController::class, 'storeForUser'])->name('admin.ai.fotograflar.user-store');
-        Route::patch('ai/{kullanici}/fotograflar/{fotograf}', [AiPhotoController::class, 'update'])->name('admin.ai.fotograflar.update');
-        Route::delete('ai/{kullanici}/fotograflar/{fotograf}', [AiPhotoController::class, 'destroy'])->name('admin.ai.fotograflar.destroy');
-        Route::get('ai/{kullanici}', [AiStudioController::class, 'show'])->name('admin.ai.goster');
-        Route::get('ai/{kullanici}/duzenle', [AiStudioController::class, 'edit'])->name('admin.ai.duzenle');
-        Route::put('ai/{kullanici}', [AiStudioController::class, 'update'])->name('admin.ai.guncelle');
-        Route::delete('ai/{kullanici}', [AiStudioController::class, 'destroy'])->name('admin.ai.sil');
+        Route::get('ai', [AiCharacterController::class, 'index'])->name('admin.ai.index');
+        Route::get('ai/ekle', [AiCharacterController::class, 'create'])->name('admin.ai.ekle');
+        Route::post('ai/ekle', [AiCharacterController::class, 'store'])->name('admin.ai.kaydet');
+        Route::get('ai/import', [AiCharacterController::class, 'importForm'])->name('admin.ai.import');
+        Route::post('ai/import', [AiCharacterController::class, 'importZip'])->name('admin.ai.import.store');
+        Route::post('ai/prompt', [AiCharacterController::class, 'promptUpdate'])->name('admin.ai.prompt.update');
+        Route::post('ai/thresholds', [AiCharacterController::class, 'thresholdsUpdate'])->name('admin.ai.thresholds.update');
+        Route::get('ai/{character}/duzenle', [AiCharacterController::class, 'edit'])->name('admin.ai.duzenle');
+        Route::put('ai/{character}', [AiCharacterController::class, 'update'])->name('admin.ai.guncelle');
+        Route::delete('ai/{character}', [AiCharacterController::class, 'destroy'])->name('admin.ai.sil');
 
         // Moderasyon — Şikayetler
         Route::get('moderasyon/sikayetler', [SikayetController::class, 'index'])->name('admin.moderasyon.sikayetler');
@@ -110,25 +97,6 @@ Route::prefix('admin')->group(function () {
         Route::get('finansal/hediyeler/{hediye}/duzenle', [HediyeController::class, 'edit'])->name('admin.hediyeler.edit');
         Route::put('finansal/hediyeler/{hediye}', [HediyeController::class, 'update'])->name('admin.hediyeler.update');
         Route::delete('finansal/hediyeler/{hediye}', [HediyeController::class, 'destroy'])->name('admin.hediyeler.destroy');
-
-        // Instagram
-        Route::get('instagram', [InstagramController::class, 'index'])->name('admin.instagram.index');
-        Route::get('instagram/{instagramHesap}', [InstagramController::class, 'goster'])->name('admin.instagram.goster');
-        Route::get('instagram/{instagramHesap}/kisiler', [InstagramController::class, 'kisiler'])->name('admin.instagram.kisiler');
-        Route::get('instagram/{instagramHesap}/kisiler/{instagramKisi}/mesajlar', [InstagramController::class, 'mesajlar'])->name('admin.instagram.mesajlar');
-        Route::delete('instagram/{instagramHesap}/kisiler/{instagramKisi}/veriler', [InstagramController::class, 'kisiVerileriniSil'])->name('admin.instagram.kisi-verilerini-sil');
-        Route::get('instagram/{instagramHesap}/ai-gorevleri', [InstagramController::class, 'aiGorevleri'])->name('admin.instagram.ai-gorevleri');
-
-        // AI Influencer
-        Route::get('influencer', [InfluencerController::class, 'index'])->name('admin.influencer.index');
-        Route::get('influencer/ekle', [InfluencerController::class, 'ekle'])->name('admin.influencer.ekle');
-        Route::post('influencer/ekle', [InfluencerController::class, 'kaydet'])->name('admin.influencer.kaydet');
-        Route::get('influencer/json-ekle', [InfluencerController::class, 'jsonEkle'])->name('admin.influencer.json-ekle');
-        Route::post('influencer/json-ekle', [InfluencerController::class, 'jsonKaydet'])->name('admin.influencer.json-kaydet');
-        Route::get('influencer/{kullanici}', [InfluencerController::class, 'goster'])->name('admin.influencer.goster');
-        Route::get('influencer/{kullanici}/duzenle', [InfluencerController::class, 'duzenle'])->name('admin.influencer.duzenle');
-        Route::put('influencer/{kullanici}', [InfluencerController::class, 'guncelle'])->name('admin.influencer.guncelle');
-        Route::delete('influencer/{kullanici}', [InfluencerController::class, 'destroy'])->name('admin.influencer.sil');
 
         // İstatistik
         Route::get('istatistik', [IstatistikController::class, 'index'])->name('admin.istatistik.index');

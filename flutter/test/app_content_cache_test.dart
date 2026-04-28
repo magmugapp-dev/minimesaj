@@ -1,15 +1,26 @@
+import 'dart:io';
+
 import 'package:flutter_test/flutter_test.dart';
+import 'package:hive/hive.dart';
 import 'package:magmug/core/i18n/app_runtime_text.dart';
 import 'package:magmug/core/models/app_content_models.dart';
 import 'package:magmug/core/storage/app_storage.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
+  setUpAll(() async {
+    final directory = await Directory.systemTemp.createTemp(
+      'magmug_hive_test_',
+    );
+    Hive.init(directory.path);
+  });
+
+  setUp(() async {
+    await Hive.deleteBoxFromDisk('app_content');
+  });
+
   test(
     'app content cache saves and restores the last successful payload',
     () async {
-      SharedPreferences.setMockInitialValues({});
-
       final content = AppContent(
         languages: const [
           AppContentLanguage(

@@ -56,8 +56,7 @@ class KesfetController extends Controller
             ->whereNotIn('id', $haricTutulanlar)
             ->with([
                 'fotograflar',
-                'aiAyar:id,user_id,aktif_mi,saat_dilimi,uyku_baslangic,uyku_bitis,hafta_sonu_uyku_baslangic,hafta_sonu_uyku_bitis',
-                'availabilitySchedules:id,user_id,recurrence_type,specific_date,day_of_week,starts_at,ends_at,status',
+                'aiCharacter:id,user_id,character_id,character_version,schema_version,active,display_name,primary_language_code,primary_language_name,model_name,character_json',
             ])
             ->orderByRaw("CASE WHEN hesap_tipi = 'user' THEN 0 ELSE 1 END")
             ->orderByDesc('cevrim_ici_mi')
@@ -89,8 +88,7 @@ class KesfetController extends Controller
             ->where('hesap_durumu', 'aktif')
             ->whereNotIn('id', $excludedIds)
             ->with([
-                'aiAyar:id,user_id,aktif_mi,saat_dilimi,uyku_baslangic,uyku_bitis,hafta_sonu_uyku_baslangic,hafta_sonu_uyku_bitis',
-                'availabilitySchedules:id,user_id,recurrence_type,specific_date,day_of_week,starts_at,ends_at,status',
+                'aiCharacter:id,user_id,active,character_json',
             ])
             ->get(['id', 'hesap_tipi', 'hesap_durumu', 'cevrim_ici_mi', 'son_gorulme_tarihi']);
 

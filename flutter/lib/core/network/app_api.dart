@@ -10,6 +10,10 @@ class AppApi {
   static const String mobileBootstrapPath = '/api/mobile/bootstrap';
   static const String mobileSyncPath = '/api/mobile/sync';
   static const String mobileUploadsPath = '/api/mobile/uploads';
+  static const String mobileAiBootstrapPath = '/api/mobile/ai/bootstrap';
+  static const String mobileAiPendingTurnsPath = '/api/mobile/ai/pending-turns';
+  static const String mobileAiGeminiStreamPath = '/api/mobile/ai/gemini/stream';
+  static const String mobileAiViolationsPath = '/api/mobile/ai/violations';
   static const String discoverPath = '/api/dating/kesfet';
   static const String matchCenterPath = '/api/dating/eslesme-merkezi';
   static const String matchPreferencesPath = '/api/dating/eslesme-tercihleri';
@@ -47,6 +51,12 @@ class AppApi {
   static String mobileConversationMessagesPath(int conversationId) =>
       '/api/mobile/conversations/$conversationId/messages';
 
+  static String mobileAiTurnContextPath(int conversationId) =>
+      '/api/mobile/ai/conversations/$conversationId/turn-context';
+
+  static String mobileAiReplyPath(int conversationId) =>
+      '/api/mobile/ai/conversations/$conversationId/reply';
+
   static String datingChatMessageTranslationPath(
     int conversationId,
     int messageId,
@@ -62,9 +72,6 @@ class AppApi {
 
   static String datingPeerProfilePath(int userId) =>
       '/api/dating/profil/$userId';
-
-  static String influencerProfilePath(int userId) =>
-      '/api/dating/influencer-profile/$userId';
 
   static String muteUserPath(int userId) => '/api/dating/sessize-al/$userId';
 

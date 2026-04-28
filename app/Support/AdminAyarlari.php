@@ -133,13 +133,6 @@ class AdminAyarlari
                 'tam_genislik' => false,
                 'svg' => '<path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6l4.5 2.25"/><path stroke-linecap="round" stroke-linejoin="round" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>',
             ],
-            'instagram' => [
-                'etiket' => 'Instagram',
-                'aciklama' => 'Instagram entegrasyonu ve senkron davranışları.',
-                'sidebar_grup' => 'Entegrasyon',
-                'tam_genislik' => false,
-                'svg' => '<path stroke-linecap="round" stroke-linejoin="round" d="M3.75 7.5A3.75 3.75 0 017.5 3.75h9a3.75 3.75 0 013.75 3.75v9a3.75 3.75 0 01-3.75 3.75h-9a3.75 3.75 0 01-3.75-3.75v-9z"/><path stroke-linecap="round" stroke-linejoin="round" d="M9 12a3 3 0 106 0 3 3 0 00-6 0z"/><path stroke-linecap="round" stroke-linejoin="round" d="M16.5 7.5h.008v.008H16.5V7.5z"/>',
-            ],
         ];
     }
 

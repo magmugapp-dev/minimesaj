@@ -1,17 +1,36 @@
+import 'dart:io';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:hive/hive.dart';
 import 'package:magmug/app_core.dart';
 import 'package:magmug/app_push_device_sync.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+  late Directory hiveDirectory;
 
-  setUp(() {
+  setUpAll(() async {
+    hiveDirectory = await Directory.systemTemp.createTemp(
+      'magmug_hive_device_sync_test_',
+    );
+    Hive.init(hiveDirectory.path);
+  });
+
+  setUp(() async {
+    await _clearHiveBoxes();
     debugDefaultTargetPlatformOverride = TargetPlatform.android;
   });
 
-  tearDown(() {
+  tearDown(() async {
     debugDefaultTargetPlatformOverride = null;
+    await Hive.close();
+  });
+
+  tearDownAll(() async {
+    if (await hiveDirectory.exists()) {
+      await hiveDirectory.delete(recursive: true);
+    }
   });
 
   AppAuthState session({
@@ -122,4 +141,31 @@ void main() {
       expect(calls, ['register:auth-token:false']);
     },
   );
+}
+
+Future<void> _clearHiveBoxes() async {
+  const boxes = [
+    'app_session',
+    'app_preferences',
+    'app_content',
+    'app_public_settings',
+    'ai_prompt',
+    'ai_characters',
+    'ai_memory',
+    'ai_pending_turns',
+    'chat_messages',
+    'chat_previews',
+    'chat_outbox',
+    'media_cache_index',
+  ];
+
+  for (final box in boxes) {
+    try {
+      if (Hive.isBoxOpen(box)) {
+        await Hive.box<dynamic>(box).clear();
+      } else {
+        await Hive.deleteBoxFromDisk(box);
+      }
+    } catch (_) {}
+  }
 }

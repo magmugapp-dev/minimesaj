@@ -4,18 +4,34 @@ import 'dart:io';
 
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:hive/hive.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:magmug/app_core.dart';
 import 'package:magmug/features/chat/chat_local_store.dart';
 import 'package:magmug/features/chat/chat_realtime.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  setUp(() {
-    SharedPreferences.setMockInitialValues({});
+  setUpAll(() async {
+    final directory = await Directory.systemTemp.createTemp(
+      'magmug_hive_test_',
+    );
+    Hive.init(directory.path);
+  });
+
+  setUp(() async {
+    for (final box in [
+      'app_session',
+      'app_preferences',
+      'chat_messages',
+      'chat_previews',
+      'chat_outbox',
+      'media_cache_index',
+    ]) {
+      await Hive.deleteBoxFromDisk(box);
+    }
     FlutterSecureStorage.setMockInitialValues({});
   });
 

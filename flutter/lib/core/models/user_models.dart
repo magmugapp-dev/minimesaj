@@ -85,8 +85,7 @@ class AppUser {
       freeMatchesLeft: freeMatchesLeft ?? this.freeMatchesLeft,
       notificationsEnabled: notificationsEnabled ?? this.notificationsEnabled,
       vibrationEnabled: vibrationEnabled ?? this.vibrationEnabled,
-      messageSoundsEnabled:
-          messageSoundsEnabled ?? this.messageSoundsEnabled,
+      messageSoundsEnabled: messageSoundsEnabled ?? this.messageSoundsEnabled,
       languageCode: languageCode ?? this.languageCode,
       matchGenderFilterCode:
           matchGenderFilterCode ?? this.matchGenderFilterCode,

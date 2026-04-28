@@ -2,12 +2,12 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
+import 'package:hive/hive.dart';
 import 'package:magmug/core/chat/chat_text_sanitizer.dart';
 import 'package:magmug/core/models/communication_models.dart';
 import 'package:magmug/core/storage/app_storage.dart';
 import 'package:path/path.dart' as path;
 import 'package:path_provider/path_provider.dart';
-import 'package:sqflite/sqflite.dart';
 
 abstract class ChatOutboxStore {
   Future<List<ChatOutboxItem>> getPendingOutboxItems({
@@ -55,226 +55,34 @@ class ChatLocalStore implements ChatOutboxStore {
 
   static final ChatLocalStore instance = ChatLocalStore._();
   static const Duration _staleCacheAge = Duration(days: 14);
-  Database? _database;
 
-  Future<Database> get _db async {
-    final existing = _database;
-    if (existing != null) {
-      return existing;
-    }
-
-    final databasesPath = await getDatabasesPath();
-    final db = await openDatabase(
-      path.join(databasesPath, 'magmug_chat_cache.db'),
-      version: 8,
-      onCreate: (db, version) async {
-        await _createSchema(db);
-      },
-      onUpgrade: (db, oldVersion, newVersion) async {
-        if (oldVersion < 2) {
-          await db.execute(
-            'ALTER TABLE conversation_messages ADD COLUMN cached_file_path TEXT',
-          );
-          await db.execute('''
-            CREATE TABLE IF NOT EXISTS conversation_previews(
-              id INTEGER PRIMARY KEY,
-              match_id INTEGER NOT NULL,
-              peer_id INTEGER NOT NULL,
-              peer_name TEXT NOT NULL,
-              peer_username TEXT NOT NULL,
-              peer_profile_image_url TEXT,
-              online INTEGER NOT NULL,
-              last_message TEXT,
-              last_message_type TEXT,
-              last_message_at_ms INTEGER,
-              unread_count INTEGER NOT NULL,
-              my_message_read INTEGER NOT NULL
-            )
-          ''');
-          await db.execute(
-            'CREATE INDEX IF NOT EXISTS idx_conversation_previews_last_message_at ON conversation_previews(last_message_at_ms)',
-          );
-        }
-        if (oldVersion < 3) {
-          await db.execute(
-            'ALTER TABLE conversation_messages ADD COLUMN cached_sender_profile_image_path TEXT',
-          );
-          await db.execute(
-            'ALTER TABLE conversation_previews ADD COLUMN cached_peer_profile_image_path TEXT',
-          );
-        }
-        if (oldVersion < 4) {
-          await db.execute(
-            'ALTER TABLE conversation_messages ADD COLUMN language_code TEXT',
-          );
-          await db.execute(
-            'ALTER TABLE conversation_messages ADD COLUMN language_name TEXT',
-          );
-          await db.execute(
-            'ALTER TABLE conversation_messages ADD COLUMN translated_text TEXT',
-          );
-          await db.execute(
-            'ALTER TABLE conversation_messages ADD COLUMN translation_target_language_code TEXT',
-          );
-          await db.execute(
-            'ALTER TABLE conversation_messages ADD COLUMN translation_target_language_name TEXT',
-          );
-          await db.execute(
-            'ALTER TABLE conversation_previews ADD COLUMN peer_language_code TEXT',
-          );
-          await db.execute(
-            'ALTER TABLE conversation_previews ADD COLUMN peer_language_name TEXT',
-          );
-        }
-        if (oldVersion < 5) {
-          await db.execute('''
-            UPDATE conversation_messages
-            SET translated_text = NULL,
-                translation_target_language_code = NULL,
-                translation_target_language_name = NULL
-          ''');
-        }
-        if (oldVersion < 6) {
-          await db.execute(
-            'ALTER TABLE conversation_previews ADD COLUMN ai_status TEXT',
-          );
-          await db.execute(
-            'ALTER TABLE conversation_previews ADD COLUMN ai_status_text TEXT',
-          );
-          await db.execute(
-            'ALTER TABLE conversation_previews ADD COLUMN ai_planned_at_ms INTEGER',
-          );
-        }
-        if (oldVersion < 7) {
-          await db.execute(
-            'ALTER TABLE conversation_messages ADD COLUMN owner_user_id INTEGER NOT NULL DEFAULT 0',
-          );
-          await db.execute(
-            'ALTER TABLE conversation_previews ADD COLUMN owner_user_id INTEGER NOT NULL DEFAULT 0',
-          );
-          await db.execute(
-            'CREATE INDEX IF NOT EXISTS idx_conversation_messages_owner_conversation ON conversation_messages(owner_user_id, conversation_id, id)',
-          );
-          await db.execute(
-            'CREATE INDEX IF NOT EXISTS idx_conversation_previews_owner_last_message_at ON conversation_previews(owner_user_id, last_message_at_ms)',
-          );
-        }
-        if (oldVersion < 8) {
-          await db.execute(
-            'ALTER TABLE conversation_messages ADD COLUMN client_message_id TEXT',
-          );
-          await db.execute(
-            "ALTER TABLE conversation_messages ADD COLUMN delivery_status TEXT NOT NULL DEFAULT 'sent'",
-          );
-          await _createOutboxSchema(db);
-        }
-      },
-    );
-    _database = db;
-    return db;
-  }
-
-  Future<void> _createSchema(Database db) async {
-    await db.execute('''
-      CREATE TABLE conversation_messages(
-        id INTEGER PRIMARY KEY,
-        owner_user_id INTEGER NOT NULL,
-        conversation_id INTEGER NOT NULL,
-        sender_id INTEGER,
-        sender_name TEXT NOT NULL,
-        sender_profile_image_url TEXT,
-        cached_sender_profile_image_path TEXT,
-        type TEXT NOT NULL,
-        text TEXT,
-        file_url TEXT,
-        cached_file_path TEXT,
-        file_duration_ms INTEGER,
-        is_read INTEGER NOT NULL,
-        is_ai_generated INTEGER NOT NULL,
-        language_code TEXT,
-        language_name TEXT,
-        translated_text TEXT,
-        translation_target_language_code TEXT,
-        translation_target_language_name TEXT,
-        client_message_id TEXT,
-        delivery_status TEXT NOT NULL DEFAULT 'sent',
-        created_at_ms INTEGER
-      )
-    ''');
-    await db.execute(
-      'CREATE INDEX idx_conversation_messages_conversation_id ON conversation_messages(conversation_id)',
-    );
-    await db.execute(
-      'CREATE INDEX idx_conversation_messages_owner_conversation ON conversation_messages(owner_user_id, conversation_id, id)',
-    );
-    await db.execute('''
-      CREATE TABLE conversation_previews(
-        id INTEGER PRIMARY KEY,
-        owner_user_id INTEGER NOT NULL,
-        match_id INTEGER NOT NULL,
-        peer_id INTEGER NOT NULL,
-        peer_name TEXT NOT NULL,
-        peer_username TEXT NOT NULL,
-        peer_profile_image_url TEXT,
-        cached_peer_profile_image_path TEXT,
-        peer_language_code TEXT,
-        peer_language_name TEXT,
-        online INTEGER NOT NULL,
-        last_message TEXT,
-        last_message_type TEXT,
-        last_message_at_ms INTEGER,
-        unread_count INTEGER NOT NULL,
-        my_message_read INTEGER NOT NULL,
-        ai_status TEXT,
-        ai_status_text TEXT,
-        ai_planned_at_ms INTEGER
-      )
-    ''');
-    await db.execute(
-      'CREATE INDEX idx_conversation_previews_last_message_at ON conversation_previews(last_message_at_ms)',
-    );
-    await db.execute(
-      'CREATE INDEX idx_conversation_previews_owner_last_message_at ON conversation_previews(owner_user_id, last_message_at_ms)',
-    );
-    await _createOutboxSchema(db);
-  }
-
-  Future<void> _createOutboxSchema(Database db) async {
-    await db.execute('''
-      CREATE TABLE IF NOT EXISTS message_outbox(
-        local_id TEXT PRIMARY KEY,
-        owner_user_id INTEGER NOT NULL,
-        conversation_id INTEGER NOT NULL,
-        client_message_id TEXT NOT NULL,
-        client_upload_id TEXT,
-        type TEXT NOT NULL,
-        text TEXT,
-        local_file_path TEXT,
-        remote_file_path TEXT,
-        file_duration_ms INTEGER,
-        status TEXT NOT NULL,
-        retry_count INTEGER NOT NULL DEFAULT 0,
-        next_retry_at_ms INTEGER,
-        last_error TEXT,
-        created_at_ms INTEGER NOT NULL,
-        updated_at_ms INTEGER NOT NULL
-      )
-    ''');
-    await db.execute(
-      'CREATE INDEX IF NOT EXISTS idx_message_outbox_owner_status ON message_outbox(owner_user_id, status, next_retry_at_ms)',
-    );
-  }
+  Future<Box<dynamic>> get _messagesBox =>
+      Hive.openBox<dynamic>('chat_messages');
+  Future<Box<dynamic>> get _previewsBox =>
+      Hive.openBox<dynamic>('chat_previews');
+  Future<Box<dynamic>> get _outboxBox => Hive.openBox<dynamic>('chat_outbox');
+  Future<Box<dynamic>> get _mediaIndexBox =>
+      Hive.openBox<dynamic>('media_cache_index');
 
   Future<List<AppConversationPreview>> getConversationPreviews({
     required int ownerUserId,
   }) async {
-    final db = await _db;
-    final rows = await db.query(
-      'conversation_previews',
-      where: 'owner_user_id = ?',
-      whereArgs: [ownerUserId],
-      orderBy: 'last_message_at_ms DESC, id DESC',
-    );
+    final box = await _previewsBox;
+    final rows = box.values
+        .map(_asRow)
+        .where((row) => _rowOwner(row) == ownerUserId)
+        .toList(growable: false);
+    rows.sort((a, b) {
+      final last = ((b['last_message_at_ms'] as num?)?.toInt() ?? 0).compareTo(
+        (a['last_message_at_ms'] as num?)?.toInt() ?? 0,
+      );
+      if (last != 0) {
+        return last;
+      }
+      return ((b['id'] as num?)?.toInt() ?? 0).compareTo(
+        (a['id'] as num?)?.toInt() ?? 0,
+      );
+    });
 
     return rows.map(_previewFromRow).toList(growable: false);
   }
@@ -283,18 +91,13 @@ class ChatLocalStore implements ChatOutboxStore {
     int conversationId, {
     required int ownerUserId,
   }) async {
-    final db = await _db;
-    final rows = await db.query(
-      'conversation_previews',
-      where: 'owner_user_id = ? AND id = ?',
-      whereArgs: [ownerUserId, conversationId],
-      limit: 1,
-    );
-    if (rows.isEmpty) {
+    final box = await _previewsBox;
+    final row = _asRow(box.get(_previewKey(ownerUserId, conversationId)));
+    if (row.isEmpty) {
       return null;
     }
 
-    return _previewFromRow(rows.first);
+    return _previewFromRow(row);
   }
 
   Future<void> upsertConversationPreviews(
@@ -305,8 +108,7 @@ class ChatLocalStore implements ChatOutboxStore {
       return;
     }
 
-    final db = await _db;
-    final batch = db.batch();
+    final box = await _previewsBox;
     for (final conversation in conversations) {
       final cachedAvatarPath = await _cacheRemoteFileIfNeeded(
         conversation.peerProfileImageUrl,
@@ -314,7 +116,7 @@ class ChatLocalStore implements ChatOutboxStore {
         category: 'avatars',
         fileName: 'peer_${conversation.peerId}',
       );
-      batch.insert('conversation_previews', {
+      await box.put(_previewKey(ownerUserId, conversation.id), {
         'id': conversation.id,
         'owner_user_id': ownerUserId,
         'match_id': conversation.matchId,
@@ -335,9 +137,8 @@ class ChatLocalStore implements ChatOutboxStore {
         'ai_status': conversation.aiStatus,
         'ai_status_text': conversation.aiStatusText,
         'ai_planned_at_ms': conversation.aiPlannedAt?.millisecondsSinceEpoch,
-      }, conflictAlgorithm: ConflictAlgorithm.replace);
+      });
     }
-    await batch.commit(noResult: true);
     await cleanupStaleCache(ownerUserId: ownerUserId);
   }
 
@@ -346,23 +147,27 @@ class ChatLocalStore implements ChatOutboxStore {
     required int ownerUserId,
     int? limit,
   }) async {
-    final db = await _db;
-    final useRecentWindow = limit != null && limit > 0;
-    final rows = await db.query(
-      'conversation_messages',
-      where: 'owner_user_id = ? AND conversation_id = ?',
-      whereArgs: [ownerUserId, conversationId],
-      orderBy: useRecentWindow
-          ? 'created_at_ms DESC, id DESC'
-          : 'created_at_ms ASC, id ASC',
-      limit: useRecentWindow ? limit : null,
+    final rows = await _conversationMessageRows(
+      ownerUserId: ownerUserId,
+      conversationId: conversationId,
     );
-    final messages = rows.map(_messageFromRow).toList(growable: false);
-    if (!useRecentWindow) {
-      return messages;
-    }
+    rows.sort((a, b) {
+      final byDate = ((a['created_at_ms'] as num?)?.toInt() ?? 0).compareTo(
+        (b['created_at_ms'] as num?)?.toInt() ?? 0,
+      );
+      if (byDate != 0) {
+        return byDate;
+      }
+      return ((a['id'] as num?)?.toInt() ?? 0).compareTo(
+        (b['id'] as num?)?.toInt() ?? 0,
+      );
+    });
 
-    return messages.reversed.toList(growable: false);
+    final window = limit != null && limit > 0 && rows.length > limit
+        ? rows.sublist(rows.length - limit)
+        : rows;
+
+    return window.map(_messageFromRow).toList(growable: false);
   }
 
   Future<List<ChatLocalMessageSearchResult>> searchConversationMessages({
@@ -375,33 +180,40 @@ class ChatLocalStore implements ChatOutboxStore {
       return const <ChatLocalMessageSearchResult>[];
     }
 
-    final db = await _db;
-    final rows = await db.query(
-      'conversation_messages',
-      where: "owner_user_id = ? AND LOWER(COALESCE(text, '')) LIKE ?",
-      whereArgs: [ownerUserId, '%$normalizedQuery%'],
-      orderBy: 'created_at_ms DESC, id DESC',
-      limit: limit,
-    );
-
-    final previewCache = <int, AppConversationPreview?>{};
-    final results = <ChatLocalMessageSearchResult>[];
-    for (final row in rows) {
-      final message = _messageFromRow(row);
-      final conversationId = message.conversationId;
-      final preview =
-          previewCache[conversationId] ??
-          await getConversationPreview(
-            conversationId,
-            ownerUserId: ownerUserId,
-          );
-      previewCache[conversationId] = preview;
-      if (preview == null) {
-        continue;
-      }
-      results.add(
-        ChatLocalMessageSearchResult(conversation: preview, message: message),
+    final box = await _messagesBox;
+    final rows = box.values
+        .map(_asRow)
+        .where((row) => _rowOwner(row) == ownerUserId)
+        .where(
+          (row) => (row['text']?.toString().toLowerCase() ?? '').contains(
+            normalizedQuery,
+          ),
+        )
+        .toList(growable: false);
+    rows.sort((a, b) {
+      final byDate = ((b['created_at_ms'] as num?)?.toInt() ?? 0).compareTo(
+        (a['created_at_ms'] as num?)?.toInt() ?? 0,
       );
+      if (byDate != 0) {
+        return byDate;
+      }
+      return ((b['id'] as num?)?.toInt() ?? 0).compareTo(
+        (a['id'] as num?)?.toInt() ?? 0,
+      );
+    });
+
+    final results = <ChatLocalMessageSearchResult>[];
+    for (final row in rows.take(limit)) {
+      final message = _messageFromRow(row);
+      final preview = await getConversationPreview(
+        message.conversationId,
+        ownerUserId: ownerUserId,
+      );
+      if (preview != null) {
+        results.add(
+          ChatLocalMessageSearchResult(conversation: preview, message: message),
+        );
+      }
     }
 
     return results;
@@ -415,42 +227,24 @@ class ChatLocalStore implements ChatOutboxStore {
       return;
     }
 
-    final db = await _db;
-    final batch = db.batch();
     for (final message in messages) {
-      _deleteLocalOptimisticMessageIfServerAcked(
-        batch,
-        message,
-        ownerUserId: ownerUserId,
-      );
-      final row = await _rowFromMessage(message, ownerUserId: ownerUserId);
-      batch.insert(
-        'conversation_messages',
-        row,
-        conflictAlgorithm: ConflictAlgorithm.replace,
-      );
+      await upsertConversationMessage(message, ownerUserId: ownerUserId);
     }
-    await batch.commit(noResult: true);
-    await cleanupStaleCache(ownerUserId: ownerUserId);
   }
 
   Future<void> upsertConversationMessage(
     AppConversationMessage message, {
     required int ownerUserId,
   }) async {
-    final db = await _db;
-    final batch = db.batch();
-    _deleteLocalOptimisticMessageIfServerAcked(
-      batch,
+    final box = await _messagesBox;
+    await _deleteLocalOptimisticMessageIfServerAcked(
       message,
       ownerUserId: ownerUserId,
     );
-    batch.insert(
-      'conversation_messages',
+    await box.put(
+      _messageKey(ownerUserId, message.conversationId, message.id),
       await _rowFromMessage(message, ownerUserId: ownerUserId),
-      conflictAlgorithm: ConflictAlgorithm.replace,
     );
-    await batch.commit(noResult: true);
     await cleanupStaleCache(ownerUserId: ownerUserId);
   }
 
@@ -478,26 +272,24 @@ class ChatLocalStore implements ChatOutboxStore {
       deliveryStatus: 'queued',
       createdAt: now,
     );
-    final db = await _db;
-    final batch = db.batch();
-    batch.insert(
-      'conversation_messages',
+
+    await (await _messagesBox).put(
+      _messageKey(ownerUserId, conversationId, localMessage.id),
       await _rowFromMessage(localMessage, ownerUserId: ownerUserId),
-      conflictAlgorithm: ConflictAlgorithm.replace,
     );
-    batch.insert('message_outbox', <String, Object?>{
-      'local_id': clientMessageId,
-      'owner_user_id': ownerUserId,
-      'conversation_id': conversationId,
-      'client_message_id': clientMessageId,
-      'type': 'metin',
-      'text': text,
-      'status': 'queued',
-      'retry_count': 0,
-      'created_at_ms': now.millisecondsSinceEpoch,
-      'updated_at_ms': now.millisecondsSinceEpoch,
-    }, conflictAlgorithm: ConflictAlgorithm.replace);
-    await batch.commit(noResult: true);
+    await (await _outboxBox)
+        .put(_outboxKey(ownerUserId, clientMessageId), <String, Object?>{
+          'local_id': clientMessageId,
+          'owner_user_id': ownerUserId,
+          'conversation_id': conversationId,
+          'client_message_id': clientMessageId,
+          'type': 'metin',
+          'text': text,
+          'status': 'queued',
+          'retry_count': 0,
+          'created_at_ms': now.millisecondsSinceEpoch,
+          'updated_at_ms': now.millisecondsSinceEpoch,
+        });
     return localMessage;
   }
 
@@ -535,28 +327,26 @@ class ChatLocalStore implements ChatOutboxStore {
       deliveryStatus: 'queued',
       createdAt: now,
     );
-    final db = await _db;
-    final batch = db.batch();
-    batch.insert(
-      'conversation_messages',
+
+    await (await _messagesBox).put(
+      _messageKey(ownerUserId, conversationId, localMessage.id),
       await _rowFromMessage(localMessage, ownerUserId: ownerUserId),
-      conflictAlgorithm: ConflictAlgorithm.replace,
     );
-    batch.insert('message_outbox', <String, Object?>{
-      'local_id': clientMessageId,
-      'owner_user_id': ownerUserId,
-      'conversation_id': conversationId,
-      'client_message_id': clientMessageId,
-      'client_upload_id': clientUploadId,
-      'type': messageType,
-      'local_file_path': localFilePath,
-      'file_duration_ms': fileDuration?.inMilliseconds,
-      'status': 'queued',
-      'retry_count': 0,
-      'created_at_ms': now.millisecondsSinceEpoch,
-      'updated_at_ms': now.millisecondsSinceEpoch,
-    }, conflictAlgorithm: ConflictAlgorithm.replace);
-    await batch.commit(noResult: true);
+    await (await _outboxBox)
+        .put(_outboxKey(ownerUserId, clientMessageId), <String, Object?>{
+          'local_id': clientMessageId,
+          'owner_user_id': ownerUserId,
+          'conversation_id': conversationId,
+          'client_message_id': clientMessageId,
+          'client_upload_id': clientUploadId,
+          'type': messageType,
+          'local_file_path': localFilePath,
+          'file_duration_ms': fileDuration?.inMilliseconds,
+          'status': 'queued',
+          'retry_count': 0,
+          'created_at_ms': now.millisecondsSinceEpoch,
+          'updated_at_ms': now.millisecondsSinceEpoch,
+        });
     return localMessage;
   }
 
@@ -565,27 +355,34 @@ class ChatLocalStore implements ChatOutboxStore {
     required int ownerUserId,
     int limit = 20,
   }) async {
-    final db = await _db;
+    final box = await _outboxBox;
     final nowMs = DateTime.now().millisecondsSinceEpoch;
     final staleSendingMs = DateTime.now()
         .subtract(const Duration(minutes: 1))
         .millisecondsSinceEpoch;
-    final rows = await db.query(
-      'message_outbox',
-      where: '''
-        owner_user_id = ?
-        AND (
-          status IN ('queued', 'failed')
-          OR (status = 'sending' AND updated_at_ms <= ?)
-        )
-        AND (next_retry_at_ms IS NULL OR next_retry_at_ms <= ?)
-      ''',
-      whereArgs: [ownerUserId, staleSendingMs, nowMs],
-      orderBy: 'created_at_ms ASC',
-      limit: limit,
+    final rows = box.values
+        .map(_asRow)
+        .where((row) {
+          if (_rowOwner(row) != ownerUserId) {
+            return false;
+          }
+          final status = row['status']?.toString();
+          final updatedAt = (row['updated_at_ms'] as num?)?.toInt() ?? 0;
+          final nextRetryAt = (row['next_retry_at_ms'] as num?)?.toInt();
+          final due = nextRetryAt == null || nextRetryAt <= nowMs;
+          return due &&
+              (status == 'queued' ||
+                  status == 'failed' ||
+                  (status == 'sending' && updatedAt <= staleSendingMs));
+        })
+        .toList(growable: false);
+    rows.sort(
+      (a, b) => ((a['created_at_ms'] as num?)?.toInt() ?? 0).compareTo(
+        (b['created_at_ms'] as num?)?.toInt() ?? 0,
+      ),
     );
 
-    return rows.map(ChatOutboxItem.fromRow).toList(growable: false);
+    return rows.take(limit).map(ChatOutboxItem.fromRow).toList(growable: false);
   }
 
   @override
@@ -593,22 +390,13 @@ class ChatLocalStore implements ChatOutboxStore {
     required int ownerUserId,
     required String clientMessageId,
   }) async {
-    final db = await _db;
-    await db.update(
-      'message_outbox',
-      <String, Object?>{
-        'status': 'sending',
-        'updated_at_ms': DateTime.now().millisecondsSinceEpoch,
-      },
-      where: 'owner_user_id = ? AND client_message_id = ?',
-      whereArgs: [ownerUserId, clientMessageId],
-    );
-    await db.update(
-      'conversation_messages',
-      <String, Object?>{'delivery_status': 'sending'},
-      where: 'owner_user_id = ? AND client_message_id = ? AND id < 0',
-      whereArgs: [ownerUserId, clientMessageId],
-    );
+    await _patchOutbox(ownerUserId, clientMessageId, {
+      'status': 'sending',
+      'updated_at_ms': DateTime.now().millisecondsSinceEpoch,
+    });
+    await _patchOptimisticMessages(ownerUserId, clientMessageId, {
+      'delivery_status': 'sending',
+    });
   }
 
   @override
@@ -617,24 +405,18 @@ class ChatLocalStore implements ChatOutboxStore {
     required String clientMessageId,
     required AppConversationMessage sentMessage,
   }) async {
-    final db = await _db;
-    final batch = db.batch();
-    batch.delete(
-      'conversation_messages',
-      where: 'owner_user_id = ? AND client_message_id = ? AND id < 0',
-      whereArgs: [ownerUserId, clientMessageId],
-    );
-    batch.insert(
-      'conversation_messages',
+    final messagesBox = await _messagesBox;
+    for (final key in await _messageKeysForClient(
+      ownerUserId,
+      clientMessageId,
+    )) {
+      await messagesBox.delete(key);
+    }
+    await messagesBox.put(
+      _messageKey(ownerUserId, sentMessage.conversationId, sentMessage.id),
       await _rowFromMessage(sentMessage, ownerUserId: ownerUserId),
-      conflictAlgorithm: ConflictAlgorithm.replace,
     );
-    batch.delete(
-      'message_outbox',
-      where: 'owner_user_id = ? AND client_message_id = ?',
-      whereArgs: [ownerUserId, clientMessageId],
-    );
-    await batch.commit(noResult: true);
+    await (await _outboxBox).delete(_outboxKey(ownerUserId, clientMessageId));
   }
 
   @override
@@ -643,64 +425,37 @@ class ChatLocalStore implements ChatOutboxStore {
     required String clientMessageId,
     required String errorMessage,
   }) async {
-    final db = await _db;
-    final rows = await db.query(
-      'message_outbox',
-      columns: ['retry_count'],
-      where: 'owner_user_id = ? AND client_message_id = ?',
-      whereArgs: [ownerUserId, clientMessageId],
-      limit: 1,
-    );
-    final currentRetryCount = rows.isEmpty
-        ? 0
-        : (rows.first['retry_count'] as num?)?.toInt() ?? 0;
-    final retryCount = currentRetryCount + 1;
+    final box = await _outboxBox;
+    final key = _outboxKey(ownerUserId, clientMessageId);
+    final row = _asRow(box.get(key));
+    final retryCount = ((row['retry_count'] as num?)?.toInt() ?? 0) + 1;
     final retryDelay = Duration(seconds: retryCount < 6 ? retryCount * 8 : 60);
     final now = DateTime.now();
-    await db.update(
-      'message_outbox',
-      <String, Object?>{
-        'status': 'failed',
-        'retry_count': retryCount,
-        'next_retry_at_ms': now.add(retryDelay).millisecondsSinceEpoch,
-        'last_error': errorMessage,
-        'updated_at_ms': now.millisecondsSinceEpoch,
-      },
-      where: 'owner_user_id = ? AND client_message_id = ?',
-      whereArgs: [ownerUserId, clientMessageId],
-    );
-    await db.update(
-      'conversation_messages',
-      <String, Object?>{'delivery_status': 'failed'},
-      where: 'owner_user_id = ? AND client_message_id = ? AND id < 0',
-      whereArgs: [ownerUserId, clientMessageId],
-    );
+    await box.put(key, {
+      ...row,
+      'status': 'failed',
+      'retry_count': retryCount,
+      'next_retry_at_ms': now.add(retryDelay).millisecondsSinceEpoch,
+      'last_error': errorMessage,
+      'updated_at_ms': now.millisecondsSinceEpoch,
+    });
+    await _patchOptimisticMessages(ownerUserId, clientMessageId, {
+      'delivery_status': 'failed',
+    });
   }
 
   Future<void> queueOutboxRetry({
     required int ownerUserId,
     required String clientMessageId,
   }) async {
-    final db = await _db;
-    final nowMs = DateTime.now().millisecondsSinceEpoch;
-    final batch = db.batch();
-    batch.update(
-      'message_outbox',
-      <String, Object?>{
-        'status': 'queued',
-        'next_retry_at_ms': null,
-        'updated_at_ms': nowMs,
-      },
-      where: 'owner_user_id = ? AND client_message_id = ?',
-      whereArgs: [ownerUserId, clientMessageId],
-    );
-    batch.update(
-      'conversation_messages',
-      <String, Object?>{'delivery_status': 'queued'},
-      where: 'owner_user_id = ? AND client_message_id = ? AND id < 0',
-      whereArgs: [ownerUserId, clientMessageId],
-    );
-    await batch.commit(noResult: true);
+    await _patchOutbox(ownerUserId, clientMessageId, {
+      'status': 'queued',
+      'next_retry_at_ms': null,
+      'updated_at_ms': DateTime.now().millisecondsSinceEpoch,
+    });
+    await _patchOptimisticMessages(ownerUserId, clientMessageId, {
+      'delivery_status': 'queued',
+    });
   }
 
   @override
@@ -708,17 +463,11 @@ class ChatLocalStore implements ChatOutboxStore {
     required int ownerUserId,
     required String clientMessageId,
     required String remoteFilePath,
-  }) async {
-    final db = await _db;
-    await db.update(
-      'message_outbox',
-      <String, Object?>{
-        'remote_file_path': remoteFilePath,
-        'updated_at_ms': DateTime.now().millisecondsSinceEpoch,
-      },
-      where: 'owner_user_id = ? AND client_message_id = ?',
-      whereArgs: [ownerUserId, clientMessageId],
-    );
+  }) {
+    return _patchOutbox(ownerUserId, clientMessageId, {
+      'remote_file_path': remoteFilePath,
+      'updated_at_ms': DateTime.now().millisecondsSinceEpoch,
+    });
   }
 
   Future<void> updateConversationPreviewRuntimeStatus(
@@ -728,17 +477,18 @@ class ChatLocalStore implements ChatOutboxStore {
     required String? aiStatusText,
     required DateTime? aiPlannedAt,
   }) async {
-    final db = await _db;
-    await db.update(
-      'conversation_previews',
-      <String, Object?>{
-        'ai_status': aiStatus,
-        'ai_status_text': aiStatusText,
-        'ai_planned_at_ms': aiPlannedAt?.millisecondsSinceEpoch,
-      },
-      where: 'owner_user_id = ? AND id = ?',
-      whereArgs: [ownerUserId, conversationId],
-    );
+    final box = await _previewsBox;
+    final key = _previewKey(ownerUserId, conversationId);
+    final row = _asRow(box.get(key));
+    if (row.isEmpty) {
+      return;
+    }
+    await box.put(key, {
+      ...row,
+      'ai_status': aiStatus,
+      'ai_status_text': aiStatusText,
+      'ai_planned_at_ms': aiPlannedAt?.millisecondsSinceEpoch,
+    });
   }
 
   Future<bool> applyConversationMessageEvent({
@@ -750,38 +500,29 @@ class ChatLocalStore implements ChatOutboxStore {
     required String? messageText,
     DateTime? createdAt,
   }) async {
-    final db = await _db;
-    final rows = await db.query(
-      'conversation_previews',
-      where: 'owner_user_id = ? AND id = ?',
-      whereArgs: [ownerUserId, conversationId],
-      limit: 1,
-    );
-    if (rows.isEmpty) {
+    final box = await _previewsBox;
+    final key = _previewKey(ownerUserId, conversationId);
+    final row = _asRow(box.get(key));
+    if (row.isEmpty) {
       return false;
     }
 
-    final row = rows.first;
     final currentUnreadCount = (row['unread_count'] as num?)?.toInt() ?? 0;
     final isMine = senderId == currentUserId;
     final effectiveCreatedAt = createdAt ?? DateTime.now();
-    await db.update(
-      'conversation_previews',
-      <String, Object?>{
-        'last_message': _messagePreviewText(messageType, messageText),
-        'last_message_type': messageType,
-        'last_message_at_ms': effectiveCreatedAt.millisecondsSinceEpoch,
-        'unread_count': isMine ? currentUnreadCount : currentUnreadCount + 1,
-        'my_message_read': isMine
-            ? 0
-            : ((row['my_message_read'] as num?)?.toInt() ?? 0),
-        'ai_status': null,
-        'ai_status_text': null,
-        'ai_planned_at_ms': null,
-      },
-      where: 'owner_user_id = ? AND id = ?',
-      whereArgs: [ownerUserId, conversationId],
-    );
+    await box.put(key, {
+      ...row,
+      'last_message': _messagePreviewText(messageType, messageText),
+      'last_message_type': messageType,
+      'last_message_at_ms': effectiveCreatedAt.millisecondsSinceEpoch,
+      'unread_count': isMine ? currentUnreadCount : currentUnreadCount + 1,
+      'my_message_read': isMine
+          ? 0
+          : ((row['my_message_read'] as num?)?.toInt() ?? 0),
+      'ai_status': null,
+      'ai_status_text': null,
+      'ai_planned_at_ms': null,
+    });
     return true;
   }
 
@@ -817,39 +558,42 @@ class ChatLocalStore implements ChatOutboxStore {
     required int readerUserId,
     required int currentUserId,
   }) async {
-    final db = await _db;
-    final patch = conversationReadPreviewPatch(
+    final previewPatch = conversationReadPreviewPatch(
       readerUserId: readerUserId,
       currentUserId: currentUserId,
     );
-    if (patch.isEmpty) {
+    if (previewPatch.isEmpty) {
       return;
     }
 
-    final batch = db.batch();
-    batch.update(
-      'conversation_previews',
-      patch,
-      where: 'owner_user_id = ? AND id = ?',
-      whereArgs: [ownerUserId, conversationId],
-    );
-    if (readerUserId == currentUserId) {
-      batch.update(
-        'conversation_messages',
-        <String, Object?>{'is_read': 1},
-        where:
-            'owner_user_id = ? AND conversation_id = ? AND (sender_id IS NULL OR sender_id != ?)',
-        whereArgs: [ownerUserId, conversationId, currentUserId],
-      );
-    } else {
-      batch.update(
-        'conversation_messages',
-        <String, Object?>{'is_read': 1},
-        where: 'owner_user_id = ? AND conversation_id = ? AND sender_id = ?',
-        whereArgs: [ownerUserId, conversationId, currentUserId],
-      );
+    final previewBox = await _previewsBox;
+    final previewKey = _previewKey(ownerUserId, conversationId);
+    final preview = _asRow(previewBox.get(previewKey));
+    if (preview.isNotEmpty) {
+      await previewBox.put(previewKey, {...preview, ...previewPatch});
     }
-    await batch.commit(noResult: true);
+
+    final messagesBox = await _messagesBox;
+    final rows = await _conversationMessageRows(
+      ownerUserId: ownerUserId,
+      conversationId: conversationId,
+    );
+    for (final row in rows) {
+      final senderId = (row['sender_id'] as num?)?.toInt();
+      final shouldMark = readerUserId == currentUserId
+          ? senderId == null || senderId != currentUserId
+          : senderId == currentUserId;
+      if (shouldMark) {
+        await messagesBox.put(
+          _messageKey(
+            ownerUserId,
+            conversationId,
+            (row['id'] as num?)?.toInt() ?? 0,
+          ),
+          {...row, 'is_read': 1},
+        );
+      }
+    }
   }
 
   Map<String, Object?> conversationReadPreviewPatch({
@@ -894,30 +638,34 @@ class ChatLocalStore implements ChatOutboxStore {
       'is_ai_generated': message.isAiGenerated ? 1 : 0,
       'language_code': message.languageCode,
       'language_name': message.languageName,
-      'translated_text': null,
-      'translation_target_language_code': null,
-      'translation_target_language_name': null,
+      'translated_text': message.translatedText,
+      'translation_target_language_code': message.translationTargetLanguageCode,
+      'translation_target_language_name': message.translationTargetLanguageName,
       'client_message_id': _normalizedClientMessageId(message),
       'delivery_status': message.deliveryStatus,
       'created_at_ms': message.createdAt?.millisecondsSinceEpoch,
     };
   }
 
-  void _deleteLocalOptimisticMessageIfServerAcked(
-    Batch batch,
+  Future<void> _deleteLocalOptimisticMessageIfServerAcked(
     AppConversationMessage message, {
     required int ownerUserId,
-  }) {
+  }) async {
     final clientMessageId = _normalizedClientMessageId(message);
     if (message.id <= 0 || clientMessageId == null) {
       return;
     }
 
-    batch.delete(
-      'conversation_messages',
-      where: 'owner_user_id = ? AND client_message_id = ? AND id < 0',
-      whereArgs: [ownerUserId, clientMessageId],
-    );
+    final box = await _messagesBox;
+    for (final key in await _messageKeysForClient(
+      ownerUserId,
+      clientMessageId,
+    )) {
+      final row = _asRow(box.get(key));
+      if (((row['id'] as num?)?.toInt() ?? 0) < 0) {
+        await box.delete(key);
+      }
+    }
   }
 
   String? _normalizedClientMessageId(AppConversationMessage message) {
@@ -930,8 +678,8 @@ class ChatLocalStore implements ChatOutboxStore {
   }
 
   AppConversationMessage _messageFromRow(Map<String, Object?> row) {
-    final createdAtMs = row['created_at_ms'] as int?;
-    final fileDurationMs = row['file_duration_ms'] as int?;
+    final createdAtMs = (row['created_at_ms'] as num?)?.toInt();
+    final fileDurationMs = (row['file_duration_ms'] as num?)?.toInt();
     final cachedFilePath = row['cached_file_path']?.toString();
     final cachedSenderAvatarPath = row['cached_sender_profile_image_path']
         ?.toString();
@@ -978,7 +726,7 @@ class ChatLocalStore implements ChatOutboxStore {
   }
 
   AppConversationPreview _previewFromRow(Map<String, Object?> row) {
-    final lastMessageAtMs = row['last_message_at_ms'] as int?;
+    final lastMessageAtMs = (row['last_message_at_ms'] as num?)?.toInt();
     final cachedPeerAvatarPath = row['cached_peer_profile_image_path']
         ?.toString();
     final resolvedPeerAvatarUrl =
@@ -1077,6 +825,12 @@ class ChatLocalStore implements ChatOutboxStore {
     }
 
     await source.copy(target.path);
+    await _indexMediaPath(
+      ownerUserId: ownerUserId,
+      pathValue: target.path,
+      category: 'pending_$messageType',
+      remoteUrl: null,
+    );
     return target.path;
   }
 
@@ -1107,12 +861,12 @@ class ChatLocalStore implements ChatOutboxStore {
     }
 
     try {
-      final databasesPath = await getDatabasesPath();
       final namespace = await AppSessionStorage.cacheNamespaceForUser(
         ownerUserId,
       );
+      final supportDir = await getApplicationSupportDirectory();
       final cacheDir = Directory(
-        path.join(databasesPath, 'chat_binary_cache', namespace, category),
+        path.join(supportDir.path, 'chat_binary_cache', namespace, category),
       );
       if (!await cacheDir.exists()) {
         await cacheDir.create(recursive: true);
@@ -1125,6 +879,12 @@ class ChatLocalStore implements ChatOutboxStore {
         path.join(cacheDir.path, '$fileName$safeExtension'),
       );
       if (await localFile.exists()) {
+        await _indexMediaPath(
+          ownerUserId: ownerUserId,
+          pathValue: localFile.path,
+          category: category,
+          remoteUrl: fileUrl,
+        );
         return localFile.path;
       }
 
@@ -1141,6 +901,12 @@ class ChatLocalStore implements ChatOutboxStore {
           bytesBuilder.add(chunk);
         }
         await localFile.writeAsBytes(bytesBuilder.takeBytes(), flush: true);
+        await _indexMediaPath(
+          ownerUserId: ownerUserId,
+          pathValue: localFile.path,
+          category: category,
+          remoteUrl: fileUrl,
+        );
         return localFile.path;
       } finally {
         client.close(force: true);
@@ -1152,45 +918,39 @@ class ChatLocalStore implements ChatOutboxStore {
 
   Future<void> cleanupStaleCache({required int ownerUserId}) async {
     try {
-      final databasesPath = await getDatabasesPath();
       final namespace = await AppSessionStorage.cacheNamespaceForUser(
         ownerUserId,
       );
+      final supportDir = await getApplicationSupportDirectory();
       final rootDir = Directory(
-        path.join(databasesPath, 'chat_binary_cache', namespace),
+        path.join(supportDir.path, 'chat_binary_cache', namespace),
       );
       if (!await rootDir.exists()) {
         return;
       }
 
       final referencedPaths = <String>{};
-      final db = await _db;
-      final messageRows = await db.query(
-        'conversation_messages',
-        columns: ['cached_file_path', 'cached_sender_profile_image_path'],
-        where: 'owner_user_id = ?',
-        whereArgs: [ownerUserId],
-      );
-      for (final row in messageRows) {
-        final mediaPath = row['cached_file_path']?.toString();
-        final avatarPath = row['cached_sender_profile_image_path']?.toString();
-        if (mediaPath != null && mediaPath.isNotEmpty) {
-          referencedPaths.add(mediaPath);
+      for (final row in (await _messagesBox).values.map(_asRow)) {
+        if (_rowOwner(row) != ownerUserId) {
+          continue;
         }
-        if (avatarPath != null && avatarPath.isNotEmpty) {
-          referencedPaths.add(avatarPath);
+        for (final field in [
+          'cached_file_path',
+          'cached_sender_profile_image_path',
+        ]) {
+          final value = row[field]?.toString();
+          if (value != null && value.isNotEmpty) {
+            referencedPaths.add(value);
+          }
         }
       }
-      final previewRows = await db.query(
-        'conversation_previews',
-        columns: ['cached_peer_profile_image_path'],
-        where: 'owner_user_id = ?',
-        whereArgs: [ownerUserId],
-      );
-      for (final row in previewRows) {
-        final avatarPath = row['cached_peer_profile_image_path']?.toString();
-        if (avatarPath != null && avatarPath.isNotEmpty) {
-          referencedPaths.add(avatarPath);
+      for (final row in (await _previewsBox).values.map(_asRow)) {
+        if (_rowOwner(row) != ownerUserId) {
+          continue;
+        }
+        final value = row['cached_peer_profile_image_path']?.toString();
+        if (value != null && value.isNotEmpty) {
+          referencedPaths.add(value);
         }
       }
 
@@ -1204,6 +964,9 @@ class ChatLocalStore implements ChatOutboxStore {
         final isStale = now.difference(stat.modified) > _staleCacheAge;
         if (isStale || !referencedPaths.contains(entity.path)) {
           await entity.delete();
+          await (await _mediaIndexBox).delete(
+            _mediaKey(ownerUserId, entity.path),
+          );
         }
       }
     } catch (_) {
@@ -1212,30 +975,18 @@ class ChatLocalStore implements ChatOutboxStore {
   }
 
   Future<void> clearUserData(int ownerUserId) async {
-    final db = await _db;
-    await db.delete(
-      'conversation_messages',
-      where: 'owner_user_id = ?',
-      whereArgs: [ownerUserId],
-    );
-    await db.delete(
-      'conversation_previews',
-      where: 'owner_user_id = ?',
-      whereArgs: [ownerUserId],
-    );
-    await db.delete(
-      'message_outbox',
-      where: 'owner_user_id = ?',
-      whereArgs: [ownerUserId],
-    );
+    await _deleteRowsForOwner(await _messagesBox, ownerUserId);
+    await _deleteRowsForOwner(await _previewsBox, ownerUserId);
+    await _deleteRowsForOwner(await _outboxBox, ownerUserId);
+    await _deleteRowsForOwner(await _mediaIndexBox, ownerUserId);
 
     try {
-      final databasesPath = await getDatabasesPath();
       final namespace = await AppSessionStorage.cacheNamespaceForUser(
         ownerUserId,
       );
+      final supportDir = await getApplicationSupportDirectory();
       final rootDir = Directory(
-        path.join(databasesPath, 'chat_binary_cache', namespace),
+        path.join(supportDir.path, 'chat_binary_cache', namespace),
       );
       if (await rootDir.exists()) {
         await rootDir.delete(recursive: true);
@@ -1255,6 +1006,115 @@ class ChatLocalStore implements ChatOutboxStore {
       }
     } catch (_) {}
   }
+
+  Future<List<Map<String, Object?>>> _conversationMessageRows({
+    required int ownerUserId,
+    required int conversationId,
+  }) async {
+    final box = await _messagesBox;
+    return box.values
+        .map(_asRow)
+        .where(
+          (row) =>
+              _rowOwner(row) == ownerUserId &&
+              ((row['conversation_id'] as num?)?.toInt() ?? 0) ==
+                  conversationId,
+        )
+        .toList(growable: false);
+  }
+
+  Future<List<dynamic>> _messageKeysForClient(
+    int ownerUserId,
+    String clientMessageId,
+  ) async {
+    final box = await _messagesBox;
+    return box.keys
+        .where((key) {
+          final row = _asRow(box.get(key));
+          return _rowOwner(row) == ownerUserId &&
+              row['client_message_id']?.toString() == clientMessageId;
+        })
+        .toList(growable: false);
+  }
+
+  Future<void> _patchOutbox(
+    int ownerUserId,
+    String clientMessageId,
+    Map<String, Object?> patch,
+  ) async {
+    final box = await _outboxBox;
+    final key = _outboxKey(ownerUserId, clientMessageId);
+    final row = _asRow(box.get(key));
+    if (row.isEmpty) {
+      return;
+    }
+    await box.put(key, {...row, ...patch});
+  }
+
+  Future<void> _patchOptimisticMessages(
+    int ownerUserId,
+    String clientMessageId,
+    Map<String, Object?> patch,
+  ) async {
+    final box = await _messagesBox;
+    for (final key in await _messageKeysForClient(
+      ownerUserId,
+      clientMessageId,
+    )) {
+      final row = _asRow(box.get(key));
+      if (((row['id'] as num?)?.toInt() ?? 0) < 0) {
+        await box.put(key, {...row, ...patch});
+      }
+    }
+  }
+
+  Future<void> _indexMediaPath({
+    required int ownerUserId,
+    required String pathValue,
+    required String category,
+    required String? remoteUrl,
+  }) async {
+    await (await _mediaIndexBox).put(_mediaKey(ownerUserId, pathValue), {
+      'owner_user_id': ownerUserId,
+      'path': pathValue,
+      'category': category,
+      'remote_url': remoteUrl,
+      'updated_at_ms': DateTime.now().millisecondsSinceEpoch,
+    });
+  }
+
+  Future<void> _deleteRowsForOwner(Box<dynamic> box, int ownerUserId) async {
+    final keys = box.keys
+        .where((key) => _rowOwner(_asRow(box.get(key))) == ownerUserId)
+        .toList(growable: false);
+    await box.deleteAll(keys);
+  }
+
+  Map<String, Object?> _asRow(Object? value) {
+    if (value is Map<String, Object?>) {
+      return Map<String, Object?>.from(value);
+    }
+    if (value is Map) {
+      return value.map((key, value) => MapEntry(key.toString(), value));
+    }
+    return <String, Object?>{};
+  }
+
+  int _rowOwner(Map<String, Object?> row) {
+    return (row['owner_user_id'] as num?)?.toInt() ?? 0;
+  }
+
+  String _messageKey(int ownerUserId, int conversationId, int messageId) =>
+      '$ownerUserId:$conversationId:$messageId';
+
+  String _previewKey(int ownerUserId, int conversationId) =>
+      '$ownerUserId:$conversationId';
+
+  String _outboxKey(int ownerUserId, String clientMessageId) =>
+      '$ownerUserId:$clientMessageId';
+
+  String _mediaKey(int ownerUserId, String pathValue) =>
+      '$ownerUserId:$pathValue';
 }
 
 class ChatOutboxItem {

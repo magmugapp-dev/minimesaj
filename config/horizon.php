@@ -20,8 +20,6 @@ return [
     'middleware' => ['web'],
 
     'waits' => [
-        'redis:ai' => 30,
-        'redis:instagram' => 30,
         'redis:default' => 60,
     ],
 
@@ -55,41 +53,11 @@ return [
     |--------------------------------------------------------------------------
     |
     | 3 supervisor tanımlı:
-    |   - supervisor-ai       → ai queue (YapayZekaCevapGorevi)
-    |   - supervisor-instagram → instagram queue (InstagramAiCevapGorevi)
     |   - supervisor-default  → default queue (genel joblar)
     |
     */
 
     'defaults' => [
-        'supervisor-ai' => [
-            'connection' => 'redis',
-            'queue' => ['ai'],
-            'balance' => 'auto',
-            'autoScalingStrategy' => 'time',
-            'maxProcesses' => 1,
-            'maxTime' => 0,
-            'maxJobs' => 0,
-            'memory' => 256,
-            'tries' => 3,
-            'timeout' => 120,
-            'nice' => 0,
-        ],
-
-        'supervisor-instagram' => [
-            'connection' => 'redis',
-            'queue' => ['instagram'],
-            'balance' => 'auto',
-            'autoScalingStrategy' => 'time',
-            'maxProcesses' => 1,
-            'maxTime' => 0,
-            'maxJobs' => 0,
-            'memory' => 256,
-            'tries' => 3,
-            'timeout' => 120,
-            'nice' => 0,
-        ],
-
         'supervisor-default' => [
             'connection' => 'redis',
             'queue' => ['default'],
@@ -107,16 +75,6 @@ return [
 
     'environments' => [
         'production' => [
-            'supervisor-ai' => [
-                'maxProcesses' => 5,
-                'balanceMaxShift' => 1,
-                'balanceCooldown' => 3,
-            ],
-            'supervisor-instagram' => [
-                'maxProcesses' => 5,
-                'balanceMaxShift' => 1,
-                'balanceCooldown' => 3,
-            ],
             'supervisor-default' => [
                 'maxProcesses' => 10,
                 'balanceMaxShift' => 1,
@@ -125,12 +83,6 @@ return [
         ],
 
         'local' => [
-            'supervisor-ai' => [
-                'maxProcesses' => 2,
-            ],
-            'supervisor-instagram' => [
-                'maxProcesses' => 2,
-            ],
             'supervisor-default' => [
                 'maxProcesses' => 3,
             ],

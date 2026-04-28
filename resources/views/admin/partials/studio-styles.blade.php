@@ -13,13 +13,6 @@
         --studio-glow: rgba(99, 102, 241, .2);
     }
 
-    .studio--influencer {
-        --studio-accent: #c026d3;
-        --studio-accent-rgb: 192, 38, 211;
-        --studio-accent-soft: #fdf4ff;
-        --studio-glow: rgba(244, 114, 182, .22);
-    }
-
     .studio--ai {
         --studio-accent: #0f766e;
         --studio-accent-rgb: 15, 118, 110;

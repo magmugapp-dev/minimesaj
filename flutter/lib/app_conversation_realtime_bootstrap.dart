@@ -269,7 +269,11 @@ class _ConversationRealtimeBootstrapState
         }
         if (senderId != currentUserId) {
           final messageSoundsEnabled =
-              ref.read(appAuthProvider).asData?.value?.user
+              ref
+                  .read(appAuthProvider)
+                  .asData
+                  ?.value
+                  ?.user
                   ?.messageSoundsEnabled ??
               true;
           unawaited(

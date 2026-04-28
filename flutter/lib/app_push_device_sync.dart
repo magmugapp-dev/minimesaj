@@ -3,7 +3,6 @@ import 'dart:convert';
 import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
 import 'package:magmug/app_core.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 typedef RegisterNotificationDevice =
     Future<void> Function(
@@ -31,9 +30,9 @@ Future<void> syncNotificationDevice(
   if (normalizedDeviceToken.isEmpty) {
     return;
   }
-  SharedPreferences? prefs;
+  dynamic prefs;
   try {
-    prefs = await SharedPreferences.getInstance();
+    prefs = await AppHiveBoxes.preferences();
   } catch (_) {
     prefs = null;
   }
@@ -75,7 +74,7 @@ Future<void> syncNotificationDevice(
     }
 
     if (authToken == null || authToken.trim().isEmpty) {
-      await prefs?.remove(_pushDeviceSyncFingerprintKey);
+      await prefs?.delete(_pushDeviceSyncFingerprintKey);
       return;
     }
 
@@ -93,7 +92,7 @@ Future<void> syncNotificationDevice(
     );
     if (!hasPreviousAuthToken &&
         !hasPreviousDeviceToken &&
-        prefs?.getString(_pushDeviceSyncFingerprintKey) == fingerprint) {
+        prefs?.get(_pushDeviceSyncFingerprintKey)?.toString() == fingerprint) {
       return;
     }
 
@@ -105,7 +104,7 @@ Future<void> syncNotificationDevice(
       notificationPermission: permissionGranted && notificationsEnabled,
       languageCode: resolvedLanguageCode,
     );
-    await prefs?.setString(_pushDeviceSyncFingerprintKey, fingerprint);
+    await prefs?.put(_pushDeviceSyncFingerprintKey, fingerprint);
   } finally {
     api?.close();
   }
