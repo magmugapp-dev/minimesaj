@@ -8,6 +8,7 @@ import 'package:hive/hive.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:magmug/app_core.dart';
+import 'package:magmug/core/ai/flutter_ai_turn_processor.dart';
 import 'package:magmug/features/chat/chat_local_store.dart';
 import 'package:magmug/features/chat/chat_realtime.dart';
 
@@ -132,6 +133,41 @@ void main() {
     expect(message.fileDuration, const Duration(seconds: 4));
     expect(message.isRead, isTrue);
     expect(message.clientMessageId, 'client-voice-1');
+  });
+
+  test('gemini payload inlines local image messages', () async {
+    final directory = await Directory.systemTemp.createTemp('magmug_image_');
+    addTearDown(() => directory.delete(recursive: true));
+    final file = File('${directory.path}/photo.png');
+    await file.writeAsBytes(
+      base64Decode(
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=',
+      ),
+    );
+
+    final payload = await FlutterAiTurnProcessor.instance
+        .buildGeminiPayloadForTest(
+          MockClient((request) async => http.Response('', 404)),
+          {
+            'model_config': {'model_name': 'gemini-2.5-flash'},
+            'character': {'character_id': 'test'},
+            'runtime_context': {},
+            'messages': [
+              {
+                'is_ai': false,
+                'type': 'foto',
+                'text': 'Bu nedir?',
+                'file_url': file.path,
+                'file_mime': 'image/png',
+              },
+            ],
+          },
+        );
+
+    final parts = ((payload['contents'] as List).first as Map)['parts'] as List;
+    expect(parts.first['text'], contains('Bu nedir?'));
+    expect(parts.last['inlineData']['mimeType'], 'image/png');
+    expect(parts.last['inlineData']['data'], isNotEmpty);
   });
 
   test('syncDelta continues while the server reports more pages', () async {

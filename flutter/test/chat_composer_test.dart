@@ -49,6 +49,13 @@ void main() {
 
     expect(find.byKey(const ValueKey('chat-input-send')), findsOneWidget);
     expect(find.byKey(const ValueKey('chat-input-mic')), findsNothing);
+    final sendButton = tester.widget<Container>(
+      find.byKey(const ValueKey('chat-input-send')),
+    );
+    expect(
+      (sendButton.decoration! as BoxDecoration).color,
+      AppColors.onlineGreen,
+    );
   });
 
   testWidgets('attachment sheet only offers camera and photo actions', (

@@ -9,7 +9,10 @@ use App\Models\Eslesme;
 use App\Models\Mesaj;
 use App\Models\Sohbet;
 use App\Models\User;
+use App\Events\AiTurnStatusUpdated;
 use App\Services\MesajServisi;
+use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Notification;
@@ -17,6 +20,7 @@ use Laravel\Sanctum\Sanctum;
 
 it('creates a pending flutter ai turn after a user message', function () {
     Notification::fake();
+    Event::fake([AiTurnStatusUpdated::class]);
     [$viewer, $aiUser, $conversation] = aiConversationForTest();
 
     app(MesajServisi::class)->gonder($conversation, $viewer, [
@@ -33,6 +37,32 @@ it('creates a pending flutter ai turn after a user message', function () {
         'max_attempts' => 5,
     ]);
     expect($conversation->fresh()->ai_durumu)->toBe('pending');
+    Event::assertDispatched(AiTurnStatusUpdated::class, function (AiTurnStatusUpdated $event) use ($conversation) {
+        return $event->sohbetId === $conversation->id
+            && $event->status === 'pending'
+            && $event->plannedAt !== null;
+    });
+});
+
+it('recovers processing ai turns that timed out', function () {
+    Notification::fake();
+    [$viewer, , $conversation] = aiConversationForTest();
+    $incoming = app(MesajServisi::class)->gonder($conversation, $viewer, [
+        'mesaj_tipi' => 'metin',
+        'mesaj_metni' => 'Takilan gorev.',
+    ]);
+    $turn = AiMessageTurn::query()->where('source_message_id', $incoming->id)->firstOrFail();
+    $turn->forceFill([
+        'status' => AiMessageTurn::STATUS_PROCESSING,
+        'started_at' => now()->subMinutes(5),
+    ])->save();
+
+    Artisan::call('ai:takilan-gorevleri-kurtar', ['--minutes' => 1]);
+
+    $turn->refresh();
+    expect($turn->status)->toBe(AiMessageTurn::STATUS_PENDING)
+        ->and($turn->attempt_count)->toBe(1)
+        ->and($turn->retry_after)->not->toBeNull();
 });
 
 it('returns pending turns and stores flutter reply parts idempotently', function () {

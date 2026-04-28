@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:magmug/app_core.dart';
+import 'package:magmug/core/ai/flutter_ai_turn_processor.dart';
 import 'package:magmug/features/chat/chat_local_store.dart';
 import 'package:magmug/features/chat/chat_realtime.dart';
 import 'package:magmug/features/chat/chat_translation_policy.dart';
@@ -1376,10 +1377,10 @@ Widget _chatImageWidget(
   WidgetBuilder? errorBuilder,
 }) {
   final normalized = source.trim();
-  final uri = Uri.tryParse(normalized);
-  if (uri?.scheme.toLowerCase() == 'file') {
+  final mediaSource = AppMediaSource.resolve(normalized);
+  if (mediaSource.isFile) {
     return Image.file(
-      File(uri!.toFilePath()),
+      File(mediaSource.value),
       fit: fit,
       gaplessPlayback: true,
       errorBuilder: (context, _, _) =>
@@ -1475,10 +1476,11 @@ class _AudioBubbleState extends State<_AudioBubble> {
             state.processingState == ProcessingState.buffering;
         if (completed) {
           _position = Duration.zero;
+          _sourceLoaded = false;
         }
       });
       if (completed) {
-        unawaited(_player.seek(Duration.zero));
+        unawaited(_player.stop());
       }
     });
   }
@@ -1533,13 +1535,16 @@ class _AudioBubbleState extends State<_AudioBubble> {
   }
 
   Future<void> _loadSource(String source) {
-    final uri = Uri.tryParse(source);
-    final scheme = uri?.scheme.toLowerCase();
-    if (scheme == 'http' || scheme == 'https' || scheme == 'file') {
+    final mediaSource = AppMediaSource.resolve(source);
+    if (mediaSource.isRemote) {
       return _player.setUrl(source).then((_) {});
     }
 
-    return _player.setFilePath(source).then((_) {});
+    if (mediaSource.isFile) {
+      return _player.setFilePath(mediaSource.value).then((_) {});
+    }
+
+    return _player.setUrl(source).then((_) {});
   }
 
   @override
@@ -1965,8 +1970,8 @@ class _ChatInputBar extends StatelessWidget {
                             ? _circleButton(
                                 key: const ValueKey('chat-input-send'),
                                 icon: CupertinoIcons.arrow_up,
-                                bg: actionColor,
-                                iconColor: actionIconColor,
+                                bg: AppColors.onlineGreen,
+                                iconColor: AppColors.white,
                                 onTap: !isSending ? onSend : null,
                                 child: isSending
                                     ? const CupertinoActivityIndicator(
@@ -2071,13 +2076,13 @@ class _ChatInputBar extends StatelessWidget {
             child: Row(
               children: [
                 TweenAnimationBuilder<double>(
+                  key: ValueKey('voice-pulse-${elapsed.inSeconds}'),
                   tween: Tween<double>(begin: 0.72, end: 1),
-                  duration: const Duration(milliseconds: 620),
+                  duration: const Duration(milliseconds: 520),
                   curve: Curves.easeInOut,
                   builder: (context, scale, child) {
                     return Transform.scale(scale: scale, child: child);
                   },
-                  onEnd: () {},
                   child: Icon(CupertinoIcons.mic_fill, size: 18, color: accent),
                 ),
                 const SizedBox(width: 8),
@@ -2596,6 +2601,12 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
       ref.invalidate(conversationMessagesProvider(conversation.id));
       ref.read(conversationFeedRefreshProvider.notifier).state++;
       _playSendSound(currentUser);
+      unawaited(
+        FlutterAiTurnProcessor.instance.run(
+          token: authState.token,
+          ownerUserId: currentUser.id,
+        ),
+      );
     } catch (error) {
       if (!mounted) {
         return;
@@ -2619,6 +2630,12 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
         ref.invalidate(conversationMessagesProvider(conversation.id));
         ref.read(conversationFeedRefreshProvider.notifier).state++;
         _playSendSound(currentUser);
+        unawaited(
+          FlutterAiTurnProcessor.instance.run(
+            token: authState.token,
+            ownerUserId: currentUser.id,
+          ),
+        );
         return;
       }
       final message = AppAuthErrorFormatter.messageFrom(error);
@@ -2928,6 +2945,12 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
       ref.read(conversationFeedRefreshProvider.notifier).state++;
       _playSendSound(currentUser);
       unawaited(_flushOutboxAndRefresh(conversation.id));
+      unawaited(
+        FlutterAiTurnProcessor.instance.run(
+          token: authState.token,
+          ownerUserId: currentUser.id,
+        ),
+      );
     } catch (error) {
       if (!mounted) {
         return;

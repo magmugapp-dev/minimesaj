@@ -77,11 +77,7 @@ class AiMobileController extends Controller
         if ($turn) {
             abort_unless($this->turnBelongsToUser($turn, $request->user()), 403);
             abort_unless(in_array($turn->status, [AiMessageTurn::STATUS_PENDING, AiMessageTurn::STATUS_DEFERRED, AiMessageTurn::STATUS_PROCESSING], true), 409);
-            $turn->forceFill([
-                'status' => AiMessageTurn::STATUS_PROCESSING,
-                'started_at' => now(),
-                'last_error' => null,
-            ])->save();
+            $this->turnService->markProcessing($turn);
         } elseif (!($validated['translation'] ?? false)) {
             abort(422, 'Turn id required.');
         }

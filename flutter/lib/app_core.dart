@@ -29,6 +29,7 @@ export 'package:magmug/core/theme/app_colors.dart';
 export 'package:magmug/core/theme/app_theme_tokens.dart';
 export 'package:magmug/core/ui/app_controls.dart';
 export 'package:magmug/core/ui/cached_app_image.dart';
+export 'package:magmug/core/ui/app_media_source.dart';
 export 'package:magmug/core/ui/app_identity_widgets.dart';
 export 'package:magmug/core/utils/app_auth_error_formatter.dart';
 export 'package:magmug/core/utils/currency_format.dart';

@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:magmug/app_core.dart';
+import 'package:magmug/core/ai/flutter_ai_turn_processor.dart';
 import 'package:magmug/features/chat/chat_local_store.dart';
 import 'package:magmug/features/chat/chat_realtime.dart';
 
@@ -24,6 +25,7 @@ class _ConversationRealtimeBootstrapState
   int? _currentUserId;
   DateTime? _subscriptionRetryAfter;
   Timer? _subscriptionRetryTimer;
+  final Map<int, Timer> _aiTurnTimers = <int, Timer>{};
   int _eventSequence = 0;
 
   @override
@@ -52,6 +54,10 @@ class _ConversationRealtimeBootstrapState
     _subscriptionRetryAfter = null;
     _subscriptionRetryTimer?.cancel();
     _subscriptionRetryTimer = null;
+    for (final timer in _aiTurnTimers.values) {
+      timer.cancel();
+    }
+    _aiTurnTimers.clear();
     super.dispose();
   }
 
@@ -239,6 +245,9 @@ class _ConversationRealtimeBootstrapState
         );
         break;
       case ChatRealtimeEventType.aiStatus:
+        final plannedAt = DateTime.tryParse(
+          event.payload['planned_at']?.toString() ?? '',
+        );
         await store.updateConversationPreviewRuntimeStatus(
           event.conversationId,
           ownerUserId: currentUserId,
@@ -246,9 +255,12 @@ class _ConversationRealtimeBootstrapState
           aiStatusText: _nullableString(
             event.payload['status_text']?.toString(),
           ),
-          aiPlannedAt: DateTime.tryParse(
-            event.payload['planned_at']?.toString() ?? '',
-          ),
+          aiPlannedAt: plannedAt,
+        );
+        _scheduleAiTurnRun(
+          conversationId: event.conversationId,
+          plannedAt: plannedAt,
+          ownerUserId: currentUserId,
         );
         break;
       case ChatRealtimeEventType.messageSent:
@@ -338,6 +350,37 @@ class _ConversationRealtimeBootstrapState
     if (ChatRealtimeEventRefreshDeduper.instance.shouldRefresh(event)) {
       ref.read(conversationFeedRefreshProvider.notifier).state++;
     }
+  }
+
+  void _scheduleAiTurnRun({
+    required int conversationId,
+    required DateTime? plannedAt,
+    required int ownerUserId,
+  }) {
+    _aiTurnTimers.remove(conversationId)?.cancel();
+    final token = _desiredToken;
+    if (token == null || token.trim().isEmpty || plannedAt == null) {
+      return;
+    }
+
+    final delay = plannedAt.difference(DateTime.now());
+    _aiTurnTimers[conversationId] = Timer(
+      delay.isNegative ? Duration.zero : delay,
+      () {
+        _aiTurnTimers.remove(conversationId);
+        if (!mounted ||
+            _desiredToken != token ||
+            _desiredUserId != ownerUserId) {
+          return;
+        }
+        unawaited(
+          FlutterAiTurnProcessor.instance.run(
+            token: token,
+            ownerUserId: ownerUserId,
+          ),
+        );
+      },
+    );
   }
 
   @override

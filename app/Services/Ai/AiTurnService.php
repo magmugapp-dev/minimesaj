@@ -3,6 +3,7 @@
 namespace App\Services\Ai;
 
 use App\Events\MesajGonderildi;
+use App\Events\AiTurnStatusUpdated;
 use App\Models\AiBlockThreshold;
 use App\Models\AiCharacter;
 use App\Models\AiMessageTurn;
@@ -15,6 +16,7 @@ use App\Models\User;
 use App\Notifications\YeniMesaj;
 use App\Support\AiMessageTextSanitizer;
 use App\Support\Language;
+use App\Support\MediaUrl;
 use Illuminate\Support\Facades\DB;
 
 class AiTurnService
@@ -51,6 +53,12 @@ class AiTurnService
             'ai_planlanan_cevap_at' => $plannedAt,
             'ai_durum_guncellendi_at' => now(),
         ])->save();
+        AiTurnStatusUpdated::dispatch(
+            $conversation->id,
+            'pending',
+            null,
+            $plannedAt?->toISOString(),
+        );
 
         return $turn;
     }
@@ -122,7 +130,8 @@ class AiTurnService
                     'is_ai' => (bool) $message->ai_tarafindan_uretildi_mi,
                     'type' => $message->mesaj_tipi,
                     'text' => $message->mesaj_metni,
-                    'file_url' => $message->dosya_yolu,
+                    'file_url' => MediaUrl::resolve($message->dosya_yolu) ?? $message->dosya_yolu,
+                    'file_mime' => $this->messageFileMime($message),
                     'file_duration' => $message->dosya_suresi,
                     'created_at' => $message->created_at?->toISOString(),
                 ])
@@ -188,6 +197,7 @@ class AiTurnService
                 'ai_planlanan_cevap_at' => null,
                 'ai_durum_guncellendi_at' => now(),
             ])->save();
+            AiTurnStatusUpdated::dispatch($conversation->id, '', null, null);
 
             return $messages;
         });
@@ -204,6 +214,48 @@ class AiTurnService
             'retry_after' => $deferred ? now()->addMinutes(5) : now()->addSeconds($this->backoffSeconds($attempts)),
             'last_error' => mb_substr($error, 0, 1000),
         ])->save();
+        $conversation = $turn->conversation;
+        if ($conversation) {
+            $conversation->forceFill([
+                'ai_durumu' => $deferred ? 'deferred' : 'pending',
+                'ai_durum_metni' => null,
+                'ai_planlanan_cevap_at' => $turn->planned_at,
+                'ai_durum_guncellendi_at' => now(),
+            ])->save();
+            AiTurnStatusUpdated::dispatch(
+                $conversation->id,
+                $deferred ? 'deferred' : 'pending',
+                null,
+                $turn->planned_at?->toISOString(),
+            );
+        }
+
+        return $turn;
+    }
+
+    public function markProcessing(AiMessageTurn $turn): AiMessageTurn
+    {
+        $turn->forceFill([
+            'status' => AiMessageTurn::STATUS_PROCESSING,
+            'started_at' => now(),
+            'last_error' => null,
+        ])->save();
+
+        $conversation = $turn->conversation;
+        if ($conversation) {
+            $conversation->forceFill([
+                'ai_durumu' => 'typing',
+                'ai_durum_metni' => 'Yaziyor...',
+                'ai_planlanan_cevap_at' => $turn->planned_at,
+                'ai_durum_guncellendi_at' => now(),
+            ])->save();
+            AiTurnStatusUpdated::dispatch(
+                $conversation->id,
+                'typing',
+                'Yaziyor...',
+                $turn->planned_at?->toISOString(),
+            );
+        }
 
         return $turn;
     }
@@ -349,6 +401,29 @@ class AiTurnService
     private function backoffSeconds(int $attempt): int
     {
         return min(60, (2 ** max(0, $attempt - 1)) + random_int(0, 3));
+    }
+
+    private function messageFileMime(Mesaj $message): ?string
+    {
+        $path = trim((string) $message->dosya_yolu);
+        if ($path === '') {
+            return null;
+        }
+
+        $extension = strtolower(pathinfo(parse_url($path, PHP_URL_PATH) ?: $path, PATHINFO_EXTENSION));
+
+        return match ($extension) {
+            'jpg', 'jpeg' => 'image/jpeg',
+            'png' => 'image/png',
+            'webp' => 'image/webp',
+            'heic' => 'image/heic',
+            'heif' => 'image/heif',
+            'm4a', 'mp4' => 'audio/mp4',
+            'aac' => 'audio/aac',
+            'mp3' => 'audio/mpeg',
+            'wav' => 'audio/wav',
+            default => null,
+        };
     }
 
     private function defaultViolationThreshold(string $category): int

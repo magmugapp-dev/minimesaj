@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:magmug/core/models/communication_models.dart';
 import 'package:magmug/core/network/app_api.dart';
@@ -17,6 +18,14 @@ class FlutterAiTurnProcessor {
 
   bool _running = false;
   Timer? _deferredTimer;
+
+  @visibleForTesting
+  Future<Map<String, dynamic>> buildGeminiPayloadForTest(
+    http.Client client,
+    Map<String, dynamic> context,
+  ) {
+    return _geminiPayload(client, context);
+  }
 
   Future<void> run({required String token, required int ownerUserId}) async {
     if (_running || token.trim().isEmpty || ownerUserId <= 0) {
@@ -244,7 +253,7 @@ class FlutterAiTurnProcessor {
             'turn_id': turnId,
             'model':
                 modelConfig['model_name']?.toString() ?? 'gemini-2.5-flash',
-            'payload': _geminiPayload(context),
+            'payload': await _geminiPayload(client, context),
           });
 
     final streamed = await client
@@ -263,7 +272,10 @@ class FlutterAiTurnProcessor {
     return _readGeminiSse(streamed.stream);
   }
 
-  Map<String, dynamic> _geminiPayload(Map<String, dynamic> context) {
+  Future<Map<String, dynamic>> _geminiPayload(
+    http.Client client,
+    Map<String, dynamic> context,
+  ) async {
     final modelConfig = _asMap(context['model_config']) ?? const {};
     final prompt = _asMap(context['global_prompt']);
     final character = _asMap(context['character']) ?? const {};
@@ -284,29 +296,125 @@ class FlutterAiTurnProcessor {
           },
         ],
       },
-      'contents': messages.map((message) {
-        final isAi = message['is_ai'] == true;
-        final text = message['text']?.toString().trim();
-        final fileUrl = message['file_url']?.toString().trim();
-        return {
-          'role': isAi ? 'model' : 'user',
-          'parts': [
-            {
-              'text': [
-                if (text != null && text.isNotEmpty) text,
-                if (fileUrl != null && fileUrl.isNotEmpty)
-                  '[media:${message['type']}] $fileUrl',
-              ].join('\n'),
-            },
-          ],
-        };
-      }).toList(),
+      'contents': [
+        for (final message in messages)
+          {
+            'role': message['is_ai'] == true ? 'model' : 'user',
+            'parts': await _geminiPartsForMessage(client, message),
+          },
+      ],
       'generationConfig': {
         'temperature': (modelConfig['temperature'] as num?)?.toDouble() ?? 0.8,
         'topP': (modelConfig['top_p'] as num?)?.toDouble() ?? 0.9,
         'maxOutputTokens':
             (modelConfig['max_output_tokens'] as num?)?.toInt() ?? 1024,
       },
+    };
+  }
+
+  Future<List<Map<String, dynamic>>> _geminiPartsForMessage(
+    http.Client client,
+    Map<String, dynamic> message,
+  ) async {
+    final isAi = message['is_ai'] == true;
+    final text = message['text']?.toString().trim();
+    final fileUrl = message['file_url']?.toString().trim();
+    final parts = <Map<String, dynamic>>[];
+    final textParts = <String>[if (text != null && text.isNotEmpty) text];
+
+    if (!isAi &&
+        _isImageMessage(message) &&
+        fileUrl != null &&
+        fileUrl.isNotEmpty) {
+      final inline = await _inlineImagePart(client, message, fileUrl);
+      if (inline != null) {
+        parts.add(inline);
+      } else {
+        textParts.add('[media:${message['type']}] $fileUrl');
+      }
+    } else if (fileUrl != null && fileUrl.isNotEmpty) {
+      textParts.add('[media:${message['type']}] $fileUrl');
+    }
+
+    if (textParts.isNotEmpty) {
+      parts.insert(0, {'text': textParts.join('\n')});
+    }
+
+    return parts.isEmpty
+        ? [
+            {'text': ''},
+          ]
+        : parts;
+  }
+
+  bool _isImageMessage(Map<String, dynamic> message) {
+    final type = message['type']?.toString().trim().toLowerCase();
+    final mime = message['file_mime']?.toString().trim().toLowerCase();
+    return type == 'foto' ||
+        type == 'gorsel' ||
+        (mime != null && mime.startsWith('image/'));
+  }
+
+  Future<Map<String, dynamic>?> _inlineImagePart(
+    http.Client client,
+    Map<String, dynamic> message,
+    String fileUrl,
+  ) async {
+    const maxInlineBytes = 5 * 1024 * 1024;
+    try {
+      final mime = _imageMimeFor(message, fileUrl);
+      final bytes = await _readMediaBytes(client, fileUrl);
+      if (bytes == null || bytes.isEmpty || bytes.length > maxInlineBytes) {
+        return null;
+      }
+
+      return {
+        'inlineData': {'mimeType': mime, 'data': base64Encode(bytes)},
+      };
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<List<int>?> _readMediaBytes(http.Client client, String source) async {
+    final uri = Uri.tryParse(source);
+    final scheme = uri?.scheme.toLowerCase();
+    if (scheme == 'http' || scheme == 'https') {
+      final response = await client
+          .get(uri!)
+          .timeout(const Duration(seconds: 10));
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        return null;
+      }
+      return response.bodyBytes;
+    }
+    if (scheme == 'file') {
+      final file = File(uri!.toFilePath());
+      if (!await file.exists()) {
+        return null;
+      }
+      return file.readAsBytes();
+    }
+    final file = File(source);
+    if (!await file.exists()) {
+      return null;
+    }
+    return file.readAsBytes();
+  }
+
+  String _imageMimeFor(Map<String, dynamic> message, String source) {
+    final mime = message['file_mime']?.toString().trim().toLowerCase();
+    if (mime != null && mime.startsWith('image/')) {
+      return mime;
+    }
+    final path = Uri.tryParse(source)?.path ?? source;
+    final extension = path.split('.').last.toLowerCase();
+    return switch (extension) {
+      'png' => 'image/png',
+      'webp' => 'image/webp',
+      'heic' => 'image/heic',
+      'heif' => 'image/heif',
+      _ => 'image/jpeg',
     };
   }
 

@@ -13,6 +13,7 @@
                 </div>
                 <div class="flex flex-wrap gap-2">
                     <a href="{{ route('admin.ai.ekle') }}" class="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white">Yeni karakter</a>
+                    <a href="{{ route('admin.ai.json-ekle') }}" class="rounded-lg border border-gray-300 px-4 py-2 text-sm font-semibold text-gray-700">JSON import</a>
                     <a href="{{ route('admin.ai.import') }}" class="rounded-lg border border-gray-300 px-4 py-2 text-sm font-semibold text-gray-700">ZIP import</a>
                 </div>
             </div>

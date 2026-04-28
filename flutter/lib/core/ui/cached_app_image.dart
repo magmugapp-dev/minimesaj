@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:magmug/core/theme/app_colors.dart';
+import 'package:magmug/core/ui/app_media_source.dart';
 
 @visibleForTesting
 ({int? width, int? height}) resolveCachedAppImageDecodeSize({
@@ -54,6 +55,7 @@ class CachedAppImage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final source = imageUrl?.trim();
+    final mediaSource = AppMediaSource.resolve(source);
     final decodeSize = resolveCachedAppImageDecodeSize(
       cacheWidth: cacheWidth,
       cacheHeight: cacheHeight,
@@ -62,9 +64,9 @@ class CachedAppImage extends StatelessWidget {
       return _fallback(context);
     }
 
-    if (source.startsWith('http://') || source.startsWith('https://')) {
+    if (mediaSource.isRemote) {
       return CachedNetworkImage(
-        imageUrl: source,
+        imageUrl: mediaSource.value,
         width: width,
         height: height,
         fit: fit,
@@ -77,9 +79,23 @@ class CachedAppImage extends StatelessWidget {
       );
     }
 
-    if (source.startsWith('assets/')) {
+    if (mediaSource.isAsset) {
       return Image.asset(
-        source,
+        mediaSource.value,
+        width: width,
+        height: height,
+        fit: fit,
+        alignment: alignment,
+        gaplessPlayback: gaplessPlayback,
+        cacheWidth: decodeSize.width,
+        cacheHeight: decodeSize.height,
+        errorBuilder: (_, _, _) => _fallback(context),
+      );
+    }
+
+    if (mediaSource.isFile) {
+      return Image.file(
+        File(mediaSource.value),
         width: width,
         height: height,
         fit: fit,

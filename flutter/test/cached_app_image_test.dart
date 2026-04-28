@@ -42,4 +42,27 @@ void main() {
       height: null,
     ));
   });
+
+  test('app media source resolves remote asset file and relative paths', () {
+    expect(
+      AppMediaSource.resolve('https://example.test/a.jpg').kind,
+      AppMediaSourceKind.remote,
+    );
+    expect(
+      AppMediaSource.resolve('assets/images/chat_photo.png').kind,
+      AppMediaSourceKind.asset,
+    );
+    expect(
+      AppMediaSource.resolve('file:///tmp/photo.jpg').kind,
+      AppMediaSourceKind.file,
+    );
+    expect(
+      AppMediaSource.resolve(r'C:\tmp\photo.jpg').kind,
+      AppMediaSourceKind.file,
+    );
+    expect(
+      AppMediaSource.resolve('mesajlar/1/foto/a.jpg').kind,
+      AppMediaSourceKind.relative,
+    );
+  });
 }

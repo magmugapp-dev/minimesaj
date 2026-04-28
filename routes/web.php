@@ -45,6 +45,8 @@ Route::prefix('admin')->group(function () {
         Route::post('ai/ekle', [AiCharacterController::class, 'store'])->name('admin.ai.kaydet');
         Route::get('ai/import', [AiCharacterController::class, 'importForm'])->name('admin.ai.import');
         Route::post('ai/import', [AiCharacterController::class, 'importZip'])->name('admin.ai.import.store');
+        Route::get('ai/json-ekle', [AiCharacterController::class, 'importJsonForm'])->name('admin.ai.json-ekle');
+        Route::post('ai/json-ekle', [AiCharacterController::class, 'importJsonStore'])->name('admin.ai.json-kaydet');
         Route::post('ai/prompt', [AiCharacterController::class, 'promptUpdate'])->name('admin.ai.prompt.update');
         Route::post('ai/thresholds', [AiCharacterController::class, 'thresholdsUpdate'])->name('admin.ai.thresholds.update');
         Route::get('ai/{character}/duzenle', [AiCharacterController::class, 'edit'])->name('admin.ai.duzenle');
