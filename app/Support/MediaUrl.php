@@ -8,6 +8,22 @@ use Illuminate\Support\Str;
 
 class MediaUrl
 {
+    public static function buildUrl(?string $value): ?string
+    {
+        if (!is_string($value) || trim($value) === '') {
+            return null;
+        }
+        $trimmed = self::extractAbsoluteUrl(trim($value));
+        if (self::looksLikeAbsoluteUrl($trimmed)) {
+            return self::rewriteLoopbackUrl($trimmed);
+        }
+        $relativePath = ltrim($trimmed, '/');
+        if ($relativePath === '') {
+            return null;
+        }
+        return self::normalizeGeneratedUrl(Storage::disk('public')->url($relativePath));
+    }
+
     public static function resolve(?string $value): ?string
     {
         if (!is_string($value) || trim($value) === '') {

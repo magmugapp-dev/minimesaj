@@ -499,6 +499,7 @@ class ChatLocalStore implements ChatOutboxStore {
     required String? messageType,
     required String? messageText,
     DateTime? createdAt,
+    bool isAiMessage = false,
   }) async {
     final box = await _previewsBox;
     final key = _previewKey(ownerUserId, conversationId);
@@ -509,13 +510,15 @@ class ChatLocalStore implements ChatOutboxStore {
 
     final currentUnreadCount = (row['unread_count'] as num?)?.toInt() ?? 0;
     final isMine = senderId == currentUserId;
+    // AI mesajları için unread sayacı artırılmaz
+    final shouldIncrement = !isMine && !isAiMessage;
     final effectiveCreatedAt = createdAt ?? DateTime.now();
     await box.put(key, {
       ...row,
       'last_message': _messagePreviewText(messageType, messageText),
       'last_message_type': messageType,
       'last_message_at_ms': effectiveCreatedAt.millisecondsSinceEpoch,
-      'unread_count': isMine ? currentUnreadCount : currentUnreadCount + 1,
+      'unread_count': shouldIncrement ? currentUnreadCount + 1 : currentUnreadCount,
       'my_message_read': isMine
           ? 0
           : ((row['my_message_read'] as num?)?.toInt() ?? 0),
@@ -549,6 +552,7 @@ class ChatLocalStore implements ChatOutboxStore {
       messageType: message.type,
       messageText: message.text,
       createdAt: message.createdAt,
+      isAiMessage: message.isAiGenerated,
     );
   }
 

@@ -18,6 +18,8 @@ class FlutterAiTurnProcessor {
 
   bool _running = false;
   Timer? _deferredTimer;
+  String? _pendingToken;
+  int? _pendingUserId;
 
   @visibleForTesting
   Future<Map<String, dynamic>> buildGeminiPayloadForTest(
@@ -27,12 +29,24 @@ class FlutterAiTurnProcessor {
     return _geminiPayload(client, context);
   }
 
+  void cancel() {
+    _deferredTimer?.cancel();
+    _deferredTimer = null;
+    _pendingToken = null;
+    _pendingUserId = null;
+  }
+
   Future<void> run({required String token, required int ownerUserId}) async {
-    if (_running || token.trim().isEmpty || ownerUserId <= 0) {
+    if (token.trim().isEmpty || ownerUserId <= 0) return;
+    if (_running) {
+      _pendingToken = token;
+      _pendingUserId = ownerUserId;
       return;
     }
 
     _running = true;
+    _pendingToken = null;
+    _pendingUserId = null;
     final client = AppHttpClientFactory.createForApi();
     try {
       await _syncBootstrap(client, token);
@@ -55,6 +69,13 @@ class FlutterAiTurnProcessor {
     } finally {
       _running = false;
       client.close();
+      final pToken = _pendingToken;
+      final pUserId = _pendingUserId;
+      if (pToken != null && pUserId != null) {
+        _pendingToken = null;
+        _pendingUserId = null;
+        unawaited(run(token: pToken, ownerUserId: pUserId));
+      }
     }
   }
 
@@ -180,12 +201,24 @@ class FlutterAiTurnProcessor {
     final context = _decodeMap(response.bodyBytes);
     final prompt = _asMap(context['global_prompt']);
     if (prompt != null) {
-      await (await AppHiveBoxes.aiPrompt()).put('active', prompt);
+      final newHash = prompt['hash']?.toString();
+      final promptBox = await AppHiveBoxes.aiPrompt();
+      final cachedHash =
+          _asMap(await promptBox.get('active'))?['hash']?.toString();
+      if (newHash == null || newHash != cachedHash) {
+        await promptBox.put('active', prompt);
+      }
     }
     final character = _asMap(context['character']);
     final characterId = character?['character_id']?.toString();
     if (characterId != null && characterId.trim().isNotEmpty) {
-      await (await AppHiveBoxes.aiCharacters()).put(characterId, character);
+      final newVersion = character?['character_version'];
+      final charBox = await AppHiveBoxes.aiCharacters();
+      final cached = _asMap(await charBox.get(characterId));
+      final cachedVersion = cached?['character_version'];
+      if (newVersion == null || newVersion != cachedVersion) {
+        await charBox.put(characterId, character);
+      }
     }
     await (await AppHiveBoxes.aiMemory())
         .put('conversation:${context['conversation_id']}', {
@@ -222,6 +255,9 @@ class FlutterAiTurnProcessor {
         if (generated != null && generated.trim().isNotEmpty) {
           return generated;
         }
+      } on _PermanentGeminiException catch (error) {
+        await _deferLocalTurn(context, error: error.toString());
+        return null;
       } on _RetryableGeminiException catch (error) {
         lastError = error;
       } on SocketException catch (error) {
@@ -266,7 +302,8 @@ class FlutterAiTurnProcessor {
       throw _RetryableGeminiException(streamed.statusCode);
     }
     if (streamed.statusCode >= 400) {
-      return null;
+      // 4xx kalıcı hata — retry etme, direkt fail
+      throw _PermanentGeminiException(streamed.statusCode);
     }
 
     return _readGeminiSse(streamed.stream);
@@ -322,18 +359,29 @@ class FlutterAiTurnProcessor {
     final parts = <Map<String, dynamic>>[];
     final textParts = <String>[if (text != null && text.isNotEmpty) text];
 
-    if (!isAi &&
-        _isImageMessage(message) &&
-        fileUrl != null &&
-        fileUrl.isNotEmpty) {
-      final inline = await _inlineImagePart(client, message, fileUrl);
-      if (inline != null) {
-        parts.add(inline);
-      } else {
-        textParts.add('[media:${message['type']}] $fileUrl');
+    if (!isAi && fileUrl != null && fileUrl.isNotEmpty) {
+      if (_isImageMessage(message)) {
+        final inline = await _inlineImagePart(client, message, fileUrl);
+        if (inline != null) {
+          parts.add(inline);
+        } else {
+          textParts.add('[Fotoğraf mesajı]');
+        }
+      } else if (_isAudioMessage(message)) {
+        final inline = await _inlineAudioPart(client, message, fileUrl);
+        if (inline != null) {
+          parts.add(inline);
+        }
+        final dur = message['file_duration'];
+        textParts.add(
+          dur != null ? '[Sesli mesaj, süre: ${dur}s]' : '[Sesli mesaj]',
+        );
+      } else if (fileUrl.isNotEmpty) {
+        textParts.add('[Medya: ${message['type']}]');
       }
-    } else if (fileUrl != null && fileUrl.isNotEmpty) {
-      textParts.add('[media:${message['type']}] $fileUrl');
+    } else if (isAi && fileUrl != null && fileUrl.isNotEmpty) {
+      // AI kendi gönderdiği medyalar için sadece referans
+      textParts.add('[Medya: ${message['type']}]');
     }
 
     if (textParts.isNotEmpty) {
@@ -355,6 +403,12 @@ class FlutterAiTurnProcessor {
         (mime != null && mime.startsWith('image/'));
   }
 
+  bool _isAudioMessage(Map<String, dynamic> message) {
+    final type = message['type']?.toString().trim().toLowerCase();
+    final mime = message['file_mime']?.toString().trim().toLowerCase();
+    return type == 'ses' || (mime != null && mime.startsWith('audio/'));
+  }
+
   Future<Map<String, dynamic>?> _inlineImagePart(
     http.Client client,
     Map<String, dynamic> message,
@@ -374,6 +428,40 @@ class FlutterAiTurnProcessor {
     } catch (_) {
       return null;
     }
+  }
+
+  Future<Map<String, dynamic>?> _inlineAudioPart(
+    http.Client client,
+    Map<String, dynamic> message,
+    String fileUrl,
+  ) async {
+    const maxInlineBytes = 5 * 1024 * 1024;
+    try {
+      final mime = _audioMimeFor(message, fileUrl);
+      final bytes = await _readMediaBytes(client, fileUrl);
+      if (bytes == null || bytes.isEmpty || bytes.length > maxInlineBytes) {
+        return null;
+      }
+      return {
+        'inlineData': {'mimeType': mime, 'data': base64Encode(bytes)},
+      };
+    } catch (_) {
+      return null;
+    }
+  }
+
+  String _audioMimeFor(Map<String, dynamic> message, String source) {
+    final mime = message['file_mime']?.toString().trim().toLowerCase();
+    if (mime != null && mime.startsWith('audio/')) return mime;
+    final path = Uri.tryParse(source)?.path ?? source;
+    final ext = path.split('.').last.toLowerCase();
+    return switch (ext) {
+      'mp3' => 'audio/mpeg',
+      'ogg' => 'audio/ogg',
+      'wav' => 'audio/wav',
+      'webm' => 'audio/webm',
+      _ => 'audio/mp4',
+    };
   }
 
   Future<List<int>?> _readMediaBytes(http.Client client, String source) async {
@@ -575,12 +663,19 @@ class FlutterAiTurnProcessor {
       if ((row['owner_user_id'] as num?)?.toInt() != ownerUserId) {
         continue;
       }
-      final retryAt = DateTime.tryParse(row['retry_after']?.toString() ?? '');
-      if (retryAt == null) {
-        continue;
+      final plannedAt =
+          DateTime.tryParse(row['planned_at']?.toString() ?? '');
+      final retryAt =
+          DateTime.tryParse(row['retry_after']?.toString() ?? '');
+      DateTime? candidate;
+      if (plannedAt != null && retryAt != null) {
+        candidate = plannedAt.isBefore(retryAt) ? plannedAt : retryAt;
+      } else {
+        candidate = plannedAt ?? retryAt;
       }
-      if (nextRetry == null || retryAt.isBefore(nextRetry)) {
-        nextRetry = retryAt;
+      if (candidate == null) continue;
+      if (nextRetry == null || candidate.isBefore(nextRetry)) {
+        nextRetry = candidate;
       }
     }
     if (nextRetry == null) {
@@ -625,4 +720,13 @@ class _RetryableGeminiException implements Exception {
 
   @override
   String toString() => 'Gemini retryable $statusCode';
+}
+
+class _PermanentGeminiException implements Exception {
+  final int statusCode;
+
+  const _PermanentGeminiException(this.statusCode);
+
+  @override
+  String toString() => 'Gemini permanent error $statusCode';
 }

@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:math' as math;
 
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
@@ -1700,6 +1701,35 @@ class _WaveformPainter extends CustomPainter {
       old.bars != bars;
 }
 
+class _AnimatedWaveformPainter extends CustomPainter {
+  final double animValue;
+  final Color color;
+  static const int _count = 20;
+
+  _AnimatedWaveformPainter({required this.animValue, required this.color});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = color
+      ..strokeCap = StrokeCap.round
+      ..strokeWidth = 2.5;
+    final gap = size.width / _count;
+    final mid = size.height / 2;
+    for (var i = 0; i < _count; i++) {
+      final phase = i * 0.45;
+      final freq = 1.0 + (i % 3) * 0.7;
+      final h = (0.15 + 0.80 * ((math.sin(animValue * math.pi * 2 * freq + phase) + 1) / 2)) * size.height;
+      final x = i * gap + gap / 2;
+      canvas.drawLine(Offset(x, mid - h / 2), Offset(x, mid + h / 2), paint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(_AnimatedWaveformPainter old) =>
+      old.animValue != animValue || old.color != color;
+}
+
 class _TypingBubble extends StatefulWidget {
   const _TypingBubble();
 
@@ -2097,13 +2127,24 @@ class _ChatInputBar extends StatelessWidget {
                 ),
                 const SizedBox(width: 10),
                 Expanded(
-                  child: CustomPaint(
-                    size: const Size.fromHeight(18),
-                    painter: _WaveformPainter(
-                      bars: _AudioBubble._bars,
-                      color: accent.withValues(alpha: 0.78),
-                    ),
-                  ),
+                  child: _recordingWaveController != null
+                      ? AnimatedBuilder(
+                          animation: _recordingWaveController!,
+                          builder: (_, __) => CustomPaint(
+                            size: const Size.fromHeight(18),
+                            painter: _AnimatedWaveformPainter(
+                              animValue: _recordingWaveController!.value,
+                              color: accent.withValues(alpha: 0.78),
+                            ),
+                          ),
+                        )
+                      : CustomPaint(
+                          size: const Size.fromHeight(18),
+                          painter: _WaveformPainter(
+                            bars: _AudioBubble._bars,
+                            color: accent.withValues(alpha: 0.78),
+                          ),
+                        ),
                 ),
                 const SizedBox(width: 10),
                 const Text(
@@ -2246,7 +2287,8 @@ class ChatScreen extends ConsumerStatefulWidget {
   ConsumerState<ChatScreen> createState() => _ChatScreenState();
 }
 
-class _ChatScreenState extends ConsumerState<ChatScreen> {
+class _ChatScreenState extends ConsumerState<ChatScreen>
+    with TickerProviderStateMixin {
   late final TextEditingController _messageController;
   late final FocusNode _messageFocusNode;
   int? _currentUserId;
@@ -2270,6 +2312,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   bool _voicePressActive = false;
   bool _attachmentSheetOpening = false;
   bool _disposing = false;
+  AnimationController? _recordingWaveController;
 
   @override
   void initState() {
@@ -2782,6 +2825,11 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
         }
         setState(() => _voiceElapsedSeconds++);
       });
+      _recordingWaveController ??= AnimationController(
+        vsync: this,
+        duration: const Duration(milliseconds: 1200),
+      );
+      _recordingWaveController!.repeat();
       setState(() {
         _inputError = null;
         _voiceRecording = true;
@@ -2816,6 +2864,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     _voiceTimer = null;
     _voiceRecorder = null;
     _voiceRecordingPath = null;
+    _recordingWaveController?.stop();
+    _recordingWaveController?.dispose();
+    _recordingWaveController = null;
 
     if (mounted && !_disposing && wasRecording) {
       setState(() {
@@ -2853,6 +2904,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     }
 
     setState(() => _voiceSending = true);
+    _recordingWaveController?.stop();
+    _recordingWaveController?.dispose();
+    _recordingWaveController = null;
     final recorder = _voiceRecorder;
     _voiceTimer?.cancel();
     _voiceTimer = null;

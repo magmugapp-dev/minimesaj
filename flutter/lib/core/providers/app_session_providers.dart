@@ -11,6 +11,7 @@ import 'package:magmug/core/network/app_auth_api.dart';
 import 'package:magmug/core/repository/app_repository.dart';
 import 'package:magmug/core/storage/app_storage.dart';
 import 'package:magmug/core/storage/app_user_cache_cleaner.dart';
+import 'package:magmug/core/ai/flutter_ai_turn_processor.dart';
 import 'package:magmug/core/sync/app_cache_sync_coordinator.dart';
 
 class AppAuthController extends AsyncNotifier<AppAuthState?> {
@@ -205,6 +206,7 @@ class AppAuthController extends AsyncNotifier<AppAuthState?> {
     await AppSessionStorage.clear();
     await AppUserCacheCleaner.clearUserScopedData(ownerUserId);
     AppRuntimeCacheRegistry.clearUserScopedCaches();
+    FlutterAiTurnProcessor.instance.cancel();
     if (ownerUserId != null) {
       AppRepository.instance.clearUserScopedCaches(ownerUserId);
     }
@@ -231,6 +233,7 @@ class AppAuthController extends AsyncNotifier<AppAuthState?> {
     await AppSessionStorage.clear();
     await AppUserCacheCleaner.clearUserScopedData(current.user?.id);
     AppRuntimeCacheRegistry.clearUserScopedCaches();
+    FlutterAiTurnProcessor.instance.cancel();
     if (current.user?.id != null) {
       AppRepository.instance.clearUserScopedCaches(current.user!.id);
     }

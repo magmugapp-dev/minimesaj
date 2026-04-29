@@ -130,7 +130,7 @@ class AiTurnService
                     'is_ai' => (bool) $message->ai_tarafindan_uretildi_mi,
                     'type' => $message->mesaj_tipi,
                     'text' => $message->mesaj_metni,
-                    'file_url' => MediaUrl::resolve($message->dosya_yolu) ?? $message->dosya_yolu,
+                    'file_url' => MediaUrl::resolve($message->dosya_yolu) ?? MediaUrl::buildUrl($message->dosya_yolu),
                     'file_mime' => $this->messageFileMime($message),
                     'file_duration' => $message->dosya_suresi,
                     'created_at' => $message->created_at?->toISOString(),

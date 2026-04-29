@@ -1434,6 +1434,86 @@
         color: #065f46;
     }
 
+    .studio-split {
+        display: grid;
+        gap: 1.5rem;
+    }
+
+    .studio-split-sidebar {
+        border-radius: 24px;
+        border: 1px solid #e2e8f0;
+        background: linear-gradient(180deg, #fff, #f8fafc);
+        padding: 1.25rem;
+        box-shadow: 0 20px 38px -34px rgba(15, 23, 42, .32);
+    }
+
+    .studio-split-nav-item {
+        display: flex;
+        align-items: center;
+        gap: .65rem;
+        padding: .7rem .9rem;
+        border-radius: 14px;
+        cursor: pointer;
+        font-size: .9rem;
+        font-weight: 600;
+        color: #475569;
+        transition: background .15s, color .15s;
+    }
+
+    .studio-split-nav-item:hover {
+        background: rgba(var(--studio-accent-rgb), .07);
+        color: var(--studio-accent);
+    }
+
+    .studio-split-nav-item.active {
+        background: rgba(var(--studio-accent-rgb), .13);
+        color: var(--studio-accent);
+        font-weight: 700;
+    }
+
+    .studio-split-nav-item__dot {
+        width: .42rem;
+        height: .42rem;
+        border-radius: 999px;
+        background: currentColor;
+        opacity: .55;
+        flex-shrink: 0;
+    }
+
+    .studio-split-avatar {
+        width: 3.5rem;
+        height: 3.5rem;
+        border-radius: 22px;
+        background: linear-gradient(135deg, rgba(var(--studio-accent-rgb), .9), rgba(var(--studio-accent-rgb), .55));
+        color: #fff;
+        font-size: 1.2rem;
+        font-weight: 800;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        box-shadow: 0 14px 24px -18px rgba(var(--studio-accent-rgb), .6);
+    }
+
+    .studio-split-section {
+        display: none;
+    }
+
+    .studio-split-section.active {
+        display: block;
+    }
+
+    @media (min-width: 1024px) {
+        .studio-split {
+            grid-template-columns: 268px 1fr;
+            align-items: start;
+        }
+
+        .studio-split-sidebar {
+            position: sticky;
+            top: 5.5rem;
+        }
+    }
+
     .ai-studio-nav,
     .ai-studio-stack,
     .ai-studio-grid,

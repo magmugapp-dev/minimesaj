@@ -26,6 +26,7 @@ class _ConversationRealtimeBootstrapState
   DateTime? _subscriptionRetryAfter;
   Timer? _subscriptionRetryTimer;
   final Map<int, Timer> _aiTurnTimers = <int, Timer>{};
+  final Map<int, Timer> _aiTypingTimers = <int, Timer>{};
   int _eventSequence = 0;
 
   @override
@@ -58,6 +59,10 @@ class _ConversationRealtimeBootstrapState
       timer.cancel();
     }
     _aiTurnTimers.clear();
+    for (final timer in _aiTypingTimers.values) {
+      timer.cancel();
+    }
+    _aiTypingTimers.clear();
     super.dispose();
   }
 
@@ -248,10 +253,11 @@ class _ConversationRealtimeBootstrapState
         final plannedAt = DateTime.tryParse(
           event.payload['planned_at']?.toString() ?? '',
         );
+        final aiStatus = _nullableString(event.payload['status']?.toString());
         await store.updateConversationPreviewRuntimeStatus(
           event.conversationId,
           ownerUserId: currentUserId,
-          aiStatus: _nullableString(event.payload['status']?.toString()),
+          aiStatus: aiStatus,
           aiStatusText: _nullableString(
             event.payload['status_text']?.toString(),
           ),
@@ -262,6 +268,15 @@ class _ConversationRealtimeBootstrapState
           plannedAt: plannedAt,
           ownerUserId: currentUserId,
         );
+        if (aiStatus == 'typing') {
+          _aiTypingTimers[event.conversationId]?.cancel();
+          _aiTypingTimers[event.conversationId] = Timer(
+            const Duration(seconds: 30),
+            () => _clearTypingStatus(event.conversationId, currentUserId),
+          );
+        } else {
+          _aiTypingTimers.remove(event.conversationId)?.cancel();
+        }
         break;
       case ChatRealtimeEventType.messageSent:
         var localPatchApplied = false;
@@ -350,6 +365,20 @@ class _ConversationRealtimeBootstrapState
     if (ChatRealtimeEventRefreshDeduper.instance.shouldRefresh(event)) {
       ref.read(conversationFeedRefreshProvider.notifier).state++;
     }
+  }
+
+  void _clearTypingStatus(int conversationId, int ownerUserId) {
+    _aiTypingTimers.remove(conversationId);
+    if (!mounted) return;
+    unawaited(
+      ChatLocalStore.instance.updateConversationPreviewRuntimeStatus(
+        conversationId,
+        ownerUserId: ownerUserId,
+        aiStatus: null,
+        aiStatusText: null,
+        aiPlannedAt: null,
+      ),
+    );
   }
 
   void _scheduleAiTurnRun({
