@@ -35,6 +35,7 @@ class CachedAppImage extends StatelessWidget {
   final bool gaplessPlayback;
   final int? cacheWidth;
   final int? cacheHeight;
+  final Map<String, String>? httpHeaders;
   final WidgetBuilder? placeholderBuilder;
   final WidgetBuilder? errorBuilder;
 
@@ -48,6 +49,7 @@ class CachedAppImage extends StatelessWidget {
     this.gaplessPlayback = true,
     this.cacheWidth,
     this.cacheHeight,
+    this.httpHeaders,
     this.placeholderBuilder,
     this.errorBuilder,
   });
@@ -67,6 +69,7 @@ class CachedAppImage extends StatelessWidget {
     if (mediaSource.isRemote) {
       return CachedNetworkImage(
         imageUrl: mediaSource.value,
+        httpHeaders: httpHeaders,
         width: width,
         height: height,
         fit: fit,

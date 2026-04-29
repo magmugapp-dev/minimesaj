@@ -5,6 +5,7 @@ namespace App\Http\Resources;
 use App\Support\MediaUrl;
 use App\Support\Language;
 use App\Support\AiMessageTextSanitizer;
+use App\Support\MessageMediaUrl;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -26,7 +27,9 @@ class MesajResource extends JsonResource
             'dil_kodu' => $this->dil_kodu,
             'dil_adi' => $this->dil_adi ?: Language::name($this->dil_kodu),
             'ceviri' => null,
-            'dosya_yolu' => MediaUrl::resolve($this->dosya_yolu) ?? MediaUrl::buildUrl($this->dosya_yolu),
+            'dosya_yolu' => MessageMediaUrl::forMessage($this->resource)
+                ?? MediaUrl::resolve($this->dosya_yolu)
+                ?? MediaUrl::buildUrl($this->dosya_yolu),
             'dosya_suresi' => $this->dosya_suresi,
             'okundu_mu' => $this->okundu_mu,
             'ai_tarafindan_uretildi_mi' => $this->ai_tarafindan_uretildi_mi,

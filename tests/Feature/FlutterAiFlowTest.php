@@ -16,6 +16,7 @@ use Illuminate\Support\Facades\Event;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Notification;
+use Illuminate\Support\Facades\Storage;
 use Laravel\Sanctum\Sanctum;
 
 it('creates a pending flutter ai turn after a user message', function () {
@@ -40,8 +41,40 @@ it('creates a pending flutter ai turn after a user message', function () {
     Event::assertDispatched(AiTurnStatusUpdated::class, function (AiTurnStatusUpdated $event) use ($conversation) {
         return $event->sohbetId === $conversation->id
             && $event->status === 'pending'
-            && $event->plannedAt !== null;
+            && $event->plannedAt !== null
+            && $event->turnId !== null
+            && $event->aiUserId !== null
+            && $event->sourceMessageId !== null;
     });
+});
+
+it('plans ai turns from source message created at and supports pending lookahead', function () {
+    Notification::fake();
+    [$viewer, $aiUser, $conversation] = aiConversationForTest();
+    $character = $aiUser->aiCharacter()->firstOrFail();
+    $json = $character->character_json;
+    data_set($json, 'rate_limits.min_response_seconds', 10);
+    data_set($json, 'rate_limits.max_response_seconds', 10);
+    $character->forceFill(['character_json' => $json])->save();
+
+    $incoming = app(MesajServisi::class)->gonder($conversation, $viewer, [
+        'mesaj_tipi' => 'metin',
+        'mesaj_metni' => 'Planli cevap.',
+    ]);
+    $turn = AiMessageTurn::query()->where('source_message_id', $incoming->id)->firstOrFail();
+
+    expect($turn->planned_at->equalTo($incoming->created_at->copy()->addSeconds(10)))->toBeTrue();
+
+    Sanctum::actingAs($viewer);
+
+    $this->getJson('/api/mobile/ai/pending-turns')
+        ->assertOk()
+        ->assertJsonCount(0, 'data');
+
+    $this->getJson('/api/mobile/ai/pending-turns?lookahead_seconds=120')
+        ->assertOk()
+        ->assertJsonPath('data.0.id', $turn->id)
+        ->assertJsonPath('data.0.planned_at', $turn->planned_at->toISOString());
 });
 
 it('recovers processing ai turns that timed out', function () {
@@ -101,6 +134,27 @@ it('returns pending turns and stores flutter reply parts idempotently', function
         ->where('sohbet_id', $conversation->id)
         ->where('gonderen_user_id', $aiUser->id)
         ->count())->toBe(2);
+});
+
+it('returns auth media urls and mime metadata in ai turn context', function () {
+    Storage::fake('public');
+    Notification::fake();
+    [$viewer, , $conversation] = aiConversationForTest();
+    Storage::disk('public')->put('mesajlar/1/foto/photo.jpg', 'image-bytes');
+
+    $incoming = app(MesajServisi::class)->gonder($conversation, $viewer, [
+        'mesaj_tipi' => 'foto',
+        'dosya_yolu' => 'mesajlar/1/foto/photo.jpg',
+        'dosya_suresi' => null,
+    ]);
+    $turn = AiMessageTurn::query()->where('source_message_id', $incoming->id)->firstOrFail();
+
+    Sanctum::actingAs($viewer);
+
+    $this->getJson("/api/mobile/ai/conversations/{$conversation->id}/turn-context?turn_id={$turn->id}")
+        ->assertOk()
+        ->assertJsonPath('messages.0.file_mime', 'image/jpeg')
+        ->assertJsonPath('messages.0.file_url', route('mobile.messages.media', ['message' => $incoming->id]));
 });
 
 it('requires a valid turn for gemini relay and defers retryable failures', function () {

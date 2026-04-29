@@ -22,11 +22,11 @@
     $genderOptions = [
         'female' => ['label' => 'Female', 'description' => 'Kadin karakter olarak davranir.'],
         'male'   => ['label' => 'Male',   'description' => 'Erkek karakter olarak davranir.'],
-        'other'  => ['label' => 'Other',  'description' => 'Notr karakter icin kullanilir.'],
+        'other'  => ['label' => 'Other',  'description' => 'Belirtmek istemeyen veya notr karakter.'],
     ];
     $traitOptions = [
         'warmth' => [
-            'warm'     => ['label' => 'Warm',     'description' => 'Sicak, yakin ton.'],
+            'warm'     => ['label' => 'Warm',     'description' => 'Sicak, yakin ve kolay iletisim kuran ton.'],
             'neutral'  => ['label' => 'Neutral',  'description' => 'Dengeli, guvenli ton.'],
             'reserved' => ['label' => 'Reserved', 'description' => 'Mesafeli, yavas acilan.'],
         ],
@@ -345,6 +345,11 @@
                             <x-ai-field label="Max cevap saniye" hint="Rastgele cevap gecikmesinin ust siniri.">
                                 <input required type="number" name="max_response_seconds" x-model="values.max_response_seconds" value="{{ $f('max_response_seconds', 30) }}" class="mt-1 w-full rounded-lg border-gray-300 text-sm">
                             </x-ai-field>
+                            <div class="rounded-lg border border-emerald-100 bg-emerald-50 p-3 text-sm font-semibold text-emerald-900 sm:col-span-2">
+                                Cevap araligi kullanici mesajinin created_at zamanindan sonra
+                                <span x-text="values.min_response_seconds || 0"></span>-<span x-text="values.max_response_seconds || 0"></span>
+                                saniye olarak planlanir.
+                            </div>
                             <x-ai-field label="Gunluk chat limit">
                                 <input required type="number" name="daily_chat_limit" value="{{ $f('daily_chat_limit', 100) }}" class="mt-1 w-full rounded-lg border-gray-300 text-sm">
                             </x-ai-field>

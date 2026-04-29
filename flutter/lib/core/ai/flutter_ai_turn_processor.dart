@@ -11,22 +11,51 @@ import 'package:magmug/core/network/app_auth_api.dart';
 import 'package:magmug/core/storage/app_storage.dart';
 import 'package:magmug/features/chat/chat_local_store.dart';
 
+class FlutterAiLocalStatusEvent {
+  final int conversationId;
+  final String? status;
+  final String? statusText;
+
+  const FlutterAiLocalStatusEvent({
+    required this.conversationId,
+    required this.status,
+    this.statusText,
+  });
+}
+
 class FlutterAiTurnProcessor {
   FlutterAiTurnProcessor._();
 
   static final FlutterAiTurnProcessor instance = FlutterAiTurnProcessor._();
+  static const Duration _pendingFetchCooldown = Duration(seconds: 12);
+  static const Duration _bootstrapCooldown = Duration(minutes: 5);
+  static final StreamController<FlutterAiLocalStatusEvent> _statusController =
+      StreamController<FlutterAiLocalStatusEvent>.broadcast();
 
   bool _running = false;
   Timer? _deferredTimer;
   String? _pendingToken;
   int? _pendingUserId;
+  bool _pendingForceFetch = false;
+  int _pendingLookaheadSeconds = 0;
+  DateTime? _pendingFetchAllowedAt;
+  DateTime? _bootstrapAllowedAt;
+
+  Stream<FlutterAiLocalStatusEvent> get statusEvents =>
+      _statusController.stream;
 
   @visibleForTesting
   Future<Map<String, dynamic>> buildGeminiPayloadForTest(
     http.Client client,
-    Map<String, dynamic> context,
-  ) {
-    return _geminiPayload(client, context);
+    Map<String, dynamic> context, {
+    String? token,
+  }) {
+    return _geminiPayload(client, context, token: token);
+  }
+
+  @visibleForTesting
+  Duration typingHoldDurationForTest(List<String> parts) {
+    return _typingHoldDuration(parts);
   }
 
   void cancel() {
@@ -34,33 +63,58 @@ class FlutterAiTurnProcessor {
     _deferredTimer = null;
     _pendingToken = null;
     _pendingUserId = null;
+    _pendingForceFetch = false;
+    _pendingLookaheadSeconds = 0;
   }
 
-  Future<void> run({required String token, required int ownerUserId}) async {
+  Future<void> run({
+    required String token,
+    required int ownerUserId,
+    bool forceFetch = false,
+    int lookaheadSeconds = 0,
+  }) async {
     if (token.trim().isEmpty || ownerUserId <= 0) return;
     if (_running) {
       _pendingToken = token;
       _pendingUserId = ownerUserId;
+      _pendingForceFetch = _pendingForceFetch || forceFetch;
+      _pendingLookaheadSeconds = math.max(
+        _pendingLookaheadSeconds,
+        lookaheadSeconds,
+      );
       return;
     }
 
     _running = true;
     _pendingToken = null;
     _pendingUserId = null;
+    _pendingForceFetch = false;
+    _pendingLookaheadSeconds = 0;
     final client = AppHttpClientFactory.createForApi();
     try {
-      await _syncBootstrap(client, token);
-      final turns = await _fetchPendingTurns(client, token);
-      for (final turn in turns) {
-        if ((turn['ai_user_id'] as num?)?.toInt() == ownerUserId) {
-          continue;
+      await _syncBootstrap(client, token, force: forceFetch);
+      await _processDueLocalTurns(
+        client,
+        token: token,
+        ownerUserId: ownerUserId,
+      );
+      if (forceFetch || _canFetchPendingTurns()) {
+        final turns = await _fetchPendingTurns(
+          client,
+          token,
+          lookaheadSeconds: forceFetch ? lookaheadSeconds : 0,
+        );
+        _pendingFetchAllowedAt = DateTime.now().add(_pendingFetchCooldown);
+        for (final turn in turns) {
+          if ((turn['ai_user_id'] as num?)?.toInt() == ownerUserId) {
+            continue;
+          }
+          await _storePendingTurn(turn, ownerUserId: ownerUserId);
         }
-        await _storePendingTurn(turn, ownerUserId: ownerUserId);
-        await _processTurn(
+        await _processDueLocalTurns(
           client,
           token: token,
           ownerUserId: ownerUserId,
-          turn: turn,
         );
       }
       await _scheduleNextLocalDeferred(token: token, ownerUserId: ownerUserId);
@@ -71,19 +125,72 @@ class FlutterAiTurnProcessor {
       client.close();
       final pToken = _pendingToken;
       final pUserId = _pendingUserId;
+      final pForceFetch = _pendingForceFetch;
+      final pLookaheadSeconds = _pendingLookaheadSeconds;
       if (pToken != null && pUserId != null) {
         _pendingToken = null;
         _pendingUserId = null;
-        unawaited(run(token: pToken, ownerUserId: pUserId));
+        _pendingForceFetch = false;
+        _pendingLookaheadSeconds = 0;
+        unawaited(
+          run(
+            token: pToken,
+            ownerUserId: pUserId,
+            forceFetch: pForceFetch,
+            lookaheadSeconds: pLookaheadSeconds,
+          ),
+        );
       }
     }
   }
 
-  Future<void> _syncBootstrap(http.Client client, String token) async {
+  Future<void> cacheRealtimeTurn({
+    required Map<String, dynamic> payload,
+    required int conversationId,
+    required String token,
+    required int ownerUserId,
+  }) async {
+    final turnId =
+        (payload['turn_id'] as num?)?.toInt() ??
+        (payload['id'] as num?)?.toInt();
+    if (turnId == null || turnId <= 0) {
+      return;
+    }
+
+    await _storePendingTurn({
+      'id': turnId,
+      'conversation_id': conversationId,
+      'source_message_id': (payload['source_message_id'] as num?)?.toInt(),
+      'ai_user_id': (payload['ai_user_id'] as num?)?.toInt(),
+      'status': payload['status']?.toString(),
+      'planned_at': payload['planned_at']?.toString(),
+      'retry_after': payload['retry_after']?.toString(),
+      'attempt_count': (payload['attempt_count'] as num?)?.toInt() ?? 0,
+      'max_attempts': (payload['max_attempts'] as num?)?.toInt() ?? 5,
+    }, ownerUserId: ownerUserId);
+    await _scheduleNextLocalDeferred(token: token, ownerUserId: ownerUserId);
+  }
+
+  bool _canFetchPendingTurns() {
+    final allowedAt = _pendingFetchAllowedAt;
+    return allowedAt == null || !DateTime.now().isBefore(allowedAt);
+  }
+
+  Future<void> _syncBootstrap(
+    http.Client client,
+    String token, {
+    bool force = false,
+  }) async {
+    final allowedAt = _bootstrapAllowedAt;
+    if (!force && allowedAt != null && DateTime.now().isBefore(allowedAt)) {
+      return;
+    }
+
     final response = await client.get(
       AppApi.uri(AppApi.mobileAiBootstrapPath),
       headers: {'Accept': 'application/json', 'Authorization': 'Bearer $token'},
     );
+    _bootstrapAllowedAt = DateTime.now().add(_bootstrapCooldown);
     if (response.statusCode >= 400 || response.bodyBytes.isEmpty) {
       return;
     }
@@ -97,10 +204,16 @@ class FlutterAiTurnProcessor {
 
   Future<List<Map<String, dynamic>>> _fetchPendingTurns(
     http.Client client,
-    String token,
-  ) async {
+    String token, {
+    int lookaheadSeconds = 0,
+  }) async {
+    final uri = AppApi.uri(AppApi.mobileAiPendingTurnsPath).replace(
+      queryParameters: lookaheadSeconds > 0
+          ? {'lookahead_seconds': '$lookaheadSeconds'}
+          : null,
+    );
     final response = await client.get(
-      AppApi.uri(AppApi.mobileAiPendingTurnsPath),
+      uri,
       headers: {'Accept': 'application/json', 'Authorization': 'Bearer $token'},
     );
     if (response.statusCode >= 400 || response.bodyBytes.isEmpty) {
@@ -109,6 +222,42 @@ class FlutterAiTurnProcessor {
 
     final payload = _decodeMap(response.bodyBytes);
     return _mapsFromValue(payload['data']);
+  }
+
+  Future<void> _processDueLocalTurns(
+    http.Client client, {
+    required String token,
+    required int ownerUserId,
+  }) async {
+    final box = await AppHiveBoxes.pendingAiTurns();
+    final rows =
+        box.values
+            .map(_asMap)
+            .whereType<Map<String, dynamic>>()
+            .where(
+              (row) => (row['owner_user_id'] as num?)?.toInt() == ownerUserId,
+            )
+            .where(_isTurnDue)
+            .toList(growable: false)
+          ..sort((a, b) {
+            final aAt =
+                _dueAtForTurn(a) ?? DateTime.fromMillisecondsSinceEpoch(0);
+            final bAt =
+                _dueAtForTurn(b) ?? DateTime.fromMillisecondsSinceEpoch(0);
+            return aAt.compareTo(bAt);
+          });
+
+    for (final turn in rows) {
+      if ((turn['ai_user_id'] as num?)?.toInt() == ownerUserId) {
+        continue;
+      }
+      await _processTurn(
+        client,
+        token: token,
+        ownerUserId: ownerUserId,
+        turn: turn,
+      );
+    }
   }
 
   Future<void> _processTurn(
@@ -140,45 +289,143 @@ class FlutterAiTurnProcessor {
       return;
     }
 
-    final text = await _generateWithSilentRetries(
-      client,
-      token: token,
-      turnId: turnId,
-      context: context,
-    );
-    if (text == null || text.trim().isEmpty) {
-      return;
-    }
-
-    final cleaned = await _handleBlockTags(
-      client,
-      token: token,
-      aiUserId: aiUserId,
-      text: text,
-    );
-    final parts = cleaned
-        .split(RegExp(r'\n\s*\n+'))
-        .map((part) => part.trim())
-        .where((part) => part.isNotEmpty)
-        .toList(growable: false);
-    if (parts.isEmpty) {
-      return;
-    }
-
-    final messages = await _persistReply(
-      client,
-      token: token,
-      conversationId: conversationId,
-      turnId: turnId,
-      parts: parts,
-    );
-    if (messages.isNotEmpty) {
-      await ChatLocalStore.instance.upsertConversationMessages(
-        messages,
-        ownerUserId: ownerUserId,
+    _emitLocalStatus(conversationId, 'typing', 'Yaziyor...');
+    final typingStartedAt = DateTime.now();
+    try {
+      final text = await _generateWithSilentRetries(
+        client,
+        token: token,
+        turnId: turnId,
+        context: context,
       );
-      await _removePendingTurn(ownerUserId: ownerUserId, turnId: turnId);
+      if (text == null || text.trim().isEmpty) {
+        await _reportTurnFailure(
+          client,
+          token: token,
+          turnId: turnId,
+          error: 'empty_generated_text',
+        );
+        return;
+      }
+
+      final cleaned = await _handleBlockTags(
+        client,
+        token: token,
+        aiUserId: aiUserId,
+        text: text,
+      );
+      final parts = cleaned
+          .split(RegExp(r'\n\s*\n+'))
+          .map((part) => part.trim())
+          .where((part) => part.isNotEmpty)
+          .toList(growable: false);
+      if (parts.isEmpty) {
+        await _reportTurnFailure(
+          client,
+          token: token,
+          turnId: turnId,
+          error: 'empty_sanitized_text',
+        );
+        return;
+      }
+
+      await _holdTypingBeforeReply(parts, startedAt: typingStartedAt);
+
+      final messages = await _persistReply(
+        client,
+        token: token,
+        conversationId: conversationId,
+        turnId: turnId,
+        parts: parts,
+      );
+      if (messages.isNotEmpty) {
+        await ChatLocalStore.instance.upsertConversationMessages(
+          messages,
+          ownerUserId: ownerUserId,
+        );
+        await ChatLocalStore.instance.updateConversationPreviewRuntimeStatus(
+          conversationId,
+          ownerUserId: ownerUserId,
+          aiStatus: null,
+          aiStatusText: null,
+          aiPlannedAt: null,
+        );
+        await _removePendingTurn(ownerUserId: ownerUserId, turnId: turnId);
+      } else {
+        await _reportTurnFailure(
+          client,
+          token: token,
+          turnId: turnId,
+          error: 'empty_persisted_reply',
+        );
+      }
+    } finally {
+      _emitLocalStatus(conversationId, null, null);
     }
+  }
+
+  void _emitLocalStatus(
+    int conversationId,
+    String? status,
+    String? statusText,
+  ) {
+    _statusController.add(
+      FlutterAiLocalStatusEvent(
+        conversationId: conversationId,
+        status: status,
+        statusText: statusText,
+      ),
+    );
+  }
+
+  Future<void> _holdTypingBeforeReply(
+    List<String> parts, {
+    required DateTime startedAt,
+  }) async {
+    final target = _typingHoldDuration(parts);
+    final elapsed = DateTime.now().difference(startedAt);
+    final remaining = target - elapsed;
+    if (remaining <= Duration.zero) {
+      return;
+    }
+
+    await Future<void>.delayed(remaining);
+  }
+
+  Future<void> _reportTurnFailure(
+    http.Client client, {
+    required String token,
+    required int turnId,
+    required String error,
+  }) async {
+    try {
+      await client
+          .post(
+            AppApi.uri(AppApi.mobileAiTurnFailurePath),
+            headers: {
+              'Accept': 'application/json',
+              'Authorization': 'Bearer $token',
+              'Content-Type': 'application/json',
+            },
+            body: jsonEncode({'turn_id': turnId, 'error': error}),
+          )
+          .timeout(const Duration(seconds: 8));
+    } catch (_) {
+      // Failure reporting is best effort; local status still clears below.
+    }
+  }
+
+  Duration _typingHoldDuration(List<String> parts) {
+    final charCount = parts.fold<int>(
+      0,
+      (sum, part) => sum + part.trim().runes.length,
+    );
+    if (charCount <= 0) {
+      return const Duration(milliseconds: 900);
+    }
+
+    final milliseconds = 650 + (charCount * 18) + (parts.length * 250);
+    return Duration(milliseconds: milliseconds.clamp(900, 4500).toInt());
   }
 
   Future<Map<String, dynamic>?> _fetchTurnContext(
@@ -203,8 +450,9 @@ class FlutterAiTurnProcessor {
     if (prompt != null) {
       final newHash = prompt['hash']?.toString();
       final promptBox = await AppHiveBoxes.aiPrompt();
-      final cachedHash =
-          _asMap(await promptBox.get('active'))?['hash']?.toString();
+      final cachedHash = _asMap(
+        await promptBox.get('active'),
+      )?['hash']?.toString();
       if (newHash == null || newHash != cachedHash) {
         await promptBox.put('active', prompt);
       }
@@ -289,7 +537,7 @@ class FlutterAiTurnProcessor {
             'turn_id': turnId,
             'model':
                 modelConfig['model_name']?.toString() ?? 'gemini-2.5-flash',
-            'payload': await _geminiPayload(client, context),
+            'payload': await _geminiPayload(client, context, token: token),
           });
 
     final streamed = await client
@@ -311,8 +559,9 @@ class FlutterAiTurnProcessor {
 
   Future<Map<String, dynamic>> _geminiPayload(
     http.Client client,
-    Map<String, dynamic> context,
-  ) async {
+    Map<String, dynamic> context, {
+    String? token,
+  }) async {
     final modelConfig = _asMap(context['model_config']) ?? const {};
     final prompt = _asMap(context['global_prompt']);
     final character = _asMap(context['character']) ?? const {};
@@ -337,7 +586,11 @@ class FlutterAiTurnProcessor {
         for (final message in messages)
           {
             'role': message['is_ai'] == true ? 'model' : 'user',
-            'parts': await _geminiPartsForMessage(client, message),
+            'parts': await _geminiPartsForMessage(
+              client,
+              message,
+              token: token,
+            ),
           },
       ],
       'generationConfig': {
@@ -351,8 +604,9 @@ class FlutterAiTurnProcessor {
 
   Future<List<Map<String, dynamic>>> _geminiPartsForMessage(
     http.Client client,
-    Map<String, dynamic> message,
-  ) async {
+    Map<String, dynamic> message, {
+    String? token,
+  }) async {
     final isAi = message['is_ai'] == true;
     final text = message['text']?.toString().trim();
     final fileUrl = message['file_url']?.toString().trim();
@@ -361,14 +615,24 @@ class FlutterAiTurnProcessor {
 
     if (!isAi && fileUrl != null && fileUrl.isNotEmpty) {
       if (_isImageMessage(message)) {
-        final inline = await _inlineImagePart(client, message, fileUrl);
+        final inline = await _inlineImagePart(
+          client,
+          message,
+          fileUrl,
+          token: token,
+        );
         if (inline != null) {
           parts.add(inline);
         } else {
           textParts.add('[Fotoğraf mesajı]');
         }
       } else if (_isAudioMessage(message)) {
-        final inline = await _inlineAudioPart(client, message, fileUrl);
+        final inline = await _inlineAudioPart(
+          client,
+          message,
+          fileUrl,
+          token: token,
+        );
         if (inline != null) {
           parts.add(inline);
         }
@@ -412,12 +676,13 @@ class FlutterAiTurnProcessor {
   Future<Map<String, dynamic>?> _inlineImagePart(
     http.Client client,
     Map<String, dynamic> message,
-    String fileUrl,
-  ) async {
+    String fileUrl, {
+    String? token,
+  }) async {
     const maxInlineBytes = 5 * 1024 * 1024;
     try {
       final mime = _imageMimeFor(message, fileUrl);
-      final bytes = await _readMediaBytes(client, fileUrl);
+      final bytes = await _readMediaBytes(client, fileUrl, token: token);
       if (bytes == null || bytes.isEmpty || bytes.length > maxInlineBytes) {
         return null;
       }
@@ -433,12 +698,13 @@ class FlutterAiTurnProcessor {
   Future<Map<String, dynamic>?> _inlineAudioPart(
     http.Client client,
     Map<String, dynamic> message,
-    String fileUrl,
-  ) async {
+    String fileUrl, {
+    String? token,
+  }) async {
     const maxInlineBytes = 5 * 1024 * 1024;
     try {
       final mime = _audioMimeFor(message, fileUrl);
-      final bytes = await _readMediaBytes(client, fileUrl);
+      final bytes = await _readMediaBytes(client, fileUrl, token: token);
       if (bytes == null || bytes.isEmpty || bytes.length > maxInlineBytes) {
         return null;
       }
@@ -464,12 +730,16 @@ class FlutterAiTurnProcessor {
     };
   }
 
-  Future<List<int>?> _readMediaBytes(http.Client client, String source) async {
+  Future<List<int>?> _readMediaBytes(
+    http.Client client,
+    String source, {
+    String? token,
+  }) async {
     final uri = Uri.tryParse(source);
     final scheme = uri?.scheme.toLowerCase();
     if (scheme == 'http' || scheme == 'https') {
       final response = await client
-          .get(uri!)
+          .get(uri!, headers: _mediaRequestHeaders(uri, token))
           .timeout(const Duration(seconds: 10));
       if (response.statusCode < 200 || response.statusCode >= 300) {
         return null;
@@ -488,6 +758,19 @@ class FlutterAiTurnProcessor {
       return null;
     }
     return file.readAsBytes();
+  }
+
+  Map<String, String>? _mediaRequestHeaders(Uri uri, String? token) {
+    if (token == null || token.trim().isEmpty) {
+      return null;
+    }
+
+    final appUri = AppApi.uri('/');
+    if (uri.host != appUri.host || uri.port != appUri.port) {
+      return null;
+    }
+
+    return {'Authorization': 'Bearer $token', 'Accept': '*/*'};
   }
 
   String _imageMimeFor(Map<String, dynamic> message, String source) {
@@ -663,16 +946,7 @@ class FlutterAiTurnProcessor {
       if ((row['owner_user_id'] as num?)?.toInt() != ownerUserId) {
         continue;
       }
-      final plannedAt =
-          DateTime.tryParse(row['planned_at']?.toString() ?? '');
-      final retryAt =
-          DateTime.tryParse(row['retry_after']?.toString() ?? '');
-      DateTime? candidate;
-      if (plannedAt != null && retryAt != null) {
-        candidate = plannedAt.isBefore(retryAt) ? plannedAt : retryAt;
-      } else {
-        candidate = plannedAt ?? retryAt;
-      }
+      final candidate = _dueAtForTurn(row);
       if (candidate == null) continue;
       if (nextRetry == null || candidate.isBefore(nextRetry)) {
         nextRetry = candidate;
@@ -685,6 +959,21 @@ class FlutterAiTurnProcessor {
     _deferredTimer = Timer(delay.isNegative ? Duration.zero : delay, () {
       unawaited(run(token: token, ownerUserId: ownerUserId));
     });
+  }
+
+  bool _isTurnDue(Map<String, dynamic> row) {
+    final dueAt = _dueAtForTurn(row);
+    return dueAt == null || !DateTime.now().isBefore(dueAt);
+  }
+
+  DateTime? _dueAtForTurn(Map<String, dynamic> row) {
+    final plannedAt = DateTime.tryParse(row['planned_at']?.toString() ?? '');
+    final retryAt = DateTime.tryParse(row['retry_after']?.toString() ?? '');
+    if (plannedAt != null && retryAt != null) {
+      return plannedAt.isAfter(retryAt) ? plannedAt : retryAt;
+    }
+
+    return plannedAt ?? retryAt;
   }
 
   Map<String, dynamic> _decodeMap(List<int> bytes) {

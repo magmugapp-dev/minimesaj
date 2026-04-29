@@ -17,6 +17,7 @@ use App\Notifications\YeniMesaj;
 use App\Support\AiMessageTextSanitizer;
 use App\Support\Language;
 use App\Support\MediaUrl;
+use App\Support\MessageMediaUrl;
 use Illuminate\Support\Facades\DB;
 
 class AiTurnService
@@ -58,13 +59,17 @@ class AiTurnService
             'pending',
             null,
             $plannedAt?->toISOString(),
+            $turn->id,
+            $turn->ai_user_id,
+            $turn->source_message_id,
         );
 
         return $turn;
     }
 
-    public function pendingTurnsFor(User $user)
+    public function pendingTurnsFor(User $user, int $lookaheadSeconds = 0)
     {
+        $plannedBefore = now()->addSeconds(max(0, min(300, $lookaheadSeconds)));
         $conversationIds = Sohbet::query()
             ->whereHas('eslesme', function ($query) use ($user): void {
                 $query->where('user_id', $user->id)->orWhere('eslesen_user_id', $user->id);
@@ -75,8 +80,8 @@ class AiTurnService
             ->with(['aiUser.aiCharacter', 'sourceMessage'])
             ->whereIn('conversation_id', $conversationIds)
             ->whereIn('status', [AiMessageTurn::STATUS_PENDING, AiMessageTurn::STATUS_DEFERRED])
-            ->where(function ($query): void {
-                $query->whereNull('planned_at')->orWhere('planned_at', '<=', now());
+            ->where(function ($query) use ($plannedBefore): void {
+                $query->whereNull('planned_at')->orWhere('planned_at', '<=', $plannedBefore);
             })
             ->where(function ($query): void {
                 $query->whereNull('retry_after')->orWhere('retry_after', '<=', now());
@@ -130,7 +135,9 @@ class AiTurnService
                     'is_ai' => (bool) $message->ai_tarafindan_uretildi_mi,
                     'type' => $message->mesaj_tipi,
                     'text' => $message->mesaj_metni,
-                    'file_url' => MediaUrl::resolve($message->dosya_yolu) ?? MediaUrl::buildUrl($message->dosya_yolu),
+                    'file_url' => MessageMediaUrl::forMessage($message)
+                        ?? MediaUrl::resolve($message->dosya_yolu)
+                        ?? MediaUrl::buildUrl($message->dosya_yolu),
                     'file_mime' => $this->messageFileMime($message),
                     'file_duration' => $message->dosya_suresi,
                     'created_at' => $message->created_at?->toISOString(),
@@ -159,6 +166,7 @@ class AiTurnService
                 'completed_at' => now(),
                 'last_error' => 'newer_incoming_message',
             ])->save();
+            $this->clearConversationTyping($conversation, $turn);
 
             return [];
         }
@@ -170,6 +178,8 @@ class AiTurnService
             ->values();
 
         if ($cleanParts->isEmpty()) {
+            $this->markRetryableFailure($turn, 'empty_ai_reply');
+
             return [];
         }
 
@@ -197,10 +207,22 @@ class AiTurnService
                 'ai_planlanan_cevap_at' => null,
                 'ai_durum_guncellendi_at' => now(),
             ])->save();
-            AiTurnStatusUpdated::dispatch($conversation->id, '', null, null);
+            $this->broadcastClearedStatus($conversation, $turn);
 
             return $messages;
         });
+    }
+
+    public function markClientFailure(AiMessageTurn $turn, User $requestUser, string $error): AiMessageTurn
+    {
+        $conversation = $turn->conversation()->with('eslesme')->firstOrFail();
+        $this->abortUnlessParticipant($conversation, $requestUser);
+
+        if ($turn->status === AiMessageTurn::STATUS_COMPLETED || $turn->status === AiMessageTurn::STATUS_CANCELLED) {
+            return $turn;
+        }
+
+        return $this->markRetryableFailure($turn, $error);
     }
 
     public function markRetryableFailure(AiMessageTurn $turn, string $error): AiMessageTurn
@@ -227,6 +249,9 @@ class AiTurnService
                 $deferred ? 'deferred' : 'pending',
                 null,
                 $turn->planned_at?->toISOString(),
+                $turn->id,
+                $turn->ai_user_id,
+                $turn->source_message_id,
             );
         }
 
@@ -254,10 +279,38 @@ class AiTurnService
                 'typing',
                 'Yaziyor...',
                 $turn->planned_at?->toISOString(),
+                $turn->id,
+                $turn->ai_user_id,
+                $turn->source_message_id,
             );
         }
 
         return $turn;
+    }
+
+    private function clearConversationTyping(Sohbet $conversation, AiMessageTurn $turn): void
+    {
+        $conversation->forceFill([
+            'ai_durumu' => null,
+            'ai_durum_metni' => null,
+            'ai_planlanan_cevap_at' => null,
+            'ai_durum_guncellendi_at' => now(),
+        ])->save();
+
+        $this->broadcastClearedStatus($conversation, $turn);
+    }
+
+    private function broadcastClearedStatus(Sohbet $conversation, AiMessageTurn $turn): void
+    {
+        AiTurnStatusUpdated::dispatch(
+            $conversation->id,
+            '',
+            null,
+            null,
+            $turn->id,
+            $turn->ai_user_id,
+            $turn->source_message_id,
+        );
     }
 
     public function recordViolation(User $user, User $aiUser, string $category): array

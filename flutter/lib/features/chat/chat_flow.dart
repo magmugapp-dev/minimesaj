@@ -910,6 +910,7 @@ class _MessageBubble extends StatelessWidget {
   final ChatMessage message;
   final ChatPeer peer;
   final _ChatThemePalette theme;
+  final Map<String, String>? mediaHttpHeaders;
   final VoidCallback? onReport;
   final bool showTranslateAction;
   final VoidCallback? onTranslate;
@@ -920,6 +921,7 @@ class _MessageBubble extends StatelessWidget {
     required this.message,
     required this.peer,
     required this.theme,
+    this.mediaHttpHeaders,
     this.onReport,
     this.showTranslateAction = false,
     this.onTranslate,
@@ -937,12 +939,16 @@ class _MessageBubble extends StatelessWidget {
       case ChatMessageType.typing:
         content = const _TypingBubble();
       case ChatMessageType.image:
-        content = _ImageBubble(asset: message.asset!);
+        content = _ImageBubble(
+          asset: message.asset!,
+          httpHeaders: mediaHttpHeaders,
+        );
       case ChatMessageType.audio:
         content = _AudioBubble(
           isMe: isMe,
           duration: message.duration ?? const Duration(),
           source: message.asset,
+          httpHeaders: mediaHttpHeaders,
         );
       case ChatMessageType.text:
         content = _TextBubble(
@@ -1254,22 +1260,33 @@ class _TextBubble extends StatelessWidget {
 
 class _ImageBubble extends StatelessWidget {
   final String asset;
+  final Map<String, String>? httpHeaders;
 
-  const _ImageBubble({required this.asset});
+  const _ImageBubble({required this.asset, this.httpHeaders});
 
   @override
   Widget build(BuildContext context) {
     final imageWidget = _chatImageWidget(
       asset,
       fit: BoxFit.cover,
+      httpHeaders: httpHeaders,
       errorBuilder: (_) => _imagePlaceholder(),
     );
 
     return PressableScale(
-      onTap: () => Navigator.of(context).push(
-        CupertinoPageRoute<void>(
-          builder: (_) => _ChatImageViewerScreen(asset: asset),
+      onTap: () => Navigator.of(context, rootNavigator: true).push(
+        PageRouteBuilder<void>(
+          opaque: true,
           fullscreenDialog: true,
+          transitionDuration: const Duration(milliseconds: 180),
+          reverseTransitionDuration: const Duration(milliseconds: 140),
+          pageBuilder: (_, animation, _) => FadeTransition(
+            opacity: animation,
+            child: _ChatImageViewerScreen(
+              asset: asset,
+              httpHeaders: httpHeaders,
+            ),
+          ),
         ),
       ),
       scale: 0.98,
@@ -1291,8 +1308,9 @@ class _ImageBubble extends StatelessWidget {
 
 class _ChatImageViewerScreen extends StatelessWidget {
   final String asset;
+  final Map<String, String>? httpHeaders;
 
-  const _ChatImageViewerScreen({required this.asset});
+  const _ChatImageViewerScreen({required this.asset, this.httpHeaders});
 
   @override
   Widget build(BuildContext context) {
@@ -1303,37 +1321,48 @@ class _ChatImageViewerScreen extends StatelessWidget {
         children: [
           Positioned.fill(
             child: SafeArea(
-              child: Center(
-                child: InteractiveViewer(
-                  minScale: 1,
-                  maxScale: 4,
-                  child: _chatImageWidget(
-                    asset,
-                    fit: BoxFit.contain,
-                    errorBuilder: (_) => const _ChatImageViewerFallback(),
-                  ),
-                ),
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  return InteractiveViewer(
+                    minScale: 1,
+                    maxScale: 4,
+                    child: SizedBox(
+                      width: constraints.maxWidth,
+                      height: constraints.maxHeight,
+                      child: _chatImageWidget(
+                        asset,
+                        fit: BoxFit.contain,
+                        httpHeaders: httpHeaders,
+                        errorBuilder: (_) => const _ChatImageViewerFallback(),
+                      ),
+                    ),
+                  );
+                },
               ),
             ),
           ),
           SafeArea(
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(12, 10, 12, 0),
-              child: PressableScale(
-                onTap: () => Navigator.of(context).maybePop(),
-                scale: 0.9,
-                child: Container(
-                  width: 40,
-                  height: 40,
-                  decoration: BoxDecoration(
-                    color: const Color(0x8A000000),
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  alignment: Alignment.center,
-                  child: const Icon(
-                    CupertinoIcons.xmark,
-                    size: 18,
-                    color: AppColors.white,
+            child: Align(
+              alignment: Alignment.topLeft,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(12, 10, 12, 0),
+                child: PressableScale(
+                  onTap: () =>
+                      Navigator.of(context, rootNavigator: true).maybePop(),
+                  scale: 0.9,
+                  child: Container(
+                    width: 40,
+                    height: 40,
+                    decoration: BoxDecoration(
+                      color: const Color(0x8A000000),
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    alignment: Alignment.center,
+                    child: const Icon(
+                      CupertinoIcons.xmark,
+                      size: 18,
+                      color: AppColors.white,
+                    ),
                   ),
                 ),
               ),
@@ -1375,6 +1404,7 @@ class _ChatImageViewerFallback extends StatelessWidget {
 Widget _chatImageWidget(
   String source, {
   required BoxFit fit,
+  Map<String, String>? httpHeaders,
   WidgetBuilder? errorBuilder,
 }) {
   final normalized = source.trim();
@@ -1393,6 +1423,7 @@ Widget _chatImageWidget(
   return CachedAppImage(
     imageUrl: normalized,
     fit: fit,
+    httpHeaders: httpHeaders,
     errorBuilder: errorBuilder,
   );
 }
@@ -1401,11 +1432,13 @@ class _AudioBubble extends StatefulWidget {
   final bool isMe;
   final Duration duration;
   final String? source;
+  final Map<String, String>? httpHeaders;
 
   const _AudioBubble({
     required this.isMe,
     required this.duration,
     required this.source,
+    this.httpHeaders,
   });
 
   static const List<double> _bars = [
@@ -1538,7 +1571,7 @@ class _AudioBubbleState extends State<_AudioBubble> {
   Future<void> _loadSource(String source) {
     final mediaSource = AppMediaSource.resolve(source);
     if (mediaSource.isRemote) {
-      return _player.setUrl(source).then((_) {});
+      return _player.setUrl(source, headers: widget.httpHeaders).then((_) {});
     }
 
     if (mediaSource.isFile) {
@@ -1719,7 +1752,12 @@ class _AnimatedWaveformPainter extends CustomPainter {
     for (var i = 0; i < _count; i++) {
       final phase = i * 0.45;
       final freq = 1.0 + (i % 3) * 0.7;
-      final h = (0.15 + 0.80 * ((math.sin(animValue * math.pi * 2 * freq + phase) + 1) / 2)) * size.height;
+      final h =
+          (0.15 +
+              0.80 *
+                  ((math.sin(animValue * math.pi * 2 * freq + phase) + 1) /
+                      2)) *
+          size.height;
       final x = i * gap + gap / 2;
       canvas.drawLine(Offset(x, mid - h / 2), Offset(x, mid + h / 2), paint);
     }
@@ -1840,6 +1878,7 @@ class _ChatInputBar extends StatelessWidget {
   final bool isVoiceSending;
   final Duration voiceElapsed;
   final String? errorText;
+  final AnimationController? recordingWaveController;
 
   const _ChatInputBar({
     this.variant = ChatInputVariant.empty,
@@ -1858,6 +1897,7 @@ class _ChatInputBar extends StatelessWidget {
     this.isVoiceSending = false,
     this.voiceElapsed = Duration.zero,
     this.errorText,
+    this.recordingWaveController,
   });
 
   @override
@@ -2127,13 +2167,13 @@ class _ChatInputBar extends StatelessWidget {
                 ),
                 const SizedBox(width: 10),
                 Expanded(
-                  child: _recordingWaveController != null
+                  child: recordingWaveController != null
                       ? AnimatedBuilder(
-                          animation: _recordingWaveController!,
-                          builder: (_, __) => CustomPaint(
+                          animation: recordingWaveController!,
+                          builder: (_, _) => CustomPaint(
                             size: const Size.fromHeight(18),
                             painter: _AnimatedWaveformPainter(
-                              animValue: _recordingWaveController!.value,
+                              animValue: recordingWaveController!.value,
                               color: accent.withValues(alpha: 0.78),
                             ),
                           ),
@@ -2312,6 +2352,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
   bool _voicePressActive = false;
   bool _attachmentSheetOpening = false;
   bool _disposing = false;
+  StreamSubscription<FlutterAiLocalStatusEvent>? _localAiStatusSubscription;
   AnimationController? _recordingWaveController;
 
   @override
@@ -2323,6 +2364,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     _messageFocusNode = FocusNode()..addListener(_handleInputFocusChange);
     _messageController = TextEditingController()
       ..addListener(_handleInputChange);
+    _localAiStatusSubscription = FlutterAiTurnProcessor.instance.statusEvents
+        .listen(_handleLocalAiStatusEvent);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) {
         return;
@@ -2362,6 +2405,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
       unawaited(_setConversationTyping(false, force: true));
     }
     unawaited(_cancelInlineVoiceRecording());
+    unawaited(_localAiStatusSubscription?.cancel());
     _typingDebounce?.cancel();
     _messageFocusNode
       ..removeListener(_handleInputFocusChange)
@@ -2370,6 +2414,25 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
       ..removeListener(_handleInputChange)
       ..dispose();
     super.dispose();
+  }
+
+  void _handleLocalAiStatusEvent(FlutterAiLocalStatusEvent event) {
+    if (!mounted || event.conversationId != widget.conversation?.id) {
+      return;
+    }
+
+    setState(() {
+      _aiStatusOverride = event.status ?? '';
+      _peerStatusOverride = event.status == 'typing'
+          ? ((event.statusText == null || event.statusText!.trim().isEmpty)
+                ? 'Yaziyor...'
+                : event.statusText)
+          : null;
+    });
+
+    if (event.status == null) {
+      ref.read(conversationFeedRefreshProvider.notifier).state++;
+    }
   }
 
   void _handleInputChange() {
@@ -2648,6 +2711,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
         FlutterAiTurnProcessor.instance.run(
           token: authState.token,
           ownerUserId: currentUser.id,
+          forceFetch: true,
+          lookaheadSeconds: 120,
         ),
       );
     } catch (error) {
@@ -3032,6 +3097,14 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     }
 
     await AppSyncEngine.instance.flushOutbox(token: token, ownerUserId: userId);
+    unawaited(
+      FlutterAiTurnProcessor.instance.run(
+        token: token,
+        ownerUserId: userId,
+        forceFetch: true,
+        lookaheadSeconds: 120,
+      ),
+    );
     if (!mounted) {
       return;
     }
@@ -3268,6 +3341,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                   isVoiceSending: _voiceSending,
                   voiceElapsed: Duration(seconds: _voiceElapsedSeconds),
                   errorText: _inputError,
+                  recordingWaveController: _recordingWaveController,
                 ),
               ),
             ],
@@ -3816,13 +3890,13 @@ class _LiveChatMessagesBodyState extends ConsumerState<_LiveChatMessagesBody> {
 
   @override
   Widget build(BuildContext context) {
-    final currentUserId = ref.watch(appAuthProvider).asData?.value?.user?.id;
-    final viewerLanguageCode = ref
-        .watch(appAuthProvider)
-        .asData
-        ?.value
-        ?.user
-        ?.languageCode;
+    final authState = ref.watch(appAuthProvider).asData?.value;
+    final currentUserId = authState?.user?.id;
+    final viewerLanguageCode = authState?.user?.languageCode;
+    final token = authState?.token.trim();
+    final mediaHttpHeaders = token == null || token.isEmpty
+        ? null
+        : {'Authorization': 'Bearer $token'};
     if (currentUserId == null) {
       return const Center(child: CupertinoActivityIndicator(radius: 14));
     }
@@ -3909,6 +3983,7 @@ class _LiveChatMessagesBodyState extends ConsumerState<_LiveChatMessagesBody> {
             message: uiMessages[messageIndex],
             peer: widget.peer,
             theme: widget.theme,
+            mediaHttpHeaders: mediaHttpHeaders,
           )
         else
           _MessageBubble(
@@ -3916,6 +3991,7 @@ class _LiveChatMessagesBodyState extends ConsumerState<_LiveChatMessagesBody> {
             message: uiMessages[messageIndex],
             peer: widget.peer,
             theme: widget.theme,
+            mediaHttpHeaders: mediaHttpHeaders,
             showTranslateAction: shouldShowInlineTranslateAction(
               message: _messages[messageIndex],
               currentUserId: currentUserId,

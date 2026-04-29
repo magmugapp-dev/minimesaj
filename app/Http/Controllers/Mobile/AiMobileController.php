@@ -40,8 +40,15 @@ class AiMobileController extends Controller
 
     public function pendingTurns(Request $request): JsonResponse
     {
+        $validated = $request->validate([
+            'lookahead_seconds' => ['nullable', 'integer', 'min:0', 'max:300'],
+        ]);
+
         return response()->json([
-            'data' => $this->turnService->pendingTurnsFor($request->user())
+            'data' => $this->turnService->pendingTurnsFor(
+                $request->user(),
+                (int) ($validated['lookahead_seconds'] ?? 0),
+            )
                 ->map(fn (AiMessageTurn $turn) => $this->turnPayload($turn))
                 ->values(),
         ]);
@@ -143,6 +150,26 @@ class AiMobileController extends Controller
 
         return response()->json([
             'data' => MesajResource::collection(collect($messages))->resolve($request),
+        ]);
+    }
+
+    public function fail(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'turn_id' => ['required', 'integer', 'exists:ai_message_turns,id'],
+            'error' => ['nullable', 'string', 'max:500'],
+        ]);
+
+        $turn = AiMessageTurn::query()->findOrFail($validated['turn_id']);
+        $updated = $this->turnService->markClientFailure(
+            $turn,
+            $request->user(),
+            $validated['error'] ?? 'client_ai_failure',
+        );
+
+        return response()->json([
+            'status' => $updated->status,
+            'retry_after' => $updated->retry_after?->toISOString(),
         ]);
     }
 

@@ -53,6 +53,9 @@ class AiTakilanGorevleriKurtar extends Command
                             $nextStatus,
                             null,
                             $turn->planned_at?->toISOString(),
+                            $turn->id,
+                            $turn->ai_user_id,
+                            $turn->source_message_id,
                         );
                     }
 

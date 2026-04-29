@@ -13,6 +13,7 @@ class AppApi {
   static const String mobileAiBootstrapPath = '/api/mobile/ai/bootstrap';
   static const String mobileAiPendingTurnsPath = '/api/mobile/ai/pending-turns';
   static const String mobileAiGeminiStreamPath = '/api/mobile/ai/gemini/stream';
+  static const String mobileAiTurnFailurePath = '/api/mobile/ai/turn-failure';
   static const String mobileAiViolationsPath = '/api/mobile/ai/violations';
   static const String discoverPath = '/api/dating/kesfet';
   static const String matchCenterPath = '/api/dating/eslesme-merkezi';
@@ -50,6 +51,9 @@ class AppApi {
 
   static String mobileConversationMessagesPath(int conversationId) =>
       '/api/mobile/conversations/$conversationId/messages';
+
+  static String mobileMessageMediaPath(int messageId) =>
+      '/api/mobile/messages/$messageId/media';
 
   static String mobileAiTurnContextPath(int conversationId) =>
       '/api/mobile/ai/conversations/$conversationId/turn-context';

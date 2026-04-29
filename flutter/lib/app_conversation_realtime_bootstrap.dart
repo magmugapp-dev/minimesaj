@@ -263,6 +263,19 @@ class _ConversationRealtimeBootstrapState
           ),
           aiPlannedAt: plannedAt,
         );
+        final token = _desiredToken;
+        if (token != null &&
+            token.trim().isNotEmpty &&
+            (aiStatus == 'pending' || aiStatus == 'deferred')) {
+          unawaited(
+            FlutterAiTurnProcessor.instance.cacheRealtimeTurn(
+              payload: event.payload,
+              conversationId: event.conversationId,
+              token: token,
+              ownerUserId: currentUserId,
+            ),
+          );
+        }
         _scheduleAiTurnRun(
           conversationId: event.conversationId,
           plannedAt: plannedAt,
@@ -295,6 +308,14 @@ class _ConversationRealtimeBootstrapState
           return;
         }
         if (senderId != currentUserId) {
+          await store.updateConversationPreviewRuntimeStatus(
+            event.conversationId,
+            ownerUserId: currentUserId,
+            aiStatus: null,
+            aiStatusText: null,
+            aiPlannedAt: null,
+          );
+          _aiTypingTimers.remove(event.conversationId)?.cancel();
           final messageSoundsEnabled =
               ref
                   .read(appAuthProvider)

@@ -30,6 +30,10 @@ void main() {
       'chat_previews',
       'chat_outbox',
       'media_cache_index',
+      'ai_prompt',
+      'ai_characters',
+      'ai_memory',
+      'ai_pending_turns',
     ]) {
       await Hive.deleteBoxFromDisk(box);
     }
@@ -169,6 +173,83 @@ void main() {
     expect(parts.last['inlineData']['mimeType'], 'image/png');
     expect(parts.last['inlineData']['data'], isNotEmpty);
   });
+
+  test('gemini payload downloads app media with bearer token', () async {
+    final payload = await FlutterAiTurnProcessor.instance.buildGeminiPayloadForTest(
+      MockClient((request) async {
+        expect(request.url.path, '/api/mobile/messages/91/media');
+        expect(request.headers['Authorization'], 'Bearer token-1');
+        return http.Response.bytes(
+          base64Decode(
+            'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=',
+          ),
+          200,
+          headers: {'content-type': 'image/png'},
+        );
+      }),
+      {
+        'model_config': {'model_name': 'gemini-2.5-flash'},
+        'character': {'character_id': 'test'},
+        'runtime_context': {},
+        'messages': [
+          {
+            'is_ai': false,
+            'type': 'foto',
+            'text': 'Bu nedir?',
+            'file_url':
+                '${AppEnvironment.apiBaseUrl}/api/mobile/messages/91/media',
+            'file_mime': 'image/png',
+          },
+        ],
+      },
+      token: 'token-1',
+    );
+
+    final parts = ((payload['contents'] as List).first as Map)['parts'] as List;
+    expect(parts.last['inlineData']['mimeType'], 'image/png');
+    expect(parts.last['inlineData']['data'], isNotEmpty);
+  });
+
+  test('ai typing hold scales with generated text length', () {
+    final processor = FlutterAiTurnProcessor.instance;
+    final short = processor.typingHoldDurationForTest(['Selam']);
+    final long = processor.typingHoldDurationForTest([
+      'Bu cevap daha uzun oldugu icin ekranda yaziyor durumunun biraz daha uzun kalmasi gerekir.',
+    ]);
+
+    expect(short, const Duration(milliseconds: 990));
+    expect(long, greaterThan(short));
+    expect(
+      processor.typingHoldDurationForTest([List.filled(1000, 'x').join()]),
+      const Duration(milliseconds: 4500),
+    );
+  });
+
+  test(
+    'ai processor caches realtime future turn without fetching server',
+    () async {
+      await FlutterAiTurnProcessor.instance.cacheRealtimeTurn(
+        payload: {
+          'turn_id': 44,
+          'ai_user_id': 8,
+          'source_message_id': 91,
+          'status': 'pending',
+          'planned_at': DateTime.now()
+              .add(const Duration(seconds: 30))
+              .toIso8601String(),
+        },
+        conversationId: 12,
+        token: 'token-1',
+        ownerUserId: 7,
+      );
+
+      final box = await AppHiveBoxes.pendingAiTurns();
+      final row = Map<String, dynamic>.from(box.get('7:44') as Map);
+      expect(row['conversation_id'], 12);
+      expect(row['source_message_id'], 91);
+      expect(row['status'], 'pending');
+    },
+  );
 
   test('syncDelta continues while the server reports more pages', () async {
     await AppSessionStorage.saveSession(

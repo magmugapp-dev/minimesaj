@@ -17,6 +17,9 @@ class AiTurnStatusUpdated implements ShouldBroadcastNow
         public string $status,
         public ?string $statusText = null,
         public ?string $plannedAt = null,
+        public ?int $turnId = null,
+        public ?int $aiUserId = null,
+        public ?int $sourceMessageId = null,
     ) {}
 
     public function broadcastOn(): array
@@ -39,6 +42,9 @@ class AiTurnStatusUpdated implements ShouldBroadcastNow
             'status' => $this->status,
             'status_text' => $this->statusText,
             'planned_at' => $this->plannedAt,
+            'turn_id' => $this->turnId,
+            'ai_user_id' => $this->aiUserId,
+            'source_message_id' => $this->sourceMessageId,
         ];
     }
 
