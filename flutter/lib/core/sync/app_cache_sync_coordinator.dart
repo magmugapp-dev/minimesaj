@@ -7,7 +7,7 @@ class AppCacheSyncCoordinator {
   AppCacheSyncCoordinator._();
 
   static final AppCacheSyncCoordinator instance = AppCacheSyncCoordinator._();
-  static const Duration defaultStaleWindow = Duration(minutes: 2);
+  static const Duration defaultStaleWindow = Duration(minutes: 5);
 
   final Set<int> _syncInFlight = <int>{};
   Timer? _debounceTimer;

@@ -4,11 +4,11 @@ namespace App\Events;
 
 use Illuminate\Broadcasting\InteractsWithSockets;
 use Illuminate\Broadcasting\PrivateChannel;
-use Illuminate\Contracts\Broadcasting\ShouldBroadcastNow;
+use Illuminate\Contracts\Broadcasting\ShouldBroadcast;
 use Illuminate\Foundation\Events\Dispatchable;
 use Illuminate\Queue\SerializesModels;
 
-class AiTurnStatusUpdated implements ShouldBroadcastNow
+class AiTurnStatusUpdated implements ShouldBroadcast
 {
     use Dispatchable, InteractsWithSockets, SerializesModels;
 
@@ -20,6 +20,7 @@ class AiTurnStatusUpdated implements ShouldBroadcastNow
         public ?int $turnId = null,
         public ?int $aiUserId = null,
         public ?int $sourceMessageId = null,
+        public ?string $retryAfter = null,
     ) {}
 
     public function broadcastOn(): array
@@ -45,6 +46,7 @@ class AiTurnStatusUpdated implements ShouldBroadcastNow
             'turn_id' => $this->turnId,
             'ai_user_id' => $this->aiUserId,
             'source_message_id' => $this->sourceMessageId,
+            'retry_after' => $this->retryAfter,
         ];
     }
 

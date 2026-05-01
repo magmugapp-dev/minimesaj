@@ -10,6 +10,7 @@ enum ChatRealtimeEventType {
   messagesRead,
   aiStatus,
   conversationTyping,
+  conversationCleared,
 }
 
 @immutable
@@ -319,6 +320,8 @@ class ChatRealtimeService {
       'ai.turn.status' || '.ai.turn.status' => ChatRealtimeEventType.aiStatus,
       'sohbet.typing' ||
       '.sohbet.typing' => ChatRealtimeEventType.conversationTyping,
+      'sohbet.temizlendi' ||
+      '.sohbet.temizlendi' => ChatRealtimeEventType.conversationCleared,
       _ => null,
     };
   }

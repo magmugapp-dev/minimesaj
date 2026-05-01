@@ -17,7 +17,15 @@ return Application::configure(basePath: dirname(__DIR__))
         then: function () {
             // Rate limiter tanımları
             RateLimiter::for('api', function (Request $request) {
-                return Limit::perMinute(60)->by($request->user()?->id ?: $request->ip());
+                return Limit::perMinute(30)->by($request->user()?->id ?: $request->ip());
+            });
+
+            RateLimiter::for('bootstrap', function (Request $request) {
+                return Limit::perMinute(3)->by($request->user()?->id ?: $request->ip());
+            });
+
+            RateLimiter::for('sync', function (Request $request) {
+                return Limit::perMinute(10)->by($request->user()?->id ?: $request->ip());
             });
 
             RateLimiter::for('auth', function (Request $request) {

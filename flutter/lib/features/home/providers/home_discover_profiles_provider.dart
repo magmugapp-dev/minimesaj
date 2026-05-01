@@ -1,5 +1,8 @@
 import 'package:magmug/app_core.dart';
 
+List<AppMatchCandidate> _cachedDiscoverProfiles = const <AppMatchCandidate>[];
+DateTime? _cachedDiscoverProfilesAt;
+
 final homeDiscoverProfilesProvider = FutureProvider<List<AppMatchCandidate>>((
   ref,
 ) async {
@@ -9,10 +12,22 @@ final homeDiscoverProfilesProvider = FutureProvider<List<AppMatchCandidate>>((
     return const [];
   }
 
+  final cachedAt = _cachedDiscoverProfilesAt;
+  if (cachedAt != null &&
+      DateTime.now().difference(cachedAt) < const Duration(minutes: 5) &&
+      _cachedDiscoverProfiles.isNotEmpty) {
+    return _cachedDiscoverProfiles;
+  }
+
+  final api = AppAuthApi();
   try {
-    final bootstrap = await AppBootstrapCoordinator.instance.bootstrap(token);
-    return bootstrap.discoverProfiles.take(4).toList(growable: false);
+    final profiles = await api.fetchDiscoverProfiles(token, limit: 4);
+    _cachedDiscoverProfiles = profiles;
+    _cachedDiscoverProfilesAt = DateTime.now();
+    return profiles;
   } catch (_) {
-    return const <AppMatchCandidate>[];
+    return _cachedDiscoverProfiles;
+  } finally {
+    api.close();
   }
 });

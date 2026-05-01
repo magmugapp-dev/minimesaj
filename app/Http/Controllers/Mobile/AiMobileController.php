@@ -4,12 +4,14 @@ namespace App\Http\Controllers\Mobile;
 
 use App\Http\Controllers\Controller;
 use App\Http\Resources\MesajResource;
+use App\Models\GeminiApiWarning;
 use App\Models\AiMessageTurn;
 use App\Models\AiPromptVersion;
 use App\Models\Ayar;
 use App\Models\Sohbet;
 use App\Models\User;
 use App\Services\Ai\AiTurnService;
+use App\Services\Ai\GeminiKeyPool;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Http;
@@ -89,8 +91,12 @@ class AiMobileController extends Controller
             abort(422, 'Turn id required.');
         }
 
-        $apiKey = trim((string) Ayar::query()->where('anahtar', 'gemini_api_key')->value('deger'));
+        $pooledKey = GeminiKeyPool::pick();
+        $apiKey = trim((string) ($pooledKey?->api_key ?? Ayar::query()->where('anahtar', 'gemini_api_key')->value('deger')));
         abort_if($apiKey === '', 500, 'Gemini API key missing.');
+        if ($pooledKey) {
+            GeminiKeyPool::recordUse($pooledKey);
+        }
 
         $model = $this->safeModel((string) $validated['model']);
         $url = "https://generativelanguage.googleapis.com/v1beta/models/{$model}:streamGenerateContent?alt=sse&key={$apiKey}";
@@ -104,8 +110,16 @@ class AiMobileController extends Controller
             ->send('POST', $url, ['json' => $validated['payload']]);
 
         if ($response->status() >= 400) {
-            if ($turn && in_array($response->status(), [429, 500, 503], true)) {
-                $this->turnService->markRetryableFailure($turn, 'Gemini '.$response->status());
+            if ($turn) {
+                $this->recordGeminiWarning($turn, $response->status(), $response->body());
+                if (in_array($response->status(), [429, 500, 503], true)) {
+                    if ($pooledKey) {
+                        GeminiKeyPool::markExhausted($pooledKey);
+                    }
+                    $this->turnService->markRetryableFailure($turn, 'Gemini '.$response->status());
+                } elseif ($response->status() >= 400 && $response->status() < 500) {
+                    $this->turnService->markPermanentFailure($turn, 'Gemini permanent '.$response->status());
+                }
             }
 
             return response()->json([
@@ -221,5 +235,16 @@ class AiMobileController extends Controller
         abort_unless(Str::startsWith($model, 'gemini-'), 422, 'Invalid model.');
 
         return $model;
+    }
+
+    private function recordGeminiWarning(AiMessageTurn $turn, int $status, string $body): void
+    {
+        GeminiApiWarning::query()->create([
+            'ai_user_id' => $turn->ai_user_id,
+            'turn_id' => $turn->id,
+            'error_code' => (string) $status,
+            'error_message' => Str::limit($body, 1000, ''),
+            'occurred_at' => now(),
+        ]);
     }
 }

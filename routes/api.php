@@ -51,10 +51,12 @@ Route::middleware(['auth:sanctum', 'throttle:api'])->group(function () {
     Route::post('uygulama/destek-talebi', [\App\Http\Controllers\Api\DestekTalebiController::class, 'gonder']);
 
     Route::prefix('mobile')->group(function () {
-        Route::get('bootstrap', [\App\Http\Controllers\Mobile\MobileController::class, 'bootstrap']);
-        Route::post('sync', [\App\Http\Controllers\Mobile\MobileController::class, 'sync']);
+        Route::get('bootstrap', [\App\Http\Controllers\Mobile\MobileController::class, 'bootstrap'])->middleware('throttle:bootstrap');
+        Route::post('sync', [\App\Http\Controllers\Mobile\MobileController::class, 'sync'])->middleware('throttle:sync');
+        Route::post('heartbeat', [\App\Http\Controllers\Mobile\MobileController::class, 'heartbeat']);
         Route::get('conversations/{conversation}/messages', [\App\Http\Controllers\Mobile\MobileController::class, 'messages']);
         Route::post('conversations/{conversation}/messages', [\App\Http\Controllers\Mobile\MobileController::class, 'sendMessage']);
+        Route::delete('conversations/{conversation}/clear', [\App\Http\Controllers\Mobile\MobileController::class, 'clearConversation']);
         Route::get('messages/{message}/media', \App\Http\Controllers\Mobile\MessageMediaController::class)->name('mobile.messages.media');
         Route::get('ai/bootstrap', [\App\Http\Controllers\Mobile\AiMobileController::class, 'bootstrap']);
         Route::get('ai/pending-turns', [\App\Http\Controllers\Mobile\AiMobileController::class, 'pendingTurns']);

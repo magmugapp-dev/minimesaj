@@ -33,6 +33,7 @@ class FlutterAiTurnProcessor {
       StreamController<FlutterAiLocalStatusEvent>.broadcast();
 
   bool _running = false;
+  bool _pauseProcessing = false;
   Timer? _deferredTimer;
   String? _pendingToken;
   int? _pendingUserId;
@@ -67,6 +68,20 @@ class FlutterAiTurnProcessor {
     _pendingLookaheadSeconds = 0;
   }
 
+  void onAppPaused() {
+    _pauseProcessing = true;
+    _deferredTimer?.cancel();
+    _deferredTimer = null;
+  }
+
+  void onAppResumed({
+    required String token,
+    required int ownerUserId,
+  }) {
+    _pauseProcessing = false;
+    unawaited(run(token: token, ownerUserId: ownerUserId, forceFetch: true));
+  }
+
   Future<void> run({
     required String token,
     required int ownerUserId,
@@ -74,6 +89,7 @@ class FlutterAiTurnProcessor {
     int lookaheadSeconds = 0,
   }) async {
     if (token.trim().isEmpty || ownerUserId <= 0) return;
+    if (_pauseProcessing) return;
     if (_running) {
       _pendingToken = token;
       _pendingUserId = ownerUserId;
@@ -248,6 +264,9 @@ class FlutterAiTurnProcessor {
           });
 
     for (final turn in rows) {
+      if (_pauseProcessing) {
+        return;
+      }
       if ((turn['ai_user_id'] as num?)?.toInt() == ownerUserId) {
         continue;
       }
@@ -269,6 +288,9 @@ class FlutterAiTurnProcessor {
     final turnId = (turn['id'] as num?)?.toInt();
     final conversationId = (turn['conversation_id'] as num?)?.toInt();
     if (turnId == null || conversationId == null) {
+      return;
+    }
+    if (_pauseProcessing) {
       return;
     }
 
@@ -313,7 +335,7 @@ class FlutterAiTurnProcessor {
         token: token,
         aiUserId: aiUserId,
         text: text,
-      );
+      ).then(_stripConversationEndingTags);
       final parts = cleaned
           .split(RegExp(r'\n\s*\n+'))
           .map((part) => part.trim())
@@ -420,12 +442,8 @@ class FlutterAiTurnProcessor {
       0,
       (sum, part) => sum + part.trim().runes.length,
     );
-    if (charCount <= 0) {
-      return const Duration(milliseconds: 900);
-    }
-
-    final milliseconds = 650 + (charCount * 18) + (parts.length * 250);
-    return Duration(milliseconds: milliseconds.clamp(900, 4500).toInt());
+    final milliseconds = 2000 + (charCount * 150) + (parts.length * 500);
+    return Duration(milliseconds: milliseconds.clamp(2000, 8000).toInt());
   }
 
   Future<Map<String, dynamic>?> _fetchTurnContext(
@@ -855,6 +873,18 @@ class FlutterAiTurnProcessor {
 
     cleaned = cleaned.replaceAll(RegExp(r'\[BLOCK_USER:[^\]]+\]'), '');
     return cleaned.trim();
+  }
+
+  String _stripConversationEndingTags(String text) {
+    return text
+        .replaceAll(
+          RegExp(
+            r'\[CONV_END:(sleep|work|break|general)\]',
+            caseSensitive: false,
+          ),
+          '',
+        )
+        .trim();
   }
 
   Future<List<AppConversationMessage>> _persistReply(

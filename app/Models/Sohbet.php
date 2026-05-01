@@ -20,6 +20,11 @@ class Sohbet extends Model
         'ai_durum_guncellendi_at',
         'ai_sessiz_mod_bitis_at',
         'ai_sessiz_mod_tetikleyen_mesaj_id',
+        'ai_konusma_kapanisi_at',
+        'ai_kapanis_kategorisi',
+        'ai_ghost_lockout_until',
+        'ai_ghost_tipi',
+        'temizlendi_at',
         'toplam_mesaj_sayisi',
         'durum',
     ];
@@ -31,6 +36,9 @@ class Sohbet extends Model
             'ai_planlanan_cevap_at' => 'datetime',
             'ai_durum_guncellendi_at' => 'datetime',
             'ai_sessiz_mod_bitis_at' => 'datetime',
+            'ai_konusma_kapanisi_at' => 'datetime',
+            'ai_ghost_lockout_until' => 'datetime',
+            'temizlendi_at' => 'datetime',
         ];
     }
 

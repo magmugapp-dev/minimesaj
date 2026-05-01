@@ -2666,6 +2666,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
           _aiStatusOverride = null;
         });
       }
+    } else if (event.type == ChatRealtimeEventType.conversationCleared) {
+      ref.invalidate(conversationMessagesProvider(event.conversationId));
+      ref.read(conversationFeedRefreshProvider.notifier).state++;
     }
   }
 
@@ -3801,6 +3804,42 @@ class _LiveChatMessagesBodyState extends ConsumerState<_LiveChatMessagesBody> {
 
     final api = AppAuthApi();
     try {
+      final cachedOlder = await ChatLocalStore.instance
+          .getConversationMessagesBefore(
+            ownerUserId: userId,
+            conversationId: conversationId,
+            beforeMessageId: beforeId,
+            limit: _conversationMessagePageSize,
+          );
+      if (!mounted || widget.conversation.id != conversationId) {
+        return;
+      }
+      if (cachedOlder.length >= _conversationMessagePageSize) {
+        setState(() {
+          _messages = _mergeConversationMessages(cachedOlder, _messages);
+          _loadingOlder = false;
+          _errorText = null;
+          _highestFetchedPage = _highestFetchedPage + 1;
+        });
+        return;
+      }
+
+      final noOlder = await ChatLocalStore.instance.hasNoOlderMessages(
+        ownerUserId: userId,
+        conversationId: conversationId,
+      );
+      if (!mounted || widget.conversation.id != conversationId) {
+        return;
+      }
+      if (noOlder) {
+        setState(() {
+          _messages = _mergeConversationMessages(cachedOlder, _messages);
+          _loadingOlder = false;
+          _hasMoreOlder = false;
+        });
+        return;
+      }
+
       final page = await api.fetchMobileConversationMessages(
         token,
         conversationId: conversationId,
@@ -3815,9 +3854,18 @@ class _LiveChatMessagesBodyState extends ConsumerState<_LiveChatMessagesBody> {
         page.messages,
         ownerUserId: userId,
       );
+      if (!page.hasMore) {
+        await ChatLocalStore.instance.markNoOlderMessages(
+          ownerUserId: userId,
+          conversationId: conversationId,
+        );
+      }
 
       setState(() {
-        _messages = _mergeConversationMessages(page.messages, _messages);
+        _messages = _mergeConversationMessages([
+          ...cachedOlder,
+          ...page.messages,
+        ], _messages);
         _loadingOlder = false;
         _errorText = null;
         _highestFetchedPage = _highestFetchedPage + 1;

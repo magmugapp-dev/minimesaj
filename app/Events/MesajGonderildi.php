@@ -6,11 +6,11 @@ use App\Models\Mesaj;
 use App\Http\Resources\MesajResource;
 use Illuminate\Broadcasting\InteractsWithSockets;
 use Illuminate\Broadcasting\PrivateChannel;
-use Illuminate\Contracts\Broadcasting\ShouldBroadcastNow;
+use Illuminate\Contracts\Broadcasting\ShouldBroadcast;
 use Illuminate\Foundation\Events\Dispatchable;
 use Illuminate\Queue\SerializesModels;
 
-class MesajGonderildi implements ShouldBroadcastNow
+class MesajGonderildi implements ShouldBroadcast
 {
     use Dispatchable, InteractsWithSockets, SerializesModels;
 
@@ -32,6 +32,9 @@ class MesajGonderildi implements ShouldBroadcastNow
         $payload = (new MesajResource(
             $this->mesaj->loadMissing('gonderen:id,ad,kullanici_adi,profil_resmi,dil')
         ))->resolve(request());
+        if (! empty($payload['dosya_yolu']) && trim((string) $this->mesaj->dosya_yolu) !== '') {
+            $payload['dosya_yolu'] .= '?file='.str_replace('%2F', '/', rawurlencode((string) $this->mesaj->dosya_yolu));
+        }
 
         return array_merge($payload, [
             'gonderen_user_id' => $this->mesaj->gonderen_user_id,

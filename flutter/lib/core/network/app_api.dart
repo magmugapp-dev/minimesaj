@@ -9,6 +9,7 @@ class AppApi {
   static const String mobileConfigPath = '/api/mobile/config';
   static const String mobileBootstrapPath = '/api/mobile/bootstrap';
   static const String mobileSyncPath = '/api/mobile/sync';
+  static const String mobileHeartbeatPath = '/api/mobile/heartbeat';
   static const String mobileUploadsPath = '/api/mobile/uploads';
   static const String mobileAiBootstrapPath = '/api/mobile/ai/bootstrap';
   static const String mobileAiPendingTurnsPath = '/api/mobile/ai/pending-turns';
@@ -51,6 +52,9 @@ class AppApi {
 
   static String mobileConversationMessagesPath(int conversationId) =>
       '/api/mobile/conversations/$conversationId/messages';
+
+  static String mobileConversationClearPath(int conversationId) =>
+      '/api/mobile/conversations/$conversationId/clear';
 
   static String mobileMessageMediaPath(int messageId) =>
       '/api/mobile/messages/$messageId/media';

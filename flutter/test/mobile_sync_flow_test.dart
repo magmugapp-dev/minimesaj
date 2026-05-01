@@ -217,11 +217,11 @@ void main() {
       'Bu cevap daha uzun oldugu icin ekranda yaziyor durumunun biraz daha uzun kalmasi gerekir.',
     ]);
 
-    expect(short, const Duration(milliseconds: 990));
+    expect(short, const Duration(milliseconds: 3250));
     expect(long, greaterThan(short));
     expect(
       processor.typingHoldDurationForTest([List.filled(1000, 'x').join()]),
-      const Duration(milliseconds: 4500),
+      const Duration(milliseconds: 8000),
     );
   });
 

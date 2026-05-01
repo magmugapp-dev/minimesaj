@@ -170,6 +170,64 @@ class ChatLocalStore implements ChatOutboxStore {
     return window.map(_messageFromRow).toList(growable: false);
   }
 
+  Future<List<AppConversationMessage>> getConversationMessagesBefore({
+    required int ownerUserId,
+    required int conversationId,
+    required int beforeMessageId,
+    int limit = 20,
+  }) async {
+    final rows = (await _conversationMessageRows(
+      ownerUserId: ownerUserId,
+      conversationId: conversationId,
+    ))
+        .where((row) {
+          final id = (row['id'] as num?)?.toInt() ?? 0;
+          return id > 0 && id < beforeMessageId;
+        })
+        .toList(growable: false);
+    rows.sort((a, b) {
+      final byId = ((b['id'] as num?)?.toInt() ?? 0).compareTo(
+        (a['id'] as num?)?.toInt() ?? 0,
+      );
+      if (byId != 0) {
+        return byId;
+      }
+      return ((b['created_at_ms'] as num?)?.toInt() ?? 0).compareTo(
+        (a['created_at_ms'] as num?)?.toInt() ?? 0,
+      );
+    });
+
+    return rows
+        .take(limit)
+        .map(_messageFromRow)
+        .toList(growable: false)
+        .reversed
+        .toList(growable: false);
+  }
+
+  Future<bool> hasNoOlderMessages({
+    required int ownerUserId,
+    required int conversationId,
+  }) async {
+    final row = _asRow(
+      (await _previewsBox).get(_previewKey(ownerUserId, conversationId)),
+    );
+    return (row['has_no_older_messages'] as num?)?.toInt() == 1;
+  }
+
+  Future<void> markNoOlderMessages({
+    required int ownerUserId,
+    required int conversationId,
+  }) async {
+    final box = await _previewsBox;
+    final key = _previewKey(ownerUserId, conversationId);
+    final row = _asRow(box.get(key));
+    if (row.isEmpty) {
+      return;
+    }
+    await box.put(key, {...row, 'has_no_older_messages': 1});
+  }
+
   Future<List<ChatLocalMessageSearchResult>> searchConversationMessages({
     required int ownerUserId,
     required String query,
@@ -489,6 +547,20 @@ class ChatLocalStore implements ChatOutboxStore {
       'ai_status_text': aiStatusText,
       'ai_planned_at_ms': aiPlannedAt?.millisecondsSinceEpoch,
     });
+  }
+
+  Future<void> clearConversation({
+    required int ownerUserId,
+    required int conversationId,
+  }) async {
+    final messagesBox = await _messagesBox;
+    final messageKeys = messagesBox.keys.where((key) {
+      final row = _asRow(messagesBox.get(key));
+      return _rowOwner(row) == ownerUserId &&
+          ((row['conversation_id'] as num?)?.toInt() ?? 0) == conversationId;
+    }).toList(growable: false);
+    await messagesBox.deleteAll(messageKeys);
+    await (await _previewsBox).delete(_previewKey(ownerUserId, conversationId));
   }
 
   Future<bool> applyConversationMessageEvent({

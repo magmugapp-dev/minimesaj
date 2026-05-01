@@ -3,6 +3,8 @@
 namespace App\Http\Controllers\Mobile;
 
 use App\Http\Controllers\Controller;
+use App\Events\SohbetTemizlendi;
+use App\Events\UserOnlineStatusChanged;
 use App\Http\Requests\Dating\MesajGonderRequest;
 use App\Http\Resources\BildirimResource;
 use App\Http\Resources\KullaniciResource;
@@ -195,6 +197,9 @@ class MobileController extends Controller
 
         $query = $conversation->mesajlar()
             ->with('gonderen:id,ad,kullanici_adi,profil_resmi,dil');
+        if ($conversation->temizlendi_at) {
+            $query->where('created_at', '>', $conversation->temizlendi_at);
+        }
 
         if ($afterId) {
             $messages = $query
@@ -243,6 +248,43 @@ class MobileController extends Controller
             ->setStatusCode($message->wasRecentlyCreated ? 201 : 200);
     }
 
+    public function heartbeat(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'online' => ['required', 'boolean'],
+        ]);
+
+        $user = $request->user();
+        $online = (bool) $validated['online'];
+        $user->forceFill([
+            'cevrim_ici_mi' => $online,
+            'son_gorulme_tarihi' => now(),
+        ])->save();
+
+        UserOnlineStatusChanged::dispatch($user->id, $online);
+
+        return response()->json([
+            'status' => 'ok',
+            'online' => $online,
+        ]);
+    }
+
+    public function clearConversation(Request $request, Sohbet $conversation): JsonResponse
+    {
+        Gate::authorize('erisebilir', $conversation);
+        $conversation->loadMissing('eslesme.user', 'eslesme.eslesenUser');
+        $users = collect([$conversation->eslesme?->user, $conversation->eslesme?->eslesenUser]);
+        abort_if($users->contains(fn (?User $user) => $user?->hesap_tipi === 'ai'), 422, 'AI sohbetleri temizlenemez.');
+
+        $conversation->forceFill(['temizlendi_at' => now()])->save();
+        SohbetTemizlendi::dispatch($conversation);
+
+        return response()->json([
+            'status' => 'ok',
+            'temizlendi_at' => $conversation->temizlendi_at?->toISOString(),
+        ]);
+    }
+
     private function conversationQuery(User $user)
     {
         $userId = (int) $user->id;
@@ -252,6 +294,10 @@ class MobileController extends Controller
                 $query->where('user_id', $userId)->orWhere('eslesen_user_id', $userId);
             })
             ->where('durum', 'aktif')
+            ->where(function ($query): void {
+                $query->whereNull('temizlendi_at')
+                    ->orWhereColumn('son_mesaj_tarihi', '>', 'temizlendi_at');
+            })
             ->with([
                 'eslesme.user:id,ad,kullanici_adi,profil_resmi,cevrim_ici_mi,dil,hesap_tipi',
                 'eslesme.user.aiCharacter:id,user_id,character_id,character_version,schema_version,active,display_name,primary_language_code,primary_language_name,model_name,character_json',

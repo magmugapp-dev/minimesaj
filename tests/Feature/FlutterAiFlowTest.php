@@ -48,22 +48,30 @@ it('creates a pending flutter ai turn after a user message', function () {
     });
 });
 
-it('plans ai turns from source message created at and supports pending lookahead', function () {
+it('plans ai turns from source message behavior and supports pending lookahead', function () {
     Notification::fake();
     [$viewer, $aiUser, $conversation] = aiConversationForTest();
-    $character = $aiUser->aiCharacter()->firstOrFail();
-    $json = $character->character_json;
-    data_set($json, 'rate_limits.min_response_seconds', 10);
-    data_set($json, 'rate_limits.max_response_seconds', 10);
-    $character->forceFill(['character_json' => $json])->save();
+
+    Mesaj::query()->create([
+        'sohbet_id' => $conversation->id,
+        'gonderen_user_id' => $aiUser->id,
+        'mesaj_tipi' => 'metin',
+        'mesaj_metni' => 'Selam.',
+        'ai_tarafindan_uretildi_mi' => true,
+        'created_at' => now()->subSeconds(20),
+        'updated_at' => now()->subSeconds(20),
+    ]);
 
     $incoming = app(MesajServisi::class)->gonder($conversation, $viewer, [
         'mesaj_tipi' => 'metin',
-        'mesaj_metni' => 'Planli cevap.',
+        'mesaj_metni' => 'Merhaba',
     ]);
     $turn = AiMessageTurn::query()->where('source_message_id', $incoming->id)->firstOrFail();
 
-    expect($turn->planned_at->equalTo($incoming->created_at->copy()->addSeconds(10)))->toBeTrue();
+    expect($turn->planned_at->betweenIncluded(
+        $incoming->created_at->copy()->addSeconds(2),
+        $incoming->created_at->copy()->addSeconds(5),
+    ))->toBeTrue();
 
     Sanctum::actingAs($viewer);
 
@@ -110,7 +118,7 @@ it('returns pending turns and stores flutter reply parts idempotently', function
 
     Sanctum::actingAs($viewer);
 
-    $this->getJson('/api/mobile/ai/pending-turns')
+    $this->getJson('/api/mobile/ai/pending-turns?lookahead_seconds=300')
         ->assertOk()
         ->assertJsonPath('data.0.id', $turn->id);
 

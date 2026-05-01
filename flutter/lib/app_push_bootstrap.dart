@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:magmug/app_core.dart';
+import 'package:magmug/core/ai/flutter_ai_turn_processor.dart';
 import 'package:magmug/app_push_bindings.dart';
 import 'package:magmug/app_push_device_sync.dart';
 import 'package:magmug/app_push_message_effect.dart';
@@ -57,7 +58,7 @@ class _PushBootstrapState extends ConsumerState<PushBootstrap>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state != AppLifecycleState.resumed || !mounted) {
+    if (!mounted) {
       return;
     }
 
@@ -68,6 +69,23 @@ class _PushBootstrapState extends ConsumerState<PushBootstrap>
       return;
     }
 
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.detached ||
+        state == AppLifecycleState.inactive) {
+      FlutterAiTurnProcessor.instance.onAppPaused();
+      unawaited(_sendHeartbeat(token, online: false));
+      return;
+    }
+
+    if (state != AppLifecycleState.resumed) {
+      return;
+    }
+
+    unawaited(_sendHeartbeat(token, online: true));
+    FlutterAiTurnProcessor.instance.onAppResumed(
+      token: token,
+      ownerUserId: ownerUserId,
+    );
     unawaited(
       AppCacheSyncCoordinator.instance
           .reconcile(token: token, ownerUserId: ownerUserId)
@@ -79,6 +97,17 @@ class _PushBootstrapState extends ConsumerState<PushBootstrap>
           })
           .catchError((_) {}),
     );
+  }
+
+  Future<void> _sendHeartbeat(String token, {required bool online}) async {
+    final api = AppAuthApi();
+    try {
+      await api.sendMobileHeartbeat(token, online: online);
+    } catch (_) {
+      // Presence heartbeat is best-effort.
+    } finally {
+      api.close();
+    }
   }
 
   Future<void> _configurePushNotifications() async {

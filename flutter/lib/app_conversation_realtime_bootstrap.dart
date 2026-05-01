@@ -374,6 +374,12 @@ class _ConversationRealtimeBootstrapState
           currentUserId: currentUserId,
         );
         break;
+      case ChatRealtimeEventType.conversationCleared:
+        await store.clearConversation(
+          ownerUserId: currentUserId,
+          conversationId: event.conversationId,
+        );
+        break;
     }
 
     if (!mounted) {

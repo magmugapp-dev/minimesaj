@@ -1317,6 +1317,50 @@ class AppAuthApi {
     }
   }
 
+  Future<void> sendMobileHeartbeat(
+    String token, {
+    required bool online,
+  }) async {
+    final response = await _client.post(
+      AppApi.uri(AppApi.mobileHeartbeatPath),
+      headers: {
+        'Accept': 'application/json',
+        'Authorization': 'Bearer $token',
+        'Content-Type': 'application/json',
+      },
+      body: jsonEncode({'online': online}),
+    );
+
+    if (response.statusCode == 401 || response.statusCode == 403) {
+      throw UnauthorizedApiException(
+        _text('apiErrorSessionExpired', 'Oturum suresi doldu.'),
+      );
+    }
+    if (response.statusCode >= 400) {
+      throw ApiException(_extractErrorMessage(_decodeJsonMap(response)));
+    }
+  }
+
+  Future<void> clearMobileConversation(
+    String token, {
+    required int conversationId,
+  }) async {
+    final response = await _client.delete(
+      AppApi.uri(AppApi.mobileConversationClearPath(conversationId)),
+      headers: {'Accept': 'application/json', 'Authorization': 'Bearer $token'},
+    );
+
+    final payload = _decodeJsonMap(response);
+    if (response.statusCode == 401 || response.statusCode == 403) {
+      throw UnauthorizedApiException(
+        _text('apiErrorSessionExpired', 'Oturum suresi doldu.'),
+      );
+    }
+    if (response.statusCode >= 400) {
+      throw ApiException(_extractErrorMessage(payload));
+    }
+  }
+
   Future<void> setConversationTyping(
     String token, {
     required int conversationId,
