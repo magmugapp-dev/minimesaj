@@ -175,6 +175,47 @@ it('applies conversation ending tags while storing only the clean reply', functi
     Queue::assertPushed(SetAiOffline::class);
 });
 
+it('uses the source message time for conversation ending grace windows', function () {
+    Notification::fake();
+    Event::fake([AiTurnStatusUpdated::class]);
+    [$viewer, $aiUser, $conversation] = aiConversationForTest();
+    $closedAt = now()->subMinutes(30);
+    $messageAt = $closedAt->copy()->addMinutes(10);
+    $conversation->forceFill([
+        'ai_konusma_kapanisi_at' => $closedAt,
+        'ai_kapanis_kategorisi' => 'general',
+    ])->save();
+
+    Mesaj::query()->create([
+        'sohbet_id' => $conversation->id,
+        'gonderen_user_id' => $aiUser->id,
+        'mesaj_tipi' => 'metin',
+        'mesaj_metni' => 'Gorusuruz.',
+        'ai_tarafindan_uretildi_mi' => true,
+        'client_message_id' => 'ai-before-closure-grace-test',
+    ])->forceFill([
+        'created_at' => $closedAt->copy()->subMinute(),
+        'updated_at' => $closedAt->copy()->subMinute(),
+    ])->save();
+
+    $incoming = Mesaj::query()->create([
+        'sohbet_id' => $conversation->id,
+        'gonderen_user_id' => $viewer->id,
+        'mesaj_tipi' => 'metin',
+        'mesaj_metni' => 'Peki',
+    ]);
+    $incoming->forceFill([
+        'created_at' => $messageAt,
+        'updated_at' => $messageAt,
+    ])->save();
+
+    app(\App\Services\Ai\AiTurnService::class)->createReplyTurn($conversation->fresh(), $incoming, $aiUser);
+
+    $turn = AiMessageTurn::query()->where('source_message_id', $incoming->id)->firstOrFail();
+    expect($conversation->fresh()->ai_kapanis_kategorisi)->toBeNull()
+        ->and($turn->planned_at->lessThan($closedAt->copy()->addHour()))->toBeTrue();
+});
+
 it('returns auth media urls and mime metadata in ai turn context', function () {
     Storage::fake('public');
     Notification::fake();
@@ -256,6 +297,61 @@ it('increments violation counters and blocks when threshold is reached', functio
         ->exists())->toBeTrue();
 });
 
+it('creates only one extra proactive turn after the last unanswered ai message', function () {
+    Notification::fake();
+    [$viewer, $aiUser, $conversation] = aiConversationForTest();
+    $character = $aiUser->aiCharacter()->firstOrFail();
+    $character->forceFill([
+        'reengagement_active' => true,
+        'reengagement_after_hours' => 1,
+        'reengagement_daily_limit' => 10,
+    ])->save();
+    $aiUser->forceFill([
+        'cinsiyet' => 'kadin',
+        'cevrim_ici_mi' => true,
+        'hesap_durumu' => 'aktif',
+    ])->save();
+    $viewer->forceFill(['cinsiyet' => 'erkek'])->save();
+
+    seedConversationMessagesForProactiveTest(
+        $conversation,
+        $viewer,
+        $aiUser,
+        aiMessageCountAfterUser: 1,
+    );
+
+    $secondViewer = User::factory()->create(['hesap_durumu' => 'aktif', 'cinsiyet' => 'erkek']);
+    $secondMatch = Eslesme::query()->create([
+        'user_id' => $secondViewer->id,
+        'eslesen_user_id' => $aiUser->id,
+        'eslesme_turu' => 'otomatik',
+        'eslesme_kaynagi' => 'yapay_zeka',
+        'durum' => 'aktif',
+        'baslatan_user_id' => $secondViewer->id,
+    ]);
+    $secondConversation = Sohbet::query()->create([
+        'eslesme_id' => $secondMatch->id,
+        'durum' => 'aktif',
+    ]);
+    seedConversationMessagesForProactiveTest(
+        $secondConversation,
+        $secondViewer,
+        $aiUser,
+        aiMessageCountAfterUser: 2,
+    );
+
+    Artisan::call('ai:proaktif-mesajlari-planla', ['--limit' => 10]);
+
+    expect(AiMessageTurn::query()
+        ->where('turn_type', 'proactive')
+        ->where('conversation_id', $conversation->id)
+        ->count())->toBe(1)
+        ->and(AiMessageTurn::query()
+            ->where('turn_type', 'proactive')
+            ->where('conversation_id', $secondConversation->id)
+            ->count())->toBe(0);
+});
+
 it('imports ai characters from zip and skips existing character ids', function () {
     $admin = User::factory()->create(['is_admin' => true]);
     $existing = User::factory()->aiKullanici()->create();
@@ -333,6 +429,49 @@ function createAiCharacterForTest(User $user, string $characterId): void
         'top_p' => 0.9,
         'max_output_tokens' => 1024,
     ]);
+}
+
+function seedConversationMessagesForProactiveTest(
+    Sohbet $conversation,
+    User $viewer,
+    User $aiUser,
+    int $aiMessageCountAfterUser,
+): void {
+    $userMessageAt = now()->subHours(10);
+    Mesaj::query()->create([
+        'sohbet_id' => $conversation->id,
+        'gonderen_user_id' => $viewer->id,
+        'mesaj_tipi' => 'metin',
+        'mesaj_metni' => 'Sonra konusuruz.',
+    ])->forceFill([
+        'created_at' => $userMessageAt,
+        'updated_at' => $userMessageAt,
+    ])->save();
+
+    $lastMessage = null;
+    for ($i = 0; $i < $aiMessageCountAfterUser; $i++) {
+        $messageAt = now()->subHours(3 - $i);
+        $lastMessage = Mesaj::query()->create([
+            'sohbet_id' => $conversation->id,
+            'gonderen_user_id' => $aiUser->id,
+            'mesaj_tipi' => 'metin',
+            'mesaj_metni' => "AI takip {$i}",
+            'ai_tarafindan_uretildi_mi' => true,
+        ]);
+        $lastMessage->forceFill([
+            'created_at' => $messageAt,
+            'updated_at' => $messageAt,
+        ])->save();
+    }
+
+    $conversation->forceFill([
+        'son_mesaj_id' => $lastMessage?->id,
+        'son_mesaj_gonderen_user_id' => $lastMessage?->gonderen_user_id,
+        'son_mesaj_tarihi' => $lastMessage?->created_at,
+        'son_mesaj_tipi' => $lastMessage?->mesaj_tipi,
+        'son_mesaj_metni' => $lastMessage?->mesaj_metni,
+        'durum' => 'aktif',
+    ])->save();
 }
 
 function characterJsonForTest(string $characterId, string $name): array

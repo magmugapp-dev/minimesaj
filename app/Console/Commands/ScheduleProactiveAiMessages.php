@@ -134,10 +134,27 @@ class ScheduleProactiveAiMessages extends Command
         if (!$lastMessage || (int) $lastMessage->gonderen_user_id === (int) $aiUser->id) {
             $doubleGap = now()->subHours(max(1, (int) $character->reengagement_after_hours) * 2);
 
-            return $lastMessage && $lastMessage->created_at?->lessThanOrEqualTo($doubleGap);
+            return $lastMessage
+                && $lastMessage->created_at?->lessThanOrEqualTo($doubleGap)
+                && $this->aiMessagesSinceLastUserMessage($conversation, $aiUser) === 1;
         }
 
         return true;
+    }
+
+    private function aiMessagesSinceLastUserMessage(Sohbet $conversation, User $aiUser): int
+    {
+        $lastUserMessageId = Mesaj::query()
+            ->where('sohbet_id', $conversation->id)
+            ->where('gonderen_user_id', '!=', $aiUser->id)
+            ->latest('id')
+            ->value('id');
+
+        return Mesaj::query()
+            ->where('sohbet_id', $conversation->id)
+            ->where('gonderen_user_id', $aiUser->id)
+            ->when($lastUserMessageId, fn ($query, $messageId) => $query->where('id', '>', $messageId))
+            ->count();
     }
 
     private function orientationAllows(AiCharacter $character, User $aiUser, User $peer): bool

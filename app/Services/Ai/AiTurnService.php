@@ -478,8 +478,9 @@ class AiTurnService
     private function plannedAt(AiCharacter $character, Mesaj $message)
     {
         $conversation = $message->sohbet ?: $message->sohbet()->first();
+        $referenceAt = $message->created_at?->copy() ?? now();
         if ($conversation) {
-            $closurePlannedAt = $this->plannedAtForClosedConversation($conversation, $character);
+            $closurePlannedAt = $this->plannedAtForClosedConversation($conversation, $character, $referenceAt);
             if ($closurePlannedAt) {
                 return $closurePlannedAt;
             }
@@ -499,7 +500,7 @@ class AiTurnService
         $delay = $this->gapBaseSeconds($responseTime) * $this->messageLengthMultiplier($message);
         $jitter = random_int(85, 115) / 100;
         $delaySeconds = max(2, (int) round($delay * $jitter));
-        $plannedAt = ($message->created_at?->copy() ?? now())->addSeconds($delaySeconds);
+        $plannedAt = $referenceAt->copy()->addSeconds($delaySeconds);
 
         return $this->moveOutOfSleepWindow($plannedAt, $character);
     }
@@ -605,7 +606,7 @@ class AiTurnService
         };
     }
 
-    private function plannedAtForClosedConversation(Sohbet $conversation, AiCharacter $character)
+    private function plannedAtForClosedConversation(Sohbet $conversation, AiCharacter $character, $referenceAt)
     {
         $closedAt = $conversation->ai_konusma_kapanisi_at;
         $category = $conversation->ai_kapanis_kategorisi;
@@ -613,7 +614,7 @@ class AiTurnService
             return null;
         }
 
-        if ($closedAt->diffInMinutes(now()) < 15) {
+        if ($referenceAt->lessThan($closedAt->copy()->addMinutes(15))) {
             $conversation->forceFill([
                 'ai_konusma_kapanisi_at' => null,
                 'ai_kapanis_kategorisi' => null,
@@ -629,7 +630,7 @@ class AiTurnService
             default => $closedAt->copy()->addHours(random_int(1, 3)),
         };
 
-        if ($target && now()->lessThan($target)) {
+        if ($target && $referenceAt->lessThan($target)) {
             return $target;
         }
 
