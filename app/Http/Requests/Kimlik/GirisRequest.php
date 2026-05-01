@@ -17,6 +17,8 @@ class GirisRequest extends FormRequest
             'kullanici_adi' => 'required|string',
             'password' => 'required|string',
             'istemci_tipi' => 'required|in:dating,extension,admin',
+            'device_fingerprint' => 'nullable|string|max:255',
+            'platform' => 'nullable|string|max:20',
         ];
     }
 }

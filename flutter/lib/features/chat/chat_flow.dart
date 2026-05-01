@@ -24,6 +24,7 @@ final Set<int> _conversationReadMarkInFlight = <int>{};
 final Map<int, AppMatchCandidate> _chatPeerProfileCache =
     <int, AppMatchCandidate>{};
 final Map<int, int> _chatThemeSelectionCache = <int, int>{};
+const Duration _peerProfileCacheTtl = Duration(minutes: 10);
 int _clientMessageSequence = 0;
 bool _chatRuntimeCacheCleanerRegistered = false;
 
@@ -252,6 +253,7 @@ final chatPeerProfileProvider = FutureProvider.autoDispose
 
       final session = await ref.watch(appAuthProvider.future);
       final token = session?.token;
+      final ownerUserId = session?.user?.id;
       if (token == null || token.trim().isEmpty) {
         throw ApiException(
           AppRuntimeText.instance.t(
@@ -261,15 +263,145 @@ final chatPeerProfileProvider = FutureProvider.autoDispose
         );
       }
 
+      if (ownerUserId != null) {
+        final persisted = await _readPeerProfileFromHive(
+          ownerUserId: ownerUserId,
+          userId: userId,
+        );
+        if (persisted != null) {
+          _chatPeerProfileCache[userId] = persisted;
+          return persisted;
+        }
+      }
+
       final api = AppAuthApi();
       try {
         final profile = await api.fetchDatingPeerProfile(token, userId: userId);
         _chatPeerProfileCache[userId] = profile;
+        if (ownerUserId != null) {
+          await _writePeerProfileToHive(
+            ownerUserId: ownerUserId,
+            profile: profile,
+          );
+        }
         return profile;
       } finally {
         api.close();
       }
     });
+
+Future<AppMatchCandidate?> _readPeerProfileFromHive({
+  required int ownerUserId,
+  required int userId,
+}) async {
+  final box = await AppHiveBoxes.peerProfiles();
+  final row = _chatAsMap(box.get('$ownerUserId:$userId'));
+  final expiresAtMs = (row?['expires_at_ms'] as num?)?.toInt() ?? 0;
+  final data = _chatAsMap(row?['data']);
+  if (expiresAtMs <= DateTime.now().millisecondsSinceEpoch || data == null) {
+    return null;
+  }
+
+  try {
+    return AppMatchCandidate.fromJson(data);
+  } catch (_) {
+    await box.delete('$ownerUserId:$userId');
+    return null;
+  }
+}
+
+Future<void> _writePeerProfileToHive({
+  required int ownerUserId,
+  required AppMatchCandidate profile,
+}) async {
+  final box = await AppHiveBoxes.peerProfiles();
+  await box.put('$ownerUserId:${profile.id}', {
+    'owner_user_id': ownerUserId,
+    'updated_at_ms': DateTime.now().millisecondsSinceEpoch,
+    'expires_at_ms': DateTime.now()
+        .add(_peerProfileCacheTtl)
+        .millisecondsSinceEpoch,
+    'data': _matchCandidateToJson(profile),
+  });
+
+  final rows =
+      box.keys
+          .map((key) => MapEntry(key, _chatAsMap(box.get(key))))
+          .where(
+            (entry) =>
+                (entry.value?['owner_user_id'] as num?)?.toInt() == ownerUserId,
+          )
+          .toList(growable: false)
+        ..sort((a, b) {
+          final aUpdated = (a.value?['updated_at_ms'] as num?)?.toInt() ?? 0;
+          final bUpdated = (b.value?['updated_at_ms'] as num?)?.toInt() ?? 0;
+          return bUpdated.compareTo(aUpdated);
+        });
+
+  for (final stale in rows.skip(50)) {
+    await box.delete(stale.key);
+  }
+}
+
+Map<String, dynamic>? _chatAsMap(Object? value) {
+  if (value is Map<String, dynamic>) {
+    return value;
+  }
+  if (value is Map) {
+    return value.map((key, val) => MapEntry(key.toString(), val));
+  }
+  return null;
+}
+
+Map<String, dynamic> _matchCandidateToJson(AppMatchCandidate value) => {
+  'id': value.id,
+  'ad': value.firstName,
+  'soyad': value.surname,
+  'kullanici_adi': value.username,
+  'profil_resmi': value.profileImageUrl,
+  'biyografi': value.bio,
+  'il': value.city,
+  'dogum_yili': value.birthYear,
+  'cevrim_ici_mi': value.online,
+  'premium_aktif_mi': value.premiumActive,
+  'fotograflar': value.photos.map(_profilePhotoToJson).toList(growable: false),
+  'alinan_hediyeler': value.receivedGifts
+      .map(_receivedGiftToJson)
+      .toList(growable: false),
+  'sessize_alindi_mi': value.muted,
+  'engellendi_mi': value.blocked,
+  'sessiz_bitis_tarihi': value.muteEndsAt?.toIso8601String(),
+};
+
+Map<String, dynamic> _profilePhotoToJson(AppProfilePhoto value) => {
+  'id': value.id,
+  'dosya_yolu': value.url,
+  'onizleme_yolu': value.previewUrl,
+  'sira_no': value.order,
+  'ana_fotograf_mi': value.isPrimary,
+  'aktif_mi': value.isActive,
+  'medya_tipi': value.mediaType == 'video' ? 'video' : 'fotograf',
+  'mime_tipi': value.mimeType,
+  'sure_saniye': value.durationSeconds,
+};
+
+Map<String, dynamic> _receivedGiftToJson(AppReceivedGift value) => {
+  'id': value.id,
+  'hediye_id': value.giftId,
+  'hediye_adi': value.name,
+  'hediye_ikon': value.icon,
+  'puan_bedeli': value.cost,
+  'gonderen': value.sender == null ? null : _giftSenderToJson(value.sender!),
+  'created_at': value.createdAt?.toIso8601String(),
+};
+
+Map<String, dynamic> _giftSenderToJson(AppGiftSender value) => {
+  'id': value.id,
+  'ad': value.firstName,
+  'soyad': value.surname,
+  'kullanici_adi': value.username,
+  'profil_resmi': value.profileImageUrl,
+};
 
 final chatGiftsProvider = FutureProvider<List<AppGift>>((ref) async {
   final session = await ref.watch(appAuthProvider.future);
@@ -2339,6 +2471,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
   String? _inputError;
   String? _peerStatusOverride;
   String? _aiStatusOverride;
+  bool? _peerOnlineOverride;
   Timer? _typingDebounce;
   bool _typingActive = false;
   bool _peerTyping = false;
@@ -2394,6 +2527,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
       _themeIndex = null;
       _peerStatusOverride = null;
       _aiStatusOverride = null;
+      _peerOnlineOverride = null;
       unawaited(_loadThemeSelection());
     }
   }
@@ -2575,17 +2709,27 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     final conversation = widget.conversation;
     if (conversation != null) {
       final basePeer = ChatPeer.fromConversation(conversation);
-      if (_peerStatusOverride != null &&
-          _peerStatusOverride!.trim().isNotEmpty) {
+      final online = _peerOnlineOverride ?? basePeer.online;
+      final status =
+          _peerStatusOverride != null && _peerStatusOverride!.trim().isNotEmpty
+          ? _peerStatusOverride!
+          : _peerOnlineOverride == null
+          ? basePeer.status
+          : online
+          ? AppRuntimeText.instance.t('chat.status.online', 'Cevrimici')
+          : AppRuntimeText.instance.t('chat.status.inactive', 'Aktif degil');
+      if (_peerOnlineOverride != null ||
+          (_peerStatusOverride != null &&
+              _peerStatusOverride!.trim().isNotEmpty)) {
         return ChatPeer(
           name: basePeer.name,
           handle: basePeer.handle,
-          status: _peerStatusOverride!,
+          status: status,
           avatarAsset: basePeer.avatarAsset,
           avatarUrl: basePeer.avatarUrl,
           languageCode: basePeer.languageCode,
           languageName: basePeer.languageName,
-          online: basePeer.online,
+          online: online,
         );
       }
       return basePeer;
@@ -2616,6 +2760,17 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
 
   void _handleRealtimeEvent(ChatRealtimeEvent event) {
     if (!mounted) {
+      return;
+    }
+
+    if (event.type == ChatRealtimeEventType.onlineStatus) {
+      final userId = _payloadInt(event.payload['user_id']);
+      if (userId == null || userId != widget.conversation?.peerId) {
+        return;
+      }
+      setState(() {
+        _peerOnlineOverride = _payloadBool(event.payload['is_online']);
+      });
       return;
     }
 
@@ -2669,6 +2824,105 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     } else if (event.type == ChatRealtimeEventType.conversationCleared) {
       ref.invalidate(conversationMessagesProvider(event.conversationId));
       ref.read(conversationFeedRefreshProvider.notifier).state++;
+    }
+  }
+
+  Future<void> _clearConversation() async {
+    final conversation = widget.conversation;
+    final authState = ref.read(appAuthProvider).asData?.value;
+    final token = authState?.token;
+    final ownerUserId = authState?.user?.id;
+    if (conversation == null ||
+        conversation.isPeerAi ||
+        token == null ||
+        token.trim().isEmpty ||
+        ownerUserId == null) {
+      return;
+    }
+
+    final confirmed = await showCupertinoDialog<bool>(
+      context: context,
+      builder: (dialogContext) => CupertinoAlertDialog(
+        title: Text(
+          AppRuntimeText.instance.t('chat.clear.title', 'Sohbeti Temizle'),
+          style: const TextStyle(fontFamily: AppFont.family),
+        ),
+        content: Padding(
+          padding: const EdgeInsets.only(top: 8),
+          child: Text(
+            AppRuntimeText.instance.t(
+              'chat.clear.message',
+              'Bu sohbet iki tarafta da temizlenecek.',
+            ),
+            style: const TextStyle(fontFamily: AppFont.family),
+          ),
+        ),
+        actions: [
+          CupertinoDialogAction(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: Text(
+              AppRuntimeText.instance.t('commonCancel', 'Vazgec'),
+              style: const TextStyle(fontFamily: AppFont.family),
+            ),
+          ),
+          CupertinoDialogAction(
+            isDestructiveAction: true,
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: Text(
+              AppRuntimeText.instance.t('chat.clear.confirm', 'Temizle'),
+              style: const TextStyle(fontFamily: AppFont.family),
+            ),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) {
+      return;
+    }
+
+    final api = AppAuthApi();
+    try {
+      await api.clearMobileConversation(token, conversationId: conversation.id);
+      await ChatLocalStore.instance.clearConversation(
+        ownerUserId: ownerUserId,
+        conversationId: conversation.id,
+      );
+      ref.invalidate(conversationMessagesProvider(conversation.id));
+      ref.read(conversationFeedRefreshProvider.notifier).state++;
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      await showCupertinoDialog<void>(
+        context: context,
+        builder: (dialogContext) => CupertinoAlertDialog(
+          title: Text(
+            AppRuntimeText.instance.t(
+              'chat.clear.error_title',
+              'Sohbet Temizlenemedi',
+            ),
+            style: const TextStyle(fontFamily: AppFont.family),
+          ),
+          content: Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: Text(
+              AppAuthErrorFormatter.messageFrom(error),
+              style: const TextStyle(fontFamily: AppFont.family),
+            ),
+          ),
+          actions: [
+            CupertinoDialogAction(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: Text(
+                AppRuntimeText.instance.t('commonOk', 'Tamam'),
+                style: const TextStyle(fontFamily: AppFont.family),
+              ),
+            ),
+          ],
+        ),
+      );
+    } finally {
+      api.close();
     }
   }
 
@@ -3206,6 +3460,21 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
         context: context,
         builder: (ctx) => CupertinoActionSheet(
           actions: [
+            if (widget.conversation?.isPeerAi == false)
+              CupertinoActionSheetAction(
+                isDestructiveAction: true,
+                onPressed: () {
+                  Navigator.of(ctx).pop();
+                  unawaited(_clearConversation());
+                },
+                child: Text(
+                  AppRuntimeText.instance.t(
+                    'chat.profile.action.clear',
+                    'Sohbeti Temizle',
+                  ),
+                  style: const TextStyle(fontFamily: AppFont.family),
+                ),
+              ),
             CupertinoActionSheetAction(
               onPressed: () {
                 Navigator.of(ctx).pop();

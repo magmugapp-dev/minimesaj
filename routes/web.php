@@ -2,12 +2,14 @@
 
 use App\Http\Controllers\Admin\AbonelikPaketiController;
 use App\Http\Controllers\Admin\AiCharacterController;
+use App\Http\Controllers\Admin\AiModerationEventController;
 use App\Http\Controllers\Admin\AyarController;
 use App\Http\Controllers\Admin\DestekTalebiController;
 use App\Http\Controllers\Admin\DilMetinController;
 use App\Http\Controllers\Admin\EngelController;
 use App\Http\Controllers\Admin\EslesmeController;
 use App\Http\Controllers\Admin\FinansalController;
+use App\Http\Controllers\Admin\GeminiController;
 use App\Http\Controllers\Admin\GirisController;
 use App\Http\Controllers\Admin\HediyeController;
 use App\Http\Controllers\Admin\IstatistikController;
@@ -53,6 +55,11 @@ Route::prefix('admin')->group(function () {
         Route::put('ai/{character}', [AiCharacterController::class, 'update'])->name('admin.ai.guncelle');
         Route::delete('ai/{character}', [AiCharacterController::class, 'destroy'])->name('admin.ai.sil');
 
+        Route::get('gemini', [GeminiController::class, 'index'])->name('admin.gemini.index');
+        Route::post('gemini/keys', [GeminiController::class, 'store'])->name('admin.gemini.keys.store');
+        Route::put('gemini/keys/{key}', [GeminiController::class, 'update'])->name('admin.gemini.keys.update');
+        Route::delete('gemini/keys/{key}', [GeminiController::class, 'destroy'])->name('admin.gemini.keys.destroy');
+
         // Moderasyon — Şikayetler
         Route::get('moderasyon/sikayetler', [SikayetController::class, 'index'])->name('admin.moderasyon.sikayetler');
         Route::post('moderasyon/sikayetler/toplu-durum', [SikayetController::class, 'topluDurumGuncelle'])->name('admin.moderasyon.sikayetler.toplu-durum');
@@ -62,6 +69,7 @@ Route::prefix('admin')->group(function () {
         // Moderasyon — Engellemeler
         Route::get('moderasyon/engeller', [EngelController::class, 'index'])->name('admin.moderasyon.engeller');
         Route::delete('moderasyon/engeller/{engelleme}', [EngelController::class, 'kaldir'])->name('admin.moderasyon.engeller.kaldir');
+        Route::get('moderasyon/ai-olaylari', [AiModerationEventController::class, 'index'])->name('admin.moderasyon.ai-olaylari');
 
         // Moderasyon — Destek Talepleri
         Route::get('moderasyon/destek-talepleri', [DestekTalebiController::class, 'index'])->name('admin.moderasyon.destek-talepleri');

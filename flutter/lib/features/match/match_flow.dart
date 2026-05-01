@@ -92,6 +92,8 @@ class MatchState {
 }
 
 class MatchNotifier extends Notifier<MatchState> {
+  static const Duration _summaryCacheTtl = Duration(minutes: 2);
+
   String? _bootstrappedToken;
 
   @override
@@ -127,27 +129,25 @@ class MatchNotifier extends Notifier<MatchState> {
     final api = AppAuthApi();
     try {
       if (shouldResetFiltersForAppLaunch) {
+        if (user != null) {
+          await AppSessionStorage.clearMatchSummaryCache(ownerUserId: user.id);
+        }
         await api.updateMatchPreferences(
           token,
           genderCode: _genderCode(MatchGender.mixed),
           ageCode: _ageCodeFromRange(18, 60),
           superMatchEnabled: false,
         );
+      } else if (!force) {
+        final cached = await _readCachedSummary(user?.id);
+        if (cached != null) {
+          _applySummary(cached, isLoading: false);
+          return;
+        }
       }
 
-      final summary = await api.fetchMatchCenter(token);
-      state = state.copyWith(
-        gemBalance: summary.gemBalance,
-        freeMatchesLeft: summary.freeMatchesLeft,
-        onlineCount: summary.onlineCount,
-        waitingLikes: summary.waitingLikes,
-        startCost: summary.startCost,
-        gender: _genderFromCode(summary.filters.genderCode),
-        superMatchEnabled: summary.filters.superMatchEnabled,
-        minAge: _ageRangeFromCode(summary.filters.ageCode).$1,
-        maxAge: _ageRangeFromCode(summary.filters.ageCode).$2,
-        isLoading: false,
-      );
+      final summary = await _fetchAndCacheSummary(api, token, user?.id);
+      _applySummary(summary, isLoading: false);
     } catch (error) {
       state = state.copyWith(
         isLoading: false,
@@ -185,19 +185,12 @@ class MatchNotifier extends Notifier<MatchState> {
 
     final api = AppAuthApi();
     try {
-      final summary = await api.fetchMatchCenter(token);
-      state = state.copyWith(
-        gemBalance: summary.gemBalance,
-        freeMatchesLeft: summary.freeMatchesLeft,
-        startCost: summary.startCost,
-        onlineCount: summary.onlineCount,
-        waitingLikes: summary.waitingLikes,
-        gender: _genderFromCode(summary.filters.genderCode),
-        superMatchEnabled: summary.filters.superMatchEnabled,
-        minAge: _ageRangeFromCode(summary.filters.ageCode).$1,
-        maxAge: _ageRangeFromCode(summary.filters.ageCode).$2,
-        clearNotice: true,
+      final summary = await _fetchAndCacheSummary(
+        api,
+        token,
+        session?.user?.id,
       );
+      _applySummary(summary, clearNotice: true);
     } catch (error) {
       state = state.copyWith(notice: AppAuthErrorFormatter.messageFrom(error));
     } finally {
@@ -230,6 +223,9 @@ class MatchNotifier extends Notifier<MatchState> {
         activeCandidate: result.candidate,
         clearActiveCandidate: result.candidate == null,
       );
+      await AppSessionStorage.clearMatchSummaryCache(
+        ownerUserId: session?.user?.id,
+      );
       await ref.read(appAuthProvider.notifier).refreshCurrentUser();
       return result;
     } catch (error) {
@@ -258,6 +254,9 @@ class MatchNotifier extends Notifier<MatchState> {
       if (state.activeCandidate?.id == id) {
         state = state.copyWith(clearActiveCandidate: true);
       }
+      await AppSessionStorage.clearMatchSummaryCache(
+        ownerUserId: session?.user?.id,
+      );
       return result;
     } catch (error) {
       state = state.copyWith(notice: AppAuthErrorFormatter.messageFrom(error));
@@ -308,25 +307,87 @@ class MatchNotifier extends Notifier<MatchState> {
         ageCode: _ageCodeFromRange(state.minAge, state.maxAge),
         superMatchEnabled: state.superMatchEnabled,
       );
-      final summary = await api.fetchMatchCenter(token);
-      state = state.copyWith(
-        gemBalance: summary.gemBalance,
-        freeMatchesLeft: summary.freeMatchesLeft,
-        startCost: summary.startCost,
-        onlineCount: summary.onlineCount,
-        waitingLikes: summary.waitingLikes,
-        gender: _genderFromCode(summary.filters.genderCode),
-        superMatchEnabled: summary.filters.superMatchEnabled,
-        minAge: _ageRangeFromCode(summary.filters.ageCode).$1,
-        maxAge: _ageRangeFromCode(summary.filters.ageCode).$2,
-        clearNotice: true,
+      await AppSessionStorage.clearMatchSummaryCache(
+        ownerUserId: session?.user?.id,
       );
+      final summary = await _fetchAndCacheSummary(
+        api,
+        token,
+        session?.user?.id,
+      );
+      _applySummary(summary, clearNotice: true);
     } catch (error) {
       state = state.copyWith(notice: AppAuthErrorFormatter.messageFrom(error));
     } finally {
       api.close();
     }
   }
+
+  Future<AppMatchCenterSummary?> _readCachedSummary(int? ownerUserId) async {
+    if (ownerUserId == null || ownerUserId <= 0) {
+      return null;
+    }
+
+    final cached = await AppSessionStorage.readFreshMatchSummaryCache(
+      ownerUserId,
+      _summaryCacheTtl,
+    );
+    if (cached == null) {
+      return null;
+    }
+
+    return AppMatchCenterSummary.fromJson(cached);
+  }
+
+  Future<AppMatchCenterSummary> _fetchAndCacheSummary(
+    AppAuthApi api,
+    String token,
+    int? ownerUserId,
+  ) async {
+    final summary = await api.fetchMatchCenter(token);
+    if (ownerUserId != null && ownerUserId > 0) {
+      await AppSessionStorage.saveMatchSummaryCache(
+        ownerUserId,
+        _summaryToJson(summary),
+      );
+    }
+    return summary;
+  }
+
+  void _applySummary(
+    AppMatchCenterSummary summary, {
+    bool? isLoading,
+    bool clearNotice = false,
+  }) {
+    state = state.copyWith(
+      gemBalance: summary.gemBalance,
+      freeMatchesLeft: summary.freeMatchesLeft,
+      onlineCount: summary.onlineCount,
+      waitingLikes: summary.waitingLikes,
+      startCost: summary.startCost,
+      gender: _genderFromCode(summary.filters.genderCode),
+      superMatchEnabled: summary.filters.superMatchEnabled,
+      minAge: _ageRangeFromCode(summary.filters.ageCode).$1,
+      maxAge: _ageRangeFromCode(summary.filters.ageCode).$2,
+      isLoading: isLoading,
+      clearNotice: clearNotice,
+    );
+  }
+}
+
+Map<String, dynamic> _summaryToJson(AppMatchCenterSummary summary) {
+  return <String, dynamic>{
+    'mevcut_puan': summary.gemBalance,
+    'gunluk_ucretsiz_hak': summary.freeMatchesLeft,
+    'eslesme_baslatma_maliyeti': summary.startCost,
+    'cevrimici_kisi_sayisi': summary.onlineCount,
+    'bekleyen_kisi_sayisi': summary.waitingLikes,
+    'filtreler': <String, dynamic>{
+      'cinsiyet': summary.filters.genderCode,
+      'yas': summary.filters.ageCode,
+      'super_eslesme_aktif_mi': summary.filters.superMatchEnabled,
+    },
+  };
 }
 
 MatchGender _genderFromCode(String? code) {
@@ -1359,6 +1420,9 @@ class _PurchaseSheetState extends ConsumerState<PurchaseSheet> {
 
     if (result.isSuccess) {
       await ref.read(appAuthProvider.notifier).refreshCurrentUser();
+      await AppSessionStorage.clearMatchSummaryCache(
+        ownerUserId: ref.read(appAuthProvider).asData?.value?.user?.id,
+      );
       if (!mounted) {
         return;
       }

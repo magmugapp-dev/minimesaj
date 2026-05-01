@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class AiModerationEvent extends Model
 {
@@ -24,5 +25,20 @@ class AiModerationEvent extends Model
             'resolved_at' => 'datetime',
             'metadata' => 'array',
         ];
+    }
+
+    public function aiUser(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'ai_user_id');
+    }
+
+    public function user(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'user_id');
+    }
+
+    public function conversation(): BelongsTo
+    {
+        return $this->belongsTo(Sohbet::class, 'conversation_id');
     }
 }

@@ -23,6 +23,8 @@ class SosyalKayitRequest extends FormRequest
             'ulke' => 'nullable|string|max:100',
             'il' => 'nullable|string|max:100',
             'dosya' => 'nullable|image|max:5120',
+            'device_fingerprint' => 'nullable|string|max:255',
+            'platform' => 'nullable|string|max:20',
         ];
     }
 }

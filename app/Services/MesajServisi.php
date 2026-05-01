@@ -6,6 +6,7 @@ use App\Events\MesajGonderildi;
 use App\Events\MesajlarOkundu;
 use App\Exceptions\MesajlasmaEngeliException;
 use App\Models\Engelleme;
+use App\Models\Eslesme;
 use App\Models\Mesaj;
 use App\Models\SessizeAlinanKullanici;
 use App\Models\Sohbet;
@@ -26,6 +27,7 @@ class MesajServisi
     public function gonder(Sohbet $sohbet, User $gonderen, array $veri): Mesaj
     {
         return DB::transaction(function () use ($sohbet, $gonderen, $veri) {
+            $sohbet->loadMissing('eslesme.user', 'eslesme.eslesenUser');
             $eslesme = $sohbet->eslesme;
             $karsiTarafId = $eslesme->user_id === $gonderen->id
                 ? $eslesme->eslesen_user_id
@@ -35,7 +37,9 @@ class MesajServisi
                 throw new MesajlasmaEngeliException();
             }
 
-            $karsiTaraf = User::find($karsiTarafId);
+            $karsiTaraf = (int) $eslesme->user_id === (int) $gonderen->id
+                ? $eslesme->eslesenUser
+                : $eslesme->user;
             $clientMessageId = trim((string) ($veri['client_message_id'] ?? ''));
 
             if ($clientMessageId !== '') {
@@ -66,11 +70,7 @@ class MesajServisi
                 'client_message_id' => $clientMessageId !== '' ? $clientMessageId : null,
             ]);
 
-            $sohbet->update([
-                'son_mesaj_id' => $mesaj->id,
-                'son_mesaj_tarihi' => $mesaj->created_at,
-                'toplam_mesaj_sayisi' => DB::raw('toplam_mesaj_sayisi + 1'),
-            ]);
+            $this->updateConversationAfterMessage($sohbet, $eslesme, $mesaj, (int) $karsiTarafId);
 
             DB::afterCommit(function () use ($mesaj, $sohbet, $gonderen, $karsiTaraf) {
                 MesajGonderildi::dispatch($mesaj);
@@ -95,6 +95,7 @@ class MesajServisi
     public function gonderAiMesaji(Sohbet $sohbet, User $aiUser, array $veri): Mesaj
     {
         return DB::transaction(function () use ($sohbet, $aiUser, $veri) {
+            $sohbet->loadMissing('eslesme.user', 'eslesme.eslesenUser');
             $language = $this->messageLanguageFor($aiUser);
             $messageText = AiMessageTextSanitizer::sanitize($veri['mesaj_metni'] ?? null);
 
@@ -113,17 +114,14 @@ class MesajServisi
                 'ai_tarafindan_uretildi_mi' => true,
             ]);
 
-            $sohbet->update([
-                'son_mesaj_id' => $mesaj->id,
-                'son_mesaj_tarihi' => $mesaj->created_at,
-                'toplam_mesaj_sayisi' => DB::raw('toplam_mesaj_sayisi + 1'),
-            ]);
-
             $eslesme = $sohbet->eslesme;
             $karsiTarafId = $eslesme->user_id === $aiUser->id
                 ? $eslesme->eslesen_user_id
                 : $eslesme->user_id;
-            $karsiTaraf = User::find($karsiTarafId);
+            $karsiTaraf = (int) $eslesme->user_id === (int) $aiUser->id
+                ? $eslesme->eslesenUser
+                : $eslesme->user;
+            $this->updateConversationAfterMessage($sohbet, $eslesme, $mesaj, (int) $karsiTarafId);
 
             DB::afterCommit(function () use ($mesaj, $aiUser, $karsiTaraf) {
                 MesajGonderildi::dispatch($mesaj);
@@ -142,10 +140,16 @@ class MesajServisi
 
     public function okuduIsaretle(Sohbet $sohbet, User $okuyan): int
     {
+        $sohbet->loadMissing('eslesme');
         $eslesme = $sohbet->eslesme;
         $karsiTarafId = $eslesme->user_id === $okuyan->id
             ? $eslesme->eslesen_user_id
             : $eslesme->user_id;
+        $column = $this->unreadColumnForRecipient($eslesme, (int) $okuyan->id);
+
+        if ((int) $sohbet->{$column} <= 0) {
+            return 0;
+        }
 
         $guncellenen = Mesaj::where('sohbet_id', $sohbet->id)
             ->where('gonderen_user_id', $karsiTarafId)
@@ -153,6 +157,11 @@ class MesajServisi
             ->update(['okundu_mu' => true]);
 
         if ($guncellenen > 0) {
+            $payload = [$column => 0];
+            if ((int) $sohbet->son_mesaj_gonderen_user_id === (int) $karsiTarafId) {
+                $payload['son_mesaj_okundu_mu'] = true;
+            }
+            $sohbet->forceFill($payload)->save();
             MesajlarOkundu::dispatch($sohbet, $okuyan->id, $guncellenen);
         }
 
@@ -187,5 +196,42 @@ class MesajServisi
             'code' => $code,
             'name' => Language::name($code),
         ];
+    }
+
+    private function updateConversationAfterMessage(
+        Sohbet $sohbet,
+        Eslesme $eslesme,
+        Mesaj $mesaj,
+        int $recipientId,
+    ): void {
+        $unreadColumn = $this->unreadColumnForRecipient($eslesme, $recipientId);
+
+        $sohbet->forceFill([
+            'son_mesaj_id' => $mesaj->id,
+            'son_mesaj_gonderen_user_id' => $mesaj->gonderen_user_id,
+            'son_mesaj_tarihi' => $mesaj->created_at,
+            'son_mesaj_tipi' => $mesaj->mesaj_tipi,
+            'son_mesaj_metni' => $this->previewText($mesaj),
+            'son_mesaj_okundu_mu' => false,
+            'toplam_mesaj_sayisi' => DB::raw('toplam_mesaj_sayisi + 1'),
+            $unreadColumn => DB::raw($unreadColumn.' + 1'),
+        ])->save();
+    }
+
+    private function unreadColumnForRecipient(Eslesme $eslesme, int $recipientId): string
+    {
+        return (int) $eslesme->user_id === $recipientId
+            ? 'user_okunmamis_sayisi'
+            : 'eslesen_okunmamis_sayisi';
+    }
+
+    private function previewText(Mesaj $mesaj): ?string
+    {
+        $text = AiMessageTextSanitizer::sanitize($mesaj->mesaj_metni);
+        if ($text === null || trim($text) === '') {
+            return null;
+        }
+
+        return mb_substr(trim($text), 0, 500);
     }
 }

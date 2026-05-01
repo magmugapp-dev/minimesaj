@@ -8,6 +8,7 @@ use App\Http\Requests\Kimlik\SosyalGirisRequest;
 use App\Http\Requests\Kimlik\SosyalKayitRequest;
 use App\Http\Resources\KullaniciResource;
 use App\Services\AyarServisi;
+use App\Services\Kimlik\DeviceBindingService;
 use App\Services\Kimlik\Sosyal\SosyalAuthServisi;
 use Illuminate\Http\JsonResponse;
 
@@ -16,6 +17,7 @@ class SosyalKimlikController extends Controller
     public function __construct(
         private SosyalAuthServisi $sosyalAuthServisi,
         private AyarServisi $ayarServisi,
+        private DeviceBindingService $deviceBindingService,
     ) {}
 
     public function giris(SosyalGirisRequest $request): JsonResponse
@@ -24,9 +26,16 @@ class SosyalKimlikController extends Controller
             return $yanit;
         }
 
-        $sonuc = $this->sosyalAuthServisi->giris($request->validated());
+        $veri = $request->validated();
+        $sonuc = $this->sosyalAuthServisi->giris($veri);
 
         if ($sonuc['durum'] === 'authenticated') {
+            $this->deviceBindingService->bindOrFail(
+                $veri['device_fingerprint'] ?? null,
+                $sonuc['user'],
+                $veri['platform'] ?? $veri['istemci_tipi'] ?? null,
+            );
+
             return response()->json([
                 'durum' => 'authenticated',
                 'kullanici' => new KullaniciResource($sonuc['user']),
@@ -47,9 +56,17 @@ class SosyalKimlikController extends Controller
             return $yanit;
         }
 
+        $veri = $request->validated();
+        $this->deviceBindingService->ensureAvailableForRegistration($veri['device_fingerprint'] ?? null);
+
         $sonuc = $this->sosyalAuthServisi->kayit(
-            $request->validated(),
+            $veri,
             $request->file('dosya'),
+        );
+        $this->deviceBindingService->bindOrFail(
+            $veri['device_fingerprint'] ?? null,
+            $sonuc['user'],
+            $veri['platform'] ?? 'social',
         );
 
         return response()->json([

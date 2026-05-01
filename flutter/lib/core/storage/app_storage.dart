@@ -1,8 +1,10 @@
 import 'dart:convert';
+import 'dart:io' show Platform;
 import 'dart:math';
 
 import 'package:flutter/cupertino.dart';
 import 'package:crypto/crypto.dart';
+import 'package:device_info_plus/device_info_plus.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:hive/hive.dart';
 import 'package:magmug/core/models/app_content_models.dart';
@@ -18,6 +20,12 @@ class AppHiveBoxes {
   static Future<Box<dynamic>> content() => Hive.openBox<dynamic>('app_content');
   static Future<Box<dynamic>> publicSettings() =>
       Hive.openBox<dynamic>('app_public_settings');
+  static Future<Box<dynamic>> notifications() =>
+      Hive.openBox<dynamic>('app_notifications');
+  static Future<Box<dynamic>> discoverProfiles() =>
+      Hive.openBox<dynamic>('discover_profiles');
+  static Future<Box<dynamic>> peerProfiles() =>
+      Hive.openBox<dynamic>('peer_profiles');
   static Future<Box<dynamic>> aiPrompt() => Hive.openBox<dynamic>('ai_prompt');
   static Future<Box<dynamic>> aiCharacters() =>
       Hive.openBox<dynamic>('ai_characters');
@@ -37,6 +45,7 @@ class AppSessionStorage {
   static const String _installSaltKey = 'app.install_salt';
   static const String _mobileSyncTokenKey = 'mobile.sync_token';
   static const String _mobileLastSyncAtPrefix = 'mobile.last_sync_at.';
+  static const String _matchSummaryCachePrefix = 'match.summary.';
 
   static Future<void> saveSession(AuthenticatedSession session) async {
     final box = await AppHiveBoxes.session();
@@ -142,6 +151,152 @@ class AppSessionStorage {
 
   static Future<String> cacheNamespaceForUser(int userId) async {
     final box = await AppHiveBoxes.session();
+    final salt = await _installSalt(box);
+
+    return sha256.convert(utf8.encode('$salt:$userId')).toString();
+  }
+
+  static Future<Map<String, dynamic>?> readFreshMatchSummaryCache(
+    int ownerUserId,
+    Duration ttl,
+  ) async {
+    if (ownerUserId <= 0) {
+      return null;
+    }
+
+    final box = await AppHiveBoxes.session();
+    final raw = box.get('$_matchSummaryCachePrefix$ownerUserId')?.toString();
+    if (raw == null || raw.trim().isEmpty) {
+      return null;
+    }
+
+    try {
+      final decoded = jsonDecode(raw);
+      final wrapper = decoded is Map<String, dynamic>
+          ? decoded
+          : decoded is Map
+          ? decoded.map((key, value) => MapEntry(key.toString(), value))
+          : null;
+      final cachedAt = wrapper?['cached_at'];
+      final data = wrapper?['data'];
+      if (cachedAt is! num || data is! Map) {
+        await box.delete('$_matchSummaryCachePrefix$ownerUserId');
+        return null;
+      }
+
+      final age = DateTime.now().difference(
+        DateTime.fromMillisecondsSinceEpoch(cachedAt.toInt()),
+      );
+      if (age > ttl) {
+        return null;
+      }
+
+      return data.map((key, value) => MapEntry(key.toString(), value));
+    } catch (_) {
+      await box.delete('$_matchSummaryCachePrefix$ownerUserId');
+      return null;
+    }
+  }
+
+  static Future<void> saveMatchSummaryCache(
+    int ownerUserId,
+    Map<String, dynamic> data,
+  ) async {
+    if (ownerUserId <= 0) {
+      return;
+    }
+
+    final box = await AppHiveBoxes.session();
+    await box.put(
+      '$_matchSummaryCachePrefix$ownerUserId',
+      jsonEncode({
+        'cached_at': DateTime.now().millisecondsSinceEpoch,
+        'data': data,
+      }),
+    );
+  }
+
+  static Future<void> clearMatchSummaryCache({int? ownerUserId}) async {
+    final box = await AppHiveBoxes.session();
+    if (ownerUserId != null && ownerUserId > 0) {
+      await box.delete('$_matchSummaryCachePrefix$ownerUserId');
+      return;
+    }
+
+    final keys = box.keys
+        .map((key) => key.toString())
+        .where((key) => key.startsWith(_matchSummaryCachePrefix))
+        .toList(growable: false);
+    for (final key in keys) {
+      await box.delete(key);
+    }
+  }
+
+  static Future<String> deviceFingerprint() async {
+    final box = await AppHiveBoxes.session();
+    final deviceId = await _deviceIdentifier();
+    if (deviceId != null && deviceId.trim().isNotEmpty) {
+      return sha256
+          .convert(
+            utf8.encode(
+              'device:${Platform.operatingSystem}:${deviceId.trim()}',
+            ),
+          )
+          .toString();
+    }
+
+    final salt = await _installSalt(box);
+    return sha256
+        .convert(utf8.encode('device:${Platform.operatingSystem}:$salt'))
+        .toString();
+  }
+
+  static String devicePlatform() => Platform.operatingSystem;
+
+  static Future<String?> _deviceIdentifier() async {
+    try {
+      final plugin = DeviceInfoPlugin();
+      final data = Platform.isAndroid
+          ? (await plugin.androidInfo).data
+          : Platform.isIOS
+          ? (await plugin.iosInfo).data
+          : Platform.isMacOS
+          ? (await plugin.macOsInfo).data
+          : Platform.isWindows
+          ? (await plugin.windowsInfo).data
+          : Platform.isLinux
+          ? (await plugin.linuxInfo).data
+          : const <String, dynamic>{};
+
+      return _firstDeviceInfoValue(data, [
+        'androidId',
+        'android_id',
+        'identifierForVendor',
+        'computerName',
+        'machineId',
+        'deviceId',
+        'id',
+      ]);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  static String? _firstDeviceInfoValue(
+    Map<String, dynamic> data,
+    List<String> keys,
+  ) {
+    for (final key in keys) {
+      final value = data[key]?.toString().trim();
+      if (value != null && value.isNotEmpty && value != 'unknown') {
+        return value;
+      }
+    }
+
+    return null;
+  }
+
+  static Future<String> _installSalt(Box<dynamic> box) async {
     var salt = box.get(_installSaltKey)?.toString();
     if (salt == null || salt.trim().isEmpty) {
       final random = Random.secure();
@@ -150,7 +305,7 @@ class AppSessionStorage {
       await box.put(_installSaltKey, salt);
     }
 
-    return sha256.convert(utf8.encode('$salt:$userId')).toString();
+    return salt;
   }
 
   static Future<void> clear() async {
@@ -167,6 +322,7 @@ class AppSessionStorage {
     for (final key in lastSyncKeys) {
       await box.delete(key);
     }
+    await clearMatchSummaryCache();
   }
 }
 

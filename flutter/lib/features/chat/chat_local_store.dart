@@ -124,6 +124,7 @@ class ChatLocalStore implements ChatOutboxStore {
         'peer_name': conversation.peerName,
         'peer_username': conversation.peerUsername,
         'peer_profile_image_url': conversation.peerProfileImageUrl,
+        'peer_account_type': conversation.peerAccountType,
         'cached_peer_profile_image_path': cachedAvatarPath,
         'peer_language_code': conversation.peerLanguageCode,
         'peer_language_name': conversation.peerLanguageName,
@@ -176,15 +177,16 @@ class ChatLocalStore implements ChatOutboxStore {
     required int beforeMessageId,
     int limit = 20,
   }) async {
-    final rows = (await _conversationMessageRows(
-      ownerUserId: ownerUserId,
-      conversationId: conversationId,
-    ))
-        .where((row) {
-          final id = (row['id'] as num?)?.toInt() ?? 0;
-          return id > 0 && id < beforeMessageId;
-        })
-        .toList(growable: false);
+    final rows =
+        (await _conversationMessageRows(
+              ownerUserId: ownerUserId,
+              conversationId: conversationId,
+            ))
+            .where((row) {
+              final id = (row['id'] as num?)?.toInt() ?? 0;
+              return id > 0 && id < beforeMessageId;
+            })
+            .toList(growable: false);
     rows.sort((a, b) {
       final byId = ((b['id'] as num?)?.toInt() ?? 0).compareTo(
         (a['id'] as num?)?.toInt() ?? 0,
@@ -549,16 +551,35 @@ class ChatLocalStore implements ChatOutboxStore {
     });
   }
 
+  Future<void> updatePeerOnlineStatus({
+    required int ownerUserId,
+    required int peerId,
+    required bool online,
+  }) async {
+    final box = await _previewsBox;
+    for (final key in box.keys.toList(growable: false)) {
+      final row = _asRow(box.get(key));
+      if (_rowOwner(row) != ownerUserId ||
+          ((row['peer_id'] as num?)?.toInt() ?? 0) != peerId) {
+        continue;
+      }
+      await box.put(key, {...row, 'online': online ? 1 : 0});
+    }
+  }
+
   Future<void> clearConversation({
     required int ownerUserId,
     required int conversationId,
   }) async {
     final messagesBox = await _messagesBox;
-    final messageKeys = messagesBox.keys.where((key) {
-      final row = _asRow(messagesBox.get(key));
-      return _rowOwner(row) == ownerUserId &&
-          ((row['conversation_id'] as num?)?.toInt() ?? 0) == conversationId;
-    }).toList(growable: false);
+    final messageKeys = messagesBox.keys
+        .where((key) {
+          final row = _asRow(messagesBox.get(key));
+          return _rowOwner(row) == ownerUserId &&
+              ((row['conversation_id'] as num?)?.toInt() ?? 0) ==
+                  conversationId;
+        })
+        .toList(growable: false);
     await messagesBox.deleteAll(messageKeys);
     await (await _previewsBox).delete(_previewKey(ownerUserId, conversationId));
   }
@@ -590,7 +611,9 @@ class ChatLocalStore implements ChatOutboxStore {
       'last_message': _messagePreviewText(messageType, messageText),
       'last_message_type': messageType,
       'last_message_at_ms': effectiveCreatedAt.millisecondsSinceEpoch,
-      'unread_count': shouldIncrement ? currentUnreadCount + 1 : currentUnreadCount,
+      'unread_count': shouldIncrement
+          ? currentUnreadCount + 1
+          : currentUnreadCount,
       'my_message_read': isMine
           ? 0
           : ((row['my_message_read'] as num?)?.toInt() ?? 0),
@@ -819,6 +842,7 @@ class ChatLocalStore implements ChatOutboxStore {
       peerName: row['peer_name']?.toString() ?? '',
       peerUsername: row['peer_username']?.toString() ?? '',
       peerProfileImageUrl: resolvedPeerAvatarUrl,
+      peerAccountType: row['peer_account_type']?.toString(),
       peerLanguageCode: row['peer_language_code']?.toString(),
       peerLanguageName: row['peer_language_name']?.toString(),
       online: (row['online'] as num?)?.toInt() == 1,

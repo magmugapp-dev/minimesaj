@@ -141,6 +141,9 @@ class AiTurnService
                 'season_for_user' => $this->season(config('app.timezone')),
                 'day_type_for_character' => $this->dayType(data_get($character->character_json, 'schedule.timezone')),
                 'day_type_for_user' => $this->dayType(config('app.timezone')),
+                'reengagement_template' => $turn->turn_type === 'proactive'
+                    ? $this->reengagementTemplate($character)
+                    : null,
                 ...$this->minutesUntilOfflineContext($character),
             ],
             'messages' => $conversation->mesajlar
@@ -188,7 +191,7 @@ class AiTurnService
         }
 
         $rawText = collect($parts)
-            ->map(fn ($part) => AiMessageTextSanitizer::sanitize(is_scalar($part) ? (string) $part : null))
+            ->map(fn ($part) => $this->sanitizeReplyPart(is_scalar($part) ? (string) $part : null))
             ->filter(fn (?string $part) => $part !== null && trim($part) !== '')
             ->map(fn (string $part) => trim($part))
             ->implode("\n\n");
@@ -438,10 +441,16 @@ class AiTurnService
             'client_message_id' => $clientMessageId,
         ]);
 
+        $unreadColumn = $this->unreadColumnForAiRecipient($conversation, $aiUser);
         $conversation->forceFill([
             'son_mesaj_id' => $message->id,
+            'son_mesaj_gonderen_user_id' => $message->gonderen_user_id,
             'son_mesaj_tarihi' => $message->created_at,
+            'son_mesaj_tipi' => $message->mesaj_tipi,
+            'son_mesaj_metni' => mb_substr($text, 0, 500),
+            'son_mesaj_okundu_mu' => false,
             'toplam_mesaj_sayisi' => DB::raw('toplam_mesaj_sayisi + 1'),
+            $unreadColumn => DB::raw($unreadColumn.' + 1'),
         ])->save();
 
         MesajGonderildi::dispatch($message);
@@ -449,6 +458,21 @@ class AiTurnService
         $recipient?->notify(new YeniMesaj($message, $aiUser));
 
         return $message->load('gonderen:id,ad,kullanici_adi,profil_resmi,dil');
+    }
+
+    private function sanitizeReplyPart(?string $part): ?string
+    {
+        $sanitized = AiMessageTextSanitizer::sanitize($part);
+        if ($sanitized !== null) {
+            return $sanitized;
+        }
+
+        $raw = trim((string) $part);
+        if (preg_match('/^\[(CONV_END:(sleep|work|break|general)|CRISIS_DETECTED|BLOCK_USER:[a-z_]+|GHOST_USER:[a-z_]+)\]/i', $raw) === 1) {
+            return $raw;
+        }
+
+        return null;
     }
 
     private function plannedAt(AiCharacter $character, Mesaj $message)
@@ -520,6 +544,22 @@ class AiTurnService
         return (int) $match->user_id === (int) $sender->id
             ? $match->eslesenUser
             : $match->user;
+    }
+
+    private function unreadColumnForAiRecipient(Sohbet $conversation, User $sender): string
+    {
+        $match = $conversation->eslesme()->first();
+        if (!$match) {
+            return 'user_okunmamis_sayisi';
+        }
+
+        $recipientId = (int) $match->user_id === (int) $sender->id
+            ? (int) $match->eslesen_user_id
+            : (int) $match->user_id;
+
+        return (int) $match->user_id === $recipientId
+            ? 'user_okunmamis_sayisi'
+            : 'eslesen_okunmamis_sayisi';
     }
 
     private function abortUnlessParticipant(Sohbet $conversation, User $user): void
@@ -662,9 +702,20 @@ class AiTurnService
         if ($overnight && $currentMinutes >= $startMinutes) {
             $wakeAt->addDay();
         }
+        $sleepStartAt = $local->copy()->setTime($startHour, $startMinute);
+        if (!$asleep) {
+            if ($overnight) {
+                if ($currentMinutes >= $endMinutes && $currentMinutes >= $startMinutes) {
+                    $sleepStartAt->addDay();
+                }
+            } elseif ($currentMinutes >= $endMinutes) {
+                $sleepStartAt->addDay();
+            }
+        }
 
         return [
             'asleep' => $asleep,
+            'sleep_start_at' => $sleepStartAt->timezone(config('app.timezone')),
             'wake_at' => $wakeAt->timezone(config('app.timezone')),
         ];
     }
@@ -848,6 +899,20 @@ class AiTurnService
         return now($timezone ?: config('app.timezone'))->isWeekend() ? 'weekend' : 'weekday';
     }
 
+    private function reengagementTemplate(AiCharacter $character): ?string
+    {
+        $templates = $character->reengagement_templates;
+        if (!is_array($templates) || $templates === []) {
+            return null;
+        }
+
+        $values = collect($templates)
+            ->filter(fn ($template) => is_string($template) && trim($template) !== '')
+            ->values();
+
+        return $values->isNotEmpty() ? $values->random() : null;
+    }
+
     private function minutesUntilOfflineContext(AiCharacter $character): array
     {
         $window = $this->sleepWindow(now(), $character);
@@ -855,7 +920,7 @@ class AiTurnService
             return [];
         }
 
-        $minutes = now()->diffInMinutes($window['wake_at'], false);
+        $minutes = now()->diffInMinutes($window['sleep_start_at'], false);
         if ($minutes < 0 || $minutes > 15) {
             return [];
         }

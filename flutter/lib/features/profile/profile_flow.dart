@@ -1539,6 +1539,9 @@ class _PaywallScreenState extends ConsumerState<PaywallScreen> {
 
     if (result.isSuccess) {
       await ref.read(appAuthProvider.notifier).refreshCurrentUser();
+      await AppSessionStorage.clearMatchSummaryCache(
+        ownerUserId: ref.read(appAuthProvider).asData?.value?.user?.id,
+      );
       if (!mounted) {
         return;
       }
@@ -1799,6 +1802,9 @@ class _JetonPurchaseSheetState extends ConsumerState<JetonPurchaseSheet> {
       }
 
       await ref.read(appAuthProvider.notifier).refreshCurrentUser();
+      await AppSessionStorage.clearMatchSummaryCache(
+        ownerUserId: ref.read(appAuthProvider).asData?.value?.user?.id,
+      );
       final ownerUserId = ref.read(appAuthProvider).asData?.value?.user?.id;
       if (ownerUserId != null) {
         AppRepository.instance.invalidateRewardAdStatus(ownerUserId);

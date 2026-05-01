@@ -304,13 +304,6 @@ class FlutterAiTurnProcessor {
       return;
     }
 
-    final aiUserId =
-        (_asMap(context['turn'])?['ai_user_id'] as num?)?.toInt() ??
-        (context['ai_user_id'] as num?)?.toInt();
-    if (aiUserId == null) {
-      return;
-    }
-
     _emitLocalStatus(conversationId, 'typing', 'Yaziyor...');
     final typingStartedAt = DateTime.now();
     try {
@@ -330,13 +323,7 @@ class FlutterAiTurnProcessor {
         return;
       }
 
-      final cleaned = await _handleBlockTags(
-        client,
-        token: token,
-        aiUserId: aiUserId,
-        text: text,
-      ).then(_stripConversationEndingTags);
-      final parts = cleaned
+      final parts = text
           .split(RegExp(r'\n\s*\n+'))
           .map((part) => part.trim())
           .where((part) => part.isNotEmpty)
@@ -360,27 +347,31 @@ class FlutterAiTurnProcessor {
         turnId: turnId,
         parts: parts,
       );
+      if (messages == null) {
+        await _reportTurnFailure(
+          client,
+          token: token,
+          turnId: turnId,
+          error: 'reply_persist_failed',
+        );
+        return;
+      }
+
       if (messages.isNotEmpty) {
         await ChatLocalStore.instance.upsertConversationMessages(
           messages,
           ownerUserId: ownerUserId,
         );
-        await ChatLocalStore.instance.updateConversationPreviewRuntimeStatus(
-          conversationId,
-          ownerUserId: ownerUserId,
-          aiStatus: null,
-          aiStatusText: null,
-          aiPlannedAt: null,
-        );
-        await _removePendingTurn(ownerUserId: ownerUserId, turnId: turnId);
-      } else {
-        await _reportTurnFailure(
-          client,
-          token: token,
-          turnId: turnId,
-          error: 'empty_persisted_reply',
-        );
       }
+
+      await ChatLocalStore.instance.updateConversationPreviewRuntimeStatus(
+        conversationId,
+        ownerUserId: ownerUserId,
+        aiStatus: null,
+        aiStatusText: null,
+        aiPlannedAt: null,
+      );
+      await _removePendingTurn(ownerUserId: ownerUserId, turnId: turnId);
     } finally {
       _emitLocalStatus(conversationId, null, null);
     }
@@ -845,49 +836,7 @@ class FlutterAiTurnProcessor {
     return buffer.toString();
   }
 
-  Future<String> _handleBlockTags(
-    http.Client client, {
-    required String token,
-    required int aiUserId,
-    required String text,
-  }) async {
-    var cleaned = text;
-    final matches = RegExp(r'\[BLOCK_USER:([^\]]+)\]').allMatches(text);
-    for (final match in matches) {
-      final category = match.group(1)?.trim();
-      if (category == null || category.isEmpty) {
-        continue;
-      }
-      unawaited(
-        client.post(
-          AppApi.uri(AppApi.mobileAiViolationsPath),
-          headers: {
-            'Accept': 'application/json',
-            'Authorization': 'Bearer $token',
-            'Content-Type': 'application/json',
-          },
-          body: jsonEncode({'ai_user_id': aiUserId, 'category': category}),
-        ),
-      );
-    }
-
-    cleaned = cleaned.replaceAll(RegExp(r'\[BLOCK_USER:[^\]]+\]'), '');
-    return cleaned.trim();
-  }
-
-  String _stripConversationEndingTags(String text) {
-    return text
-        .replaceAll(
-          RegExp(
-            r'\[CONV_END:(sleep|work|break|general)\]',
-            caseSensitive: false,
-          ),
-          '',
-        )
-        .trim();
-  }
-
-  Future<List<AppConversationMessage>> _persistReply(
+  Future<List<AppConversationMessage>?> _persistReply(
     http.Client client, {
     required String token,
     required int conversationId,
@@ -908,7 +857,7 @@ class FlutterAiTurnProcessor {
       }),
     );
     if (response.statusCode >= 400 || response.bodyBytes.isEmpty) {
-      return const [];
+      return null;
     }
 
     final payload = _decodeMap(response.bodyBytes);

@@ -21,6 +21,8 @@ class SosyalGirisRequest extends FormRequest
             'ad' => 'nullable|string|max:255',
             'soyad' => 'nullable|string|max:255',
             'avatar_url' => 'nullable|url|max:2048',
+            'device_fingerprint' => 'nullable|string|max:255',
+            'platform' => 'nullable|string|max:20',
         ];
     }
 }

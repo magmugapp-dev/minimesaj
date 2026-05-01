@@ -43,6 +43,11 @@ class UserOnlineStatusService
             $reason = 'sleep';
         }
 
+        if ($active && !$this->insideActiveHours($schedule, $local)) {
+            $active = false;
+            $reason = 'outside_active_hours';
+        }
+
         $windowState = $this->availabilityState($schedule['availability_schedules'] ?? [], $local);
         if ($windowState === 'passive') {
             $active = false;
@@ -159,32 +164,87 @@ class UserOnlineStatusService
         return null;
     }
 
+    private function insideActiveHours(array $schedule, Carbon $local): bool
+    {
+        $start = $local->isWeekend()
+            ? ($schedule['active_hours_weekend_start'] ?? $schedule['active_hours_weekday_start'] ?? null)
+            : ($schedule['active_hours_weekday_start'] ?? null);
+        $end = $local->isWeekend()
+            ? ($schedule['active_hours_weekend_end'] ?? $schedule['active_hours_weekday_end'] ?? null)
+            : ($schedule['active_hours_weekday_end'] ?? null);
+
+        if (!$this->validTime($start) || !$this->validTime($end)) {
+            return true;
+        }
+
+        foreach ([$local->copy()->subDay(), $local->copy()] as $day) {
+            $rangeStart = $day->copy()->setTimeFromTimeString($start);
+            $rangeEnd = $day->copy()->setTimeFromTimeString($end);
+            if ($rangeEnd->lessThanOrEqualTo($rangeStart)) {
+                $rangeEnd->addDay();
+            }
+            if ($local->greaterThanOrEqualTo($rangeStart) && $local->lessThan($rangeEnd)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     private function nextActiveAt(array $schedule, Carbon $local): ?Carbon
     {
         $windows = $schedule['availability_schedules'] ?? [];
-        if (!is_array($windows)) {
-            return null;
+        $candidates = collect();
+
+        if (is_array($windows)) {
+            $candidates = $candidates->merge(collect($windows)
+                ->filter(fn ($window) => is_array($window)
+                    && ($window['status'] ?? null) === 'active'
+                    && $this->validTime($window['start_time'] ?? null)
+                    && isset($window['date']))
+                ->map(function (array $window) use ($local): ?Carbon {
+                    try {
+                        return Carbon::createFromFormat(
+                            'Y-m-d H:i',
+                            $window['date'].' '.substr((string) $window['start_time'], 0, 5),
+                            $local->timezone,
+                        )->setTimezone(config('app.timezone'));
+                    } catch (\Throwable) {
+                        return null;
+                    }
+                }));
         }
 
-        return collect($windows)
-            ->filter(fn ($window) => is_array($window)
-                && ($window['status'] ?? null) === 'active'
-                && $this->validTime($window['start_time'] ?? null)
-                && isset($window['date']))
-            ->map(function (array $window) use ($local): ?Carbon {
-                try {
-                    return Carbon::createFromFormat(
-                        'Y-m-d H:i',
-                        $window['date'].' '.substr((string) $window['start_time'], 0, 5),
-                        $local->timezone,
-                    )->setTimezone(config('app.timezone'));
-                } catch (\Throwable) {
-                    return null;
-                }
-            })
+        $candidates->push($this->nextActiveHoursStart($schedule, $local));
+
+        return $candidates
             ->filter(fn ($candidate) => $candidate instanceof Carbon && $candidate->greaterThan(now()))
             ->sortBy(fn (Carbon $candidate) => $candidate->getTimestamp())
             ->first();
+    }
+
+    private function nextActiveHoursStart(array $schedule, Carbon $local): ?Carbon
+    {
+        for ($dayOffset = 0; $dayOffset < 8; $dayOffset++) {
+            $day = $local->copy()->addDays($dayOffset);
+            $start = $day->isWeekend()
+                ? ($schedule['active_hours_weekend_start'] ?? $schedule['active_hours_weekday_start'] ?? null)
+                : ($schedule['active_hours_weekday_start'] ?? null);
+            $end = $day->isWeekend()
+                ? ($schedule['active_hours_weekend_end'] ?? $schedule['active_hours_weekday_end'] ?? null)
+                : ($schedule['active_hours_weekday_end'] ?? null);
+
+            if (!$this->validTime($start) || !$this->validTime($end)) {
+                continue;
+            }
+
+            $candidate = $day->copy()->setTimeFromTimeString($start);
+            if ($candidate->greaterThan($local)) {
+                return $candidate->setTimezone(config('app.timezone'));
+            }
+        }
+
+        return null;
     }
 
     private function validTime(mixed $value): bool

@@ -18,6 +18,7 @@ class KullaniciOzetResource extends JsonResource
             'id' => $this->id,
             'ad' => $this->ad,
             'kullanici_adi' => $this->kullanici_adi,
+            'hesap_tipi' => $this->hesap_tipi,
             'profil_resmi' => MediaUrl::resolve($this->profil_resmi),
             'cevrim_ici_mi' => $onlineStatus['is_online'],
             'isOnline' => $onlineStatus['is_online'],

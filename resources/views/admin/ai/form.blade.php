@@ -8,7 +8,7 @@
         'identity'    => ['active', 'character_id', 'character_version', 'schema_version', 'first_name', 'last_name', 'username', 'gender', 'birth_year', 'country', 'city', 'district', 'quality_tag'],
         'profile'     => ['primary_language_code', 'primary_language_name', 'tagline', 'occupation', 'hobbies', 'warmth', 'dominance', 'humor', 'openness', 'flirtiness', 'intelligence', 'profile_image'],
         'messaging'   => ['average_message_length', 'message_length_min', 'message_length_max', 'can_send_voice', 'can_send_photo', 'timezone', 'sleep_start_weekday', 'sleep_end_weekday', 'sleep_start_weekend', 'sleep_end_weekend'],
-        'limits'      => ['daily_chat_limit', 'per_user_daily_message_limit', 'min_response_seconds', 'max_response_seconds', 'model_name', 'temperature', 'top_p', 'max_output_tokens'],
+        'limits'      => ['daily_chat_limit', 'per_user_daily_message_limit', 'model_name', 'temperature', 'top_p', 'max_output_tokens'],
         'reengagement'=> ['reengagement_active', 'reengagement_after_hours', 'reengagement_daily_limit', 'reengagement_templates'],
     ];
     $initialSection = collect($sectionFields)->search(fn ($fields) => collect($fields)->contains(fn ($field) => $errors->has($field))) ?: 'identity';
@@ -63,8 +63,6 @@
         'username'             => $f('username', ''),
         'city'                 => $f('city', ''),
         'model_name'           => $f('model_name', 'gemini-2.5-flash'),
-        'min_response_seconds' => $f('min_response_seconds', 3),
-        'max_response_seconds' => $f('max_response_seconds', 30),
         'active'               => (bool) old('active', $character?->active ?? true),
     ];
 @endphp
@@ -154,10 +152,6 @@
 
                     {{-- Mini summary --}}
                     <div class="mt-5 space-y-2 border-t border-gray-100 pt-4 text-xs">
-                        <div class="flex justify-between gap-2 text-gray-500">
-                            <span>Cevap</span>
-                            <span class="font-semibold text-gray-900" x-text="`${values.min_response_seconds||0}–${values.max_response_seconds||0} sn`"></span>
-                        </div>
                         <div class="flex justify-between gap-2 text-gray-500">
                             <span>Model</span>
                             <span class="max-w-32 truncate text-right font-semibold text-gray-900" x-text="values.model_name||'-'"></span>
@@ -329,6 +323,11 @@
                                     <input name="{{ $key }}" value="{{ $f($key) }}" placeholder="23:30" class="mt-1 w-full rounded-lg border-gray-300 text-sm">
                                 </x-ai-field>
                             @endforeach
+                            @foreach (['active_hours_weekday_start' => 'Hafta ici aktif baslangic', 'active_hours_weekday_end' => 'Hafta ici aktif bitis', 'active_hours_weekend_start' => 'Hafta sonu aktif baslangic', 'active_hours_weekend_end' => 'Hafta sonu aktif bitis'] as $key => $label)
+                                <x-ai-field :label="$label" hint="Bos kalirsa sadece uyku saatleri kullanilir.">
+                                    <input name="{{ $key }}" value="{{ $f($key) }}" placeholder="09:00" class="mt-1 w-full rounded-lg border-gray-300 text-sm">
+                                </x-ai-field>
+                            @endforeach
                         </div>
                     </div>
 
@@ -336,20 +335,9 @@
                     <div data-section="limits" class="studio-split-section space-y-5" :class="activeSection === 'limits' && 'active'">
                         <div>
                             <h2 class="text-lg font-bold text-gray-900">Limitler ve model</h2>
-                            <p class="mt-1 text-sm text-gray-500">Cevap hizi ve Gemini davranisini buradan ayarla.</p>
+                            <p class="mt-1 text-sm text-gray-500">Gemini model limitlerini buradan ayarla.</p>
                         </div>
                         <div class="grid gap-4 sm:grid-cols-2">
-                            <x-ai-field label="Min cevap saniye" hint="Kullanici mesajinin created_at zamanindan sonra minimum bekleme.">
-                                <input required type="number" name="min_response_seconds" x-model="values.min_response_seconds" value="{{ $f('min_response_seconds', 3) }}" class="mt-1 w-full rounded-lg border-gray-300 text-sm">
-                            </x-ai-field>
-                            <x-ai-field label="Max cevap saniye" hint="Rastgele cevap gecikmesinin ust siniri.">
-                                <input required type="number" name="max_response_seconds" x-model="values.max_response_seconds" value="{{ $f('max_response_seconds', 30) }}" class="mt-1 w-full rounded-lg border-gray-300 text-sm">
-                            </x-ai-field>
-                            <div class="rounded-lg border border-emerald-100 bg-emerald-50 p-3 text-sm font-semibold text-emerald-900 sm:col-span-2">
-                                Cevap araligi kullanici mesajinin created_at zamanindan sonra
-                                <span x-text="values.min_response_seconds || 0"></span>-<span x-text="values.max_response_seconds || 0"></span>
-                                saniye olarak planlanir.
-                            </div>
                             <x-ai-field label="Gunluk chat limit">
                                 <input required type="number" name="daily_chat_limit" value="{{ $f('daily_chat_limit', 100) }}" class="mt-1 w-full rounded-lg border-gray-300 text-sm">
                             </x-ai-field>

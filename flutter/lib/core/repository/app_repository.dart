@@ -1,9 +1,12 @@
+import 'dart:convert';
+
 import 'package:magmug/core/models/communication_models.dart';
 import 'package:magmug/core/models/app_content_models.dart';
 import 'package:magmug/core/models/match_models.dart';
 import 'package:magmug/core/models/payment_models.dart';
 import 'package:magmug/core/models/public_settings_models.dart';
 import 'package:magmug/core/network/app_auth_api.dart';
+import 'package:magmug/core/storage/app_storage.dart';
 
 class AppRepository {
   AppRepository._();
@@ -11,9 +14,9 @@ class AppRepository {
   static final AppRepository instance = AppRepository._();
 
   static const Duration _publicConfigTtl = Duration(hours: 24);
-  static const Duration _paymentTtl = Duration(hours: 12);
-  static const Duration _giftTtl = Duration(hours: 12);
-  static const Duration _notificationTtl = Duration(minutes: 1);
+  static const Duration _paymentTtl = Duration(hours: 24);
+  static const Duration _giftTtl = Duration(hours: 24);
+  static const Duration _notificationTtl = Duration(minutes: 5);
   static const Duration _rewardStatusTtl = Duration(seconds: 45);
 
   _CacheEntry<AppPublicSettings>? _publicSettings;
@@ -36,11 +39,28 @@ class AppRepository {
     if (cached != null) {
       return cached;
     }
+    final box = await AppHiveBoxes.publicSettings();
+    final persisted = await _readPublicSettingsCache(box);
+    if (persisted?.isFresh == true) {
+      _publicSettings = _CacheEntry(persisted!.settings, _publicConfigTtl);
+      return persisted.settings;
+    }
 
     final api = AppAuthApi();
     try {
-      final value = await api.fetchMobileConfig();
+      final result = await api.fetchMobileConfigResult(
+        etag: persisted?.etag,
+        fallback: persisted?.settings,
+      );
+      final value = result.settings;
       _publicSettings = _CacheEntry(value, _publicConfigTtl);
+      await _writeCache(
+        box,
+        'mobile_config',
+        _publicSettingsToJson(value),
+        _publicConfigTtl,
+        etag: result.etag ?? persisted?.etag,
+      );
       return value;
     } finally {
       api.close();
@@ -86,11 +106,26 @@ class AppRepository {
     if (cached != null) {
       return cached;
     }
+    final persisted = await _readCacheList(
+      await AppHiveBoxes.preferences(),
+      'payment.credit_packages.$key',
+      AppCreditPackage.fromJson,
+    );
+    if (persisted != null) {
+      _creditPackages[key] = _CacheEntry(persisted, _paymentTtl);
+      return persisted;
+    }
 
     final api = AppAuthApi();
     try {
       final value = await api.fetchCreditPackages(token, platform: platform);
       _creditPackages[key] = _CacheEntry(value, _paymentTtl);
+      await _writeCache(
+        await AppHiveBoxes.preferences(),
+        'payment.credit_packages.$key',
+        value.map(_creditPackageToJson).toList(growable: false),
+        _paymentTtl,
+      );
       return value;
     } finally {
       api.close();
@@ -107,6 +142,15 @@ class AppRepository {
     if (cached != null) {
       return cached;
     }
+    final persisted = await _readCacheList(
+      await AppHiveBoxes.preferences(),
+      'payment.subscription_packages.$key',
+      AppSubscriptionPackage.fromJson,
+    );
+    if (persisted != null) {
+      _subscriptionPackages[key] = _CacheEntry(persisted, _paymentTtl);
+      return persisted;
+    }
 
     final api = AppAuthApi();
     try {
@@ -115,6 +159,12 @@ class AppRepository {
         platform: platform,
       );
       _subscriptionPackages[key] = _CacheEntry(value, _paymentTtl);
+      await _writeCache(
+        await AppHiveBoxes.preferences(),
+        'payment.subscription_packages.$key',
+        value.map(_subscriptionPackageToJson).toList(growable: false),
+        _paymentTtl,
+      );
       return value;
     } finally {
       api.close();
@@ -129,11 +179,26 @@ class AppRepository {
     if (cached != null) {
       return cached;
     }
+    final persisted = await _readCacheList(
+      await AppHiveBoxes.preferences(),
+      'gifts.$ownerUserId',
+      AppGift.fromJson,
+    );
+    if (persisted != null) {
+      _gifts[ownerUserId] = _CacheEntry(persisted, _giftTtl);
+      return persisted;
+    }
 
     final api = AppAuthApi();
     try {
       final value = await api.fetchGifts(token);
       _gifts[ownerUserId] = _CacheEntry(value, _giftTtl);
+      await _writeCache(
+        await AppHiveBoxes.preferences(),
+        'gifts.$ownerUserId',
+        value.map(_giftToJson).toList(growable: false),
+        _giftTtl,
+      );
       return value;
     } finally {
       api.close();
@@ -152,11 +217,27 @@ class AppRepository {
       }
       return todayOnly;
     }
+    final persisted = await _readCacheList(
+      await AppHiveBoxes.notifications(),
+      'notifications.$ownerUserId',
+      _notificationFromJson,
+    );
+    if (persisted != null) {
+      final todayOnly = _todayNotifications(persisted);
+      _notifications[ownerUserId] = _CacheEntry(todayOnly, _notificationTtl);
+      return todayOnly;
+    }
 
     final api = AppAuthApi();
     try {
       final value = _todayNotifications(await api.fetchNotifications(token));
       _notifications[ownerUserId] = _CacheEntry(value, _notificationTtl);
+      await _writeCache(
+        await AppHiveBoxes.notifications(),
+        'notifications.$ownerUserId',
+        value.map(_notificationToJson).toList(growable: false),
+        _notificationTtl,
+      );
       return value;
     } finally {
       api.close();
@@ -200,6 +281,185 @@ class AppRepository {
     );
   }
 
+  Future<List<T>?> _readCacheList<T>(
+    dynamic box,
+    String key,
+    T Function(Map<String, dynamic> json) parser,
+  ) async {
+    final row = _asMap(box.get(key));
+    if (row == null || !_cacheFresh(row)) {
+      return null;
+    }
+    final data = row['data'];
+    if (data is! List) {
+      return null;
+    }
+    try {
+      return data
+          .map(_asMap)
+          .whereType<Map<String, dynamic>>()
+          .map(parser)
+          .toList(growable: false);
+    } catch (_) {
+      await box.delete(key);
+      return null;
+    }
+  }
+
+  Future<_PublicSettingsCache?> _readPublicSettingsCache(dynamic box) async {
+    final row = _asMap(box.get('mobile_config'));
+    if (row == null) {
+      return null;
+    }
+    final data = _asMap(row['data']);
+    if (data == null) {
+      return null;
+    }
+    try {
+      return _PublicSettingsCache(
+        settings: AppPublicSettings.fromJson(data),
+        etag: row['etag']?.toString(),
+        isFresh: _cacheFresh(row),
+      );
+    } catch (_) {
+      await box.delete('mobile_config');
+      return null;
+    }
+  }
+
+  Future<void> _writeCache(
+    dynamic box,
+    String key,
+    Object? data,
+    Duration ttl, {
+    String? etag,
+  }) {
+    return box.put(key, {
+      'expires_at_ms': DateTime.now().add(ttl).millisecondsSinceEpoch,
+      'data': data,
+      if (etag != null && etag.trim().isNotEmpty) 'etag': etag.trim(),
+    });
+  }
+
+  bool _cacheFresh(Map<String, dynamic> row) {
+    final expiresAtMs = (row['expires_at_ms'] as num?)?.toInt() ?? 0;
+    return expiresAtMs > DateTime.now().millisecondsSinceEpoch;
+  }
+
+  Map<String, dynamic>? _asMap(Object? value) {
+    if (value is Map<String, dynamic>) {
+      return value;
+    }
+    if (value is Map) {
+      return value.map((key, val) => MapEntry(key.toString(), val));
+    }
+    if (value is String && value.trim().isNotEmpty) {
+      try {
+        final decoded = jsonDecode(value);
+        if (decoded is Map) {
+          return decoded.map((key, val) => MapEntry(key.toString(), val));
+        }
+      } catch (_) {}
+    }
+    return null;
+  }
+
+  Map<String, dynamic> _publicSettingsToJson(AppPublicSettings value) => {
+    'uygulama_adi': value.appName,
+    'uygulama_logosu': value.appLogoUrl,
+    'uygulama_versiyonu': value.appVersion,
+    'mobil_minimum_versiyon': value.minimumSupportedVersion,
+    'varsayilan_dil': value.defaultLanguage,
+    'kayit_aktif_mi': value.registrationEnabled,
+    'destek_eposta': value.supportEmail,
+    'destek_whatsapp': value.supportWhatsApp,
+    'android_play_store_url': value.androidPlayStoreUrl,
+    'ios_app_store_url': value.iosAppStoreUrl,
+    'reklamlar': {
+      'aktif_mi': value.ads.enabled,
+      'test_modu': value.ads.testMode,
+      'odul_puani': value.ads.rewardPoints,
+      'gunluk_odul_limiti': value.ads.dailyRewardLimit,
+      'android': {
+        'app_id': value.ads.android.appId,
+        'rewarded_unit_id': value.ads.android.rewardedUnitId,
+        'match_native_unit_id': value.ads.android.matchNativeUnitId,
+      },
+      'ios': {
+        'app_id': value.ads.ios.appId,
+        'rewarded_unit_id': value.ads.ios.rewardedUnitId,
+        'match_native_unit_id': value.ads.ios.matchNativeUnitId,
+      },
+    },
+  };
+
+  Map<String, dynamic> _creditPackageToJson(AppCreditPackage value) => {
+    'id': value.id,
+    'kod': value.code,
+    'magaza_urun_kodu': value.storeProductCode,
+    'puan': value.credits,
+    'fiyat': value.price,
+    'para_birimi': value.currency,
+    'rozet': value.badge,
+    'onerilen_mi': value.isRecommended,
+    'aktif': value.isActive,
+    'sira': value.order,
+  };
+
+  Map<String, dynamic> _subscriptionPackageToJson(
+    AppSubscriptionPackage value,
+  ) => {
+    'id': value.id,
+    'kod': value.code,
+    'magaza_urun_kodu': value.storeProductCode,
+    'sure_ay': value.months,
+    'fiyat': value.price,
+    'para_birimi': value.currency,
+    'rozet': value.badge,
+    'onerilen_mi': value.isRecommended,
+    'aktif': value.isActive,
+    'sira': value.order,
+  };
+
+  Map<String, dynamic> _giftToJson(AppGift value) => {
+    'id': value.id,
+    'kod': value.code,
+    'ad': value.name,
+    'ikon': value.icon,
+    'puan_bedeli': value.cost,
+    'aktif': value.active,
+    'sira': value.order,
+  };
+
+  AppNotification _notificationFromJson(Map<String, dynamic> json) {
+    final routeParameters = _asMap(json['route_parameters']) ?? const {};
+    return AppNotification(
+      id: json['id']?.toString() ?? '',
+      type: json['type']?.toString(),
+      title: json['title']?.toString() ?? '',
+      message: json['message']?.toString() ?? '',
+      route: json['route']?.toString(),
+      routeParameters: routeParameters.map(
+        (key, value) => MapEntry(key, value?.toString() ?? ''),
+      ),
+      payload: _asMap(json['payload']) ?? const {},
+      isRead: json['is_read'] == true,
+      createdAt: DateTime.tryParse(json['created_at']?.toString() ?? ''),
+    );
+  }
+
+  Map<String, dynamic> _notificationToJson(AppNotification value) => {
+    'id': value.id,
+    'type': value.type,
+    'title': value.title,
+    'message': value.message,
+    'route': value.route,
+    'route_parameters': value.routeParameters,
+    'payload': value.payload,
+    'is_read': value.isRead,
+    'created_at': value.createdAt?.toIso8601String(),
+  };
+
   List<AppNotification> _todayNotifications(
     List<AppNotification> notifications,
   ) {
@@ -228,4 +488,16 @@ class _CacheEntry<T> {
     }
     return value;
   }
+}
+
+class _PublicSettingsCache {
+  final AppPublicSettings settings;
+  final String? etag;
+  final bool isFresh;
+
+  const _PublicSettingsCache({
+    required this.settings,
+    required this.etag,
+    required this.isFresh,
+  });
 }

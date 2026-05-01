@@ -8,6 +8,7 @@ class AppConversationPreview {
   final String peerName;
   final String peerUsername;
   final String? peerProfileImageUrl;
+  final String? peerAccountType;
   final String? peerLanguageCode;
   final String? peerLanguageName;
   final bool online;
@@ -27,6 +28,7 @@ class AppConversationPreview {
     required this.peerName,
     required this.peerUsername,
     this.peerProfileImageUrl,
+    this.peerAccountType,
     this.peerLanguageCode,
     this.peerLanguageName,
     required this.online,
@@ -49,6 +51,8 @@ class AppConversationPreview {
     }
     return null;
   }
+
+  bool get isPeerAi => peerAccountType == 'ai';
 }
 
 @immutable

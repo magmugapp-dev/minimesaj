@@ -148,6 +148,20 @@ class _ConversationRealtimeBootstrapState
         token: token,
         userId: userId,
         onEvent: _handleRealtimeEvent,
+        onReconnect: () {
+          AppCacheSyncCoordinator.instance.scheduleDebounced(
+            token: token,
+            ownerUserId: userId,
+            force: true,
+            delay: Duration.zero,
+            onComplete: (didSync) {
+              if (!mounted || !didSync) {
+                return;
+              }
+              ref.read(conversationFeedRefreshProvider.notifier).state++;
+            },
+          );
+        },
       );
       if (subscription == null &&
           mounted &&
@@ -378,6 +392,17 @@ class _ConversationRealtimeBootstrapState
         await store.clearConversation(
           ownerUserId: currentUserId,
           conversationId: event.conversationId,
+        );
+        break;
+      case ChatRealtimeEventType.onlineStatus:
+        final userId = _payloadInt(event.payload['user_id']);
+        if (userId == null) {
+          return;
+        }
+        await store.updatePeerOnlineStatus(
+          ownerUserId: currentUserId,
+          peerId: userId,
+          online: _payloadBool(event.payload['is_online']),
         );
         break;
     }

@@ -24,6 +24,8 @@ class KayitRequest extends FormRequest
             'ulke' => 'nullable|string|max:100',
             'il' => 'nullable|string|max:100',
             'istemci_tipi' => 'required|in:dating,extension',
+            'device_fingerprint' => 'nullable|string|max:255',
+            'platform' => 'nullable|string|max:20',
         ];
     }
 }

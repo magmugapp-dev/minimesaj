@@ -13,7 +13,11 @@ class Sohbet extends Model
     protected $fillable = [
         'eslesme_id',
         'son_mesaj_id',
+        'son_mesaj_gonderen_user_id',
         'son_mesaj_tarihi',
+        'son_mesaj_tipi',
+        'son_mesaj_metni',
+        'son_mesaj_okundu_mu',
         'ai_durumu',
         'ai_durum_metni',
         'ai_planlanan_cevap_at',
@@ -26,6 +30,8 @@ class Sohbet extends Model
         'ai_ghost_tipi',
         'temizlendi_at',
         'toplam_mesaj_sayisi',
+        'user_okunmamis_sayisi',
+        'eslesen_okunmamis_sayisi',
         'durum',
     ];
 
@@ -39,6 +45,7 @@ class Sohbet extends Model
             'ai_konusma_kapanisi_at' => 'datetime',
             'ai_ghost_lockout_until' => 'datetime',
             'temizlendi_at' => 'datetime',
+            'son_mesaj_okundu_mu' => 'boolean',
         ];
     }
 

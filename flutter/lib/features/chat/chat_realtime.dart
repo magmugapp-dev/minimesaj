@@ -11,6 +11,7 @@ enum ChatRealtimeEventType {
   aiStatus,
   conversationTyping,
   conversationCleared,
+  onlineStatus,
 }
 
 @immutable
@@ -156,6 +157,7 @@ class ChatRealtimeService {
     required String token,
     required int userId,
     required void Function(ChatRealtimeEvent event) onEvent,
+    VoidCallback? onReconnect,
   }) async {
     if (kIsWeb) {
       return null;
@@ -178,7 +180,10 @@ class ChatRealtimeService {
         }
 
         final payload = _normalizePayload(event.data);
-        final payloadConversationId = _asInt(payload['sohbet_id']);
+        final payloadConversationId =
+            eventType == ChatRealtimeEventType.onlineStatus
+            ? 0
+            : _asInt(payload['sohbet_id']);
         if (payloadConversationId == null) {
           return;
         }
@@ -195,9 +200,22 @@ class ChatRealtimeService {
         debugPrint('User realtime event error: $error');
       },
     );
+    var sawDisconnect = false;
+    final stateSubscription = client.onConnectionStateChange.listen((state) {
+      if (state == reverb.ConnectionState.connected) {
+        if (sawDisconnect) {
+          onReconnect?.call();
+        }
+        sawDisconnect = false;
+        return;
+      }
+
+      sawDisconnect = true;
+    });
 
     return ChatRealtimeSubscription._(() async {
       await eventSubscription.cancel();
+      await stateSubscription.cancel();
       channel.unsubscribe();
     });
   }
@@ -322,6 +340,8 @@ class ChatRealtimeService {
       '.sohbet.typing' => ChatRealtimeEventType.conversationTyping,
       'sohbet.temizlendi' ||
       '.sohbet.temizlendi' => ChatRealtimeEventType.conversationCleared,
+      'user.online.status' ||
+      '.user.online.status' => ChatRealtimeEventType.onlineStatus,
       _ => null,
     };
   }

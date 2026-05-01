@@ -21,6 +21,7 @@ Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Hive.initFlutter('magmug_hive');
+  //   Hive.deleteBoxFromDisk('magmug_hive');
   if (AppPushSupport.isSupported) {
     await Firebase.initializeApp(
       options: DefaultFirebaseOptions.currentPlatform,

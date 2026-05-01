@@ -19,7 +19,6 @@ use App\Services\AyarServisi;
 use App\Services\EslesmeServisi;
 use App\Services\MesajServisi;
 use App\Services\Odeme\MobilOdemeAyarServisi;
-use App\Services\Users\UserOnlineStatusService;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -38,7 +37,6 @@ class MobileController extends Controller
         private MobilOdemeAyarServisi $mobilOdemeAyarServisi,
         private EslesmeServisi $eslesmeServisi,
         private MesajServisi $mesajServisi,
-        private UserOnlineStatusService $userOnlineStatusService,
     ) {}
 
     public function config(Request $request): JsonResponse
@@ -75,13 +73,8 @@ class MobileController extends Controller
                 'notification_ttl_seconds' => 60,
             ],
             'user' => KullaniciResource::make($user->fresh()->load('aiCharacter', 'fotograflar'))->resolve($request),
-            'public_settings' => $this->publicSettingsPayload(),
-            'match_summary' => $this->eslesmeServisi->merkez($user),
             'conversations' => SohbetResource::collection(
                 $this->conversationQuery($user)->limit(20)->get()
-            )->resolve($request),
-            'discover_profiles' => KullaniciResource::collection(
-                $this->discoverProfiles($user, 4)
             )->resolve($request),
             'notifications' => [
                 'unread_count' => $this->todaysUnreadNotificationCount($user),
@@ -105,12 +98,18 @@ class MobileController extends Controller
         $conversationIds = $this->conversationQuery($user)->pluck('sohbetler.id');
 
         $messageRows = Mesaj::query()
-            ->whereIn('sohbet_id', $conversationIds)
-            ->when($sinceForQuery, fn ($query, $sinceValue) => $query->where('created_at', '>', $sinceValue))
-            ->where('created_at', '<=', $checkpointForQuery)
-            ->when($syncState['message_id'], fn ($query, $messageId) => $query->where('id', '>', $messageId))
+            ->select('mesajlar.*')
+            ->join('sohbetler as sync_sohbetler', 'sync_sohbetler.id', '=', 'mesajlar.sohbet_id')
+            ->whereIn('mesajlar.sohbet_id', $conversationIds)
+            ->where(function ($query): void {
+                $query->whereNull('sync_sohbetler.temizlendi_at')
+                    ->orWhereColumn('mesajlar.created_at', '>', 'sync_sohbetler.temizlendi_at');
+            })
+            ->when($sinceForQuery, fn ($query, $sinceValue) => $query->where('mesajlar.created_at', '>', $sinceValue))
+            ->where('mesajlar.created_at', '<=', $checkpointForQuery)
+            ->when($syncState['message_id'], fn ($query, $messageId) => $query->where('mesajlar.id', '>', $messageId))
             ->with('gonderen:id,ad,kullanici_adi,profil_resmi,dil')
-            ->orderBy('id')
+            ->orderBy('mesajlar.id')
             ->limit(self::SYNC_MESSAGE_LIMIT + 1)
             ->get();
         $messagesHasMore = $messageRows->count() > self::SYNC_MESSAGE_LIMIT;
@@ -290,29 +289,28 @@ class MobileController extends Controller
         $userId = (int) $user->id;
 
         return Sohbet::query()
+            ->select('sohbetler.*')
+            ->selectRaw(
+                'CASE WHEN eslesmeler.user_id = ? THEN sohbetler.user_okunmamis_sayisi ELSE sohbetler.eslesen_okunmamis_sayisi END as okunmamis_sayisi',
+                [$userId],
+            )
+            ->join('eslesmeler', 'eslesmeler.id', '=', 'sohbetler.eslesme_id')
             ->whereHas('eslesme', function ($query) use ($userId) {
                 $query->where('user_id', $userId)->orWhere('eslesen_user_id', $userId);
             })
-            ->where('durum', 'aktif')
+            ->where('sohbetler.durum', 'aktif')
             ->where(function ($query): void {
-                $query->whereNull('temizlendi_at')
-                    ->orWhereColumn('son_mesaj_tarihi', '>', 'temizlendi_at');
+                $query->whereNull('sohbetler.temizlendi_at')
+                    ->orWhereColumn('sohbetler.son_mesaj_tarihi', '>', 'sohbetler.temizlendi_at');
             })
             ->with([
                 'eslesme.user:id,ad,kullanici_adi,profil_resmi,cevrim_ici_mi,dil,hesap_tipi',
                 'eslesme.user.aiCharacter:id,user_id,character_id,character_version,schema_version,active,display_name,primary_language_code,primary_language_name,model_name,character_json',
                 'eslesme.eslesenUser:id,ad,kullanici_adi,profil_resmi,cevrim_ici_mi,dil,hesap_tipi',
                 'eslesme.eslesenUser.aiCharacter:id,user_id,character_id,character_version,schema_version,active,display_name,primary_language_code,primary_language_name,model_name,character_json',
-                'sonMesaj.gonderen:id,ad,kullanici_adi,profil_resmi,dil',
             ])
-            ->withCount([
-                'mesajlar as okunmamis_sayisi' => function ($query) use ($userId) {
-                    $query->where('gonderen_user_id', '!=', $userId)
-                        ->where('okundu_mu', false);
-                },
-            ])
-            ->orderByDesc('son_mesaj_tarihi')
-            ->orderByDesc('id');
+            ->orderByDesc('sohbetler.son_mesaj_tarihi')
+            ->orderByDesc('sohbetler.id');
     }
 
     private function discoverProfiles(User $user, int $limit)
@@ -340,8 +338,6 @@ class MobileController extends Controller
 
         $excludedIds = $engellenen->merge($eslesilen)->push($user->id)->unique()->values();
 
-        $this->syncAiDiscoverCandidates($excludedIds);
-
         return User::query()
             ->whereIn('hesap_tipi', ['user', 'ai'])
             ->where('hesap_durumu', 'aktif')
@@ -355,20 +351,6 @@ class MobileController extends Controller
             ->inRandomOrder()
             ->limit($limit)
             ->get();
-    }
-
-    private function syncAiDiscoverCandidates($excludedIds): void
-    {
-        $aiUsers = User::query()
-            ->where('hesap_tipi', 'ai')
-            ->where('hesap_durumu', 'aktif')
-            ->whereNotIn('id', $excludedIds)
-            ->with([
-                'aiCharacter:id,user_id,character_id,character_version,schema_version,active,display_name,primary_language_code,primary_language_name,model_name,character_json',
-            ])
-            ->get(['id', 'hesap_tipi', 'hesap_durumu', 'cevrim_ici_mi', 'son_gorulme_tarihi']);
-
-        $this->userOnlineStatusService->syncCollection($aiUsers);
     }
 
     private function publicSettingsPayload(): array

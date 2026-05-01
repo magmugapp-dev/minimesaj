@@ -10,12 +10,14 @@ use App\Models\Mesaj;
 use App\Models\Sohbet;
 use App\Models\User;
 use App\Events\AiTurnStatusUpdated;
+use App\Jobs\SetAiOffline;
 use App\Services\MesajServisi;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Notification;
+use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
 use Laravel\Sanctum\Sanctum;
 
@@ -142,6 +144,35 @@ it('returns pending turns and stores flutter reply parts idempotently', function
         ->where('sohbet_id', $conversation->id)
         ->where('gonderen_user_id', $aiUser->id)
         ->count())->toBe(2);
+});
+
+it('applies conversation ending tags while storing only the clean reply', function () {
+    Notification::fake();
+    Queue::fake();
+    [$viewer, , $conversation] = aiConversationForTest();
+
+    $incoming = app(MesajServisi::class)->gonder($conversation, $viewer, [
+        'mesaj_tipi' => 'metin',
+        'mesaj_metni' => 'Iyi geceler',
+    ]);
+    $turn = AiMessageTurn::query()->where('source_message_id', $incoming->id)->firstOrFail();
+
+    Sanctum::actingAs($viewer);
+
+    $this->postJson("/api/mobile/ai/conversations/{$conversation->id}/reply", [
+        'turn_id' => $turn->id,
+        'parts' => ['[CONV_END:sleep] Ben de uyuyorum, iyi geceler.'],
+        'client_message_id' => 'ai-turn-conv-end',
+    ])
+        ->assertOk()
+        ->assertJsonCount(1, 'data')
+        ->assertJsonPath('data.0.mesaj_metni', 'Ben de uyuyorum, iyi geceler.');
+
+    $conversation->refresh();
+    expect($conversation->ai_kapanis_kategorisi)->toBe('sleep')
+        ->and($conversation->ai_konusma_kapanisi_at)->not->toBeNull();
+
+    Queue::assertPushed(SetAiOffline::class);
 });
 
 it('returns auth media urls and mime metadata in ai turn context', function () {

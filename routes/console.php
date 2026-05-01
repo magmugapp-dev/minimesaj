@@ -2,6 +2,8 @@
 
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schedule;
+use App\Models\User;
+use App\Services\Users\UserOnlineStatusService;
 
 /*
 |--------------------------------------------------------------------------
@@ -23,6 +25,22 @@ Schedule::command('ai:takilan-gorevleri-kurtar')
     ->everyMinute()
     ->withoutOverlapping()
     ->name('ai-takilan-gorevleri-kurtar');
+
+// AI karakter online/offline durumlarini request akisi disinda guncelle
+Schedule::call(function () {
+    $service = app(UserOnlineStatusService::class);
+
+    User::query()
+        ->where('hesap_tipi', 'ai')
+        ->where('hesap_durumu', 'aktif')
+        ->with('aiCharacter')
+        ->chunkById(200, fn ($users) => $service->syncCollection($users));
+})->name('ai-online-sync')->everyFiveMinutes()->withoutOverlapping();
+
+Schedule::command('ai:proaktif-mesajlari-planla')
+    ->hourly()
+    ->withoutOverlapping()
+    ->name('ai-proaktif-mesajlari-planla');
 
 // Çevrimiçi durumu temizle (30 dk aktif olmayan → çevrimdışı)
 Schedule::call(function () {

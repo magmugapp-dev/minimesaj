@@ -8,6 +8,7 @@ use App\Http\Requests\Kimlik\KayitRequest;
 use App\Http\Resources\KullaniciResource;
 use App\Models\User;
 use App\Services\Kimlik\AuthPuanServisi;
+use App\Services\Kimlik\DeviceBindingService;
 use App\Services\Kimlik\IstemciYetenekServisi;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -20,11 +21,13 @@ class KimlikController extends Controller
     public function __construct(
         private IstemciYetenekServisi $istemciYetenekServisi,
         private AuthPuanServisi $authPuanServisi,
+        private DeviceBindingService $deviceBindingService,
     ) {}
 
     public function kayit(KayitRequest $request): JsonResponse
     {
         $veri = $request->validated();
+        $this->deviceBindingService->ensureAvailableForRegistration($veri['device_fingerprint'] ?? null);
 
         $user = User::create([
             'ad' => $veri['ad'],
@@ -39,6 +42,11 @@ class KimlikController extends Controller
         ]);
 
         $this->authPuanServisi->kayitBonusuUygula($user);
+        $this->deviceBindingService->bindOrFail(
+            $veri['device_fingerprint'] ?? null,
+            $user,
+            $veri['platform'] ?? $veri['istemci_tipi'] ?? null,
+        );
 
         $yetenekler = $this->istemciYetenekServisi->belirle($veri['istemci_tipi']);
         $token = $user->createToken($veri['istemci_tipi'], $yetenekler);
@@ -68,6 +76,11 @@ class KimlikController extends Controller
         }
 
         $this->authPuanServisi->gunlukGirisBonusuUygula($user);
+        $this->deviceBindingService->bindOrFail(
+            $veri['device_fingerprint'] ?? null,
+            $user,
+            $veri['platform'] ?? $veri['istemci_tipi'] ?? null,
+        );
 
         $yetenekler = $this->istemciYetenekServisi->belirle($veri['istemci_tipi']);
         $token = $user->createToken($veri['istemci_tipi'], $yetenekler);
@@ -100,6 +113,7 @@ class KimlikController extends Controller
         $user = $request->user();
 
         DB::transaction(function () use ($user): void {
+            $this->deviceBindingService->banUserDevices($user);
             $user->tokens()->delete();
             $user->delete();
         });

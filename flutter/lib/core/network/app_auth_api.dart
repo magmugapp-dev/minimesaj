@@ -18,6 +18,7 @@ import 'package:magmug/core/models/payment_models.dart';
 import 'package:magmug/core/models/public_settings_models.dart';
 import 'package:magmug/core/models/user_models.dart';
 import 'package:magmug/core/network/app_api.dart';
+import 'package:magmug/core/storage/app_storage.dart';
 
 typedef UploadProgressCallback = void Function(double progress);
 
@@ -62,6 +63,19 @@ class AppMobileSyncResult {
     this.messages = const [],
     this.notifications = const [],
     this.unreadNotificationCount = 0,
+  });
+}
+
+@immutable
+class AppMobileConfigResult {
+  final AppPublicSettings settings;
+  final String? etag;
+  final bool notModified;
+
+  const AppMobileConfigResult({
+    required this.settings,
+    this.etag,
+    this.notModified = false,
   });
 }
 
@@ -195,10 +209,13 @@ class AppAuthApi {
     String? avatarUrl,
   }) async {
     final appVersion = await AppClientMetadata.appVersion();
+    final deviceFingerprint = await AppSessionStorage.deviceFingerprint();
     final body = <String, String>{
       'provider': provider.name,
       'token': token,
       'istemci_tipi': AppEnvironment.clientType,
+      'device_fingerprint': deviceFingerprint,
+      'platform': AppSessionStorage.devicePlatform(),
     };
     _putIfNotBlank(body, 'uygulama_versiyonu', appVersion);
     _putIfNotBlank(body, 'ad', firstName);
@@ -275,6 +292,8 @@ class AppAuthApi {
       'kullanici_adi': data.username.trim(),
       'cinsiyet': _genderValue(data.gender),
       'dogum_yili': '${data.birthYear}',
+      'device_fingerprint': await AppSessionStorage.deviceFingerprint(),
+      'platform': AppSessionStorage.devicePlatform(),
     };
     _putIfNotBlank(fields, 'uygulama_versiyonu', appVersion);
     request.fields.addAll(fields);
@@ -335,10 +354,33 @@ class AppAuthApi {
   }
 
   Future<AppPublicSettings> fetchMobileConfig() async {
+    final result = await fetchMobileConfigResult();
+    return result.settings;
+  }
+
+  Future<AppMobileConfigResult> fetchMobileConfigResult({
+    String? etag,
+    AppPublicSettings? fallback,
+  }) async {
+    final headers = <String, String>{'Accept': 'application/json'};
+    final normalizedEtag = etag?.trim();
+    if (normalizedEtag != null && normalizedEtag.isNotEmpty) {
+      headers['If-None-Match'] = normalizedEtag;
+    }
+
     final response = await _client.get(
       AppApi.uri(AppApi.mobileConfigPath),
-      headers: const {'Accept': 'application/json'},
+      headers: headers,
     );
+    final responseEtag = response.headers['etag'];
+
+    if (response.statusCode == 304 && fallback != null) {
+      return AppMobileConfigResult(
+        settings: fallback,
+        etag: responseEtag ?? normalizedEtag,
+        notModified: true,
+      );
+    }
 
     final payload = _decodeJsonMap(response);
     if (response.statusCode >= 400) {
@@ -346,7 +388,10 @@ class AppAuthApi {
     }
 
     final settings = _asMap(payload['public_settings']) ?? payload;
-    return AppPublicSettings.fromJson(settings);
+    return AppMobileConfigResult(
+      settings: AppPublicSettings.fromJson(settings),
+      etag: responseEtag,
+    );
   }
 
   Future<AppMobileBootstrap> fetchMobileBootstrap(String token) async {
@@ -1317,10 +1362,7 @@ class AppAuthApi {
     }
   }
 
-  Future<void> sendMobileHeartbeat(
-    String token, {
-    required bool online,
-  }) async {
+  Future<void> sendMobileHeartbeat(String token, {required bool online}) async {
     final response = await _client.post(
       AppApi.uri(AppApi.mobileHeartbeatPath),
       headers: {
@@ -2146,6 +2188,9 @@ class AppAuthApi {
       peerName: peer['ad']?.toString() ?? _text('commonUser', 'Kullanici'),
       peerUsername: peer['kullanici_adi']?.toString() ?? '',
       peerProfileImageUrl: peer['profil_resmi']?.toString(),
+      peerAccountType: _nullableString(
+        json['peer_hesap_tipi']?.toString() ?? peer['hesap_tipi']?.toString(),
+      ),
       peerLanguageCode: _nullableString(
         json['peer_language_code']?.toString() ?? peer['dil']?.toString(),
       ),

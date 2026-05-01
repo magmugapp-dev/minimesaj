@@ -61,8 +61,8 @@ it('renders the redesigned ai studio pages for an admin', function () {
         ->assertSeeText('Sicak, yakin ve kolay iletisim kuran ton')
         ->assertSeeText('AI karakter sesli mesaj davranisini promptta kullanabilir')
         ->assertSeeText('Yuksek deger daha yaratici')
-        ->assertSeeText('Min cevap saniye')
-        ->assertSeeText('Cevap araligi kullanici mesajinin created_at zamanindan sonra')
+        ->assertDontSeeText('Min cevap saniye')
+        ->assertDontSeeText('Cevap araligi kullanici mesajinin created_at zamanindan sonra')
         ->assertSeeText('Re-engagement template JSON')
         ->assertSeeText('Profil fotografi');
 
@@ -115,8 +115,6 @@ it('updates an ai character from form fields and keeps bulk json import availabl
             'first_name' => 'Aylin Yeni',
             'username' => 'aylin_new',
             'tagline' => 'Yeni tagline',
-            'min_response_seconds' => 0,
-            'max_response_seconds' => 10,
         ]))
         ->assertRedirect(route('admin.ai.duzenle', $character));
 
@@ -124,7 +122,7 @@ it('updates an ai character from form fields and keeps bulk json import availabl
     expect($character->character_id)->toBe('aylin_new')
         ->and(data_get($character->character_json, 'identity.first_name'))->toBe('Aylin Yeni')
         ->and(data_get($character->character_json, 'profile.tagline'))->toBe('Yeni tagline')
-        ->and(data_get($character->character_json, 'rate_limits.max_response_seconds'))->toBe(10)
+        ->and(data_get($character->character_json, 'rate_limits.max_response_seconds'))->toBeNull()
         ->and(data_get($character->character_json, 'custom_unknown.kept'))->toBeTrue()
         ->and($character->user->fresh()->kullanici_adi)->toBe('aylin_new');
 
@@ -172,8 +170,6 @@ function aiCharacterFormPayload(array $overrides = []): array
         'sleep_end_weekend' => '09:30',
         'daily_chat_limit' => 100,
         'per_user_daily_message_limit' => 50,
-        'min_response_seconds' => 0,
-        'max_response_seconds' => 10,
         'model_name' => 'gemini-2.5-flash',
         'temperature' => 0.8,
         'top_p' => 0.9,

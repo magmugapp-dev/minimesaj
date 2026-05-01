@@ -342,14 +342,16 @@ class AiCharacterController extends Controller
             'can_send_voice' => ['nullable', 'boolean'],
             'can_send_photo' => ['nullable', 'boolean'],
             'timezone' => ['required', 'string', 'max:80'],
-            'sleep_start_weekday' => ['nullable', 'date_format:H:i'],
-            'sleep_end_weekday' => ['nullable', 'date_format:H:i'],
-            'sleep_start_weekend' => ['nullable', 'date_format:H:i'],
-            'sleep_end_weekend' => ['nullable', 'date_format:H:i'],
-            'daily_chat_limit' => ['required', 'integer', 'min:0', 'max:100000'],
+                'sleep_start_weekday' => ['nullable', 'date_format:H:i'],
+                'sleep_end_weekday' => ['nullable', 'date_format:H:i'],
+                'sleep_start_weekend' => ['nullable', 'date_format:H:i'],
+                'sleep_end_weekend' => ['nullable', 'date_format:H:i'],
+                'active_hours_weekday_start' => ['nullable', 'date_format:H:i'],
+                'active_hours_weekday_end' => ['nullable', 'date_format:H:i'],
+                'active_hours_weekend_start' => ['nullable', 'date_format:H:i'],
+                'active_hours_weekend_end' => ['nullable', 'date_format:H:i'],
+                'daily_chat_limit' => ['required', 'integer', 'min:0', 'max:100000'],
             'per_user_daily_message_limit' => ['required', 'integer', 'min:0', 'max:100000'],
-            'min_response_seconds' => ['required', 'integer', 'min:0', 'max:3600'],
-            'max_response_seconds' => ['required', 'integer', 'min:0', 'max:3600'],
             'model_name' => ['required', 'string', 'max:80'],
             'temperature' => ['required', 'numeric', 'min:0', 'max:2'],
             'top_p' => ['required', 'numeric', 'min:0', 'max:1'],
@@ -407,13 +409,17 @@ class AiCharacterController extends Controller
         data_set($json, 'messaging.can_send_photo', (bool) $payload['can_send_photo']);
         data_set($json, 'schedule.timezone', $payload['timezone']);
         data_set($json, 'schedule.sleep_start_weekday', $payload['sleep_start_weekday'] ?? null);
-        data_set($json, 'schedule.sleep_end_weekday', $payload['sleep_end_weekday'] ?? null);
-        data_set($json, 'schedule.sleep_start_weekend', $payload['sleep_start_weekend'] ?? null);
-        data_set($json, 'schedule.sleep_end_weekend', $payload['sleep_end_weekend'] ?? null);
-        data_set($json, 'rate_limits.daily_chat_limit', (int) $payload['daily_chat_limit']);
+            data_set($json, 'schedule.sleep_end_weekday', $payload['sleep_end_weekday'] ?? null);
+            data_set($json, 'schedule.sleep_start_weekend', $payload['sleep_start_weekend'] ?? null);
+            data_set($json, 'schedule.sleep_end_weekend', $payload['sleep_end_weekend'] ?? null);
+            data_set($json, 'schedule.active_hours_weekday_start', $payload['active_hours_weekday_start'] ?? null);
+            data_set($json, 'schedule.active_hours_weekday_end', $payload['active_hours_weekday_end'] ?? null);
+            data_set($json, 'schedule.active_hours_weekend_start', $payload['active_hours_weekend_start'] ?? null);
+            data_set($json, 'schedule.active_hours_weekend_end', $payload['active_hours_weekend_end'] ?? null);
+            data_set($json, 'rate_limits.daily_chat_limit', (int) $payload['daily_chat_limit']);
         data_set($json, 'rate_limits.per_user_daily_message_limit', (int) $payload['per_user_daily_message_limit']);
-        data_set($json, 'rate_limits.min_response_seconds', (int) $payload['min_response_seconds']);
-        data_set($json, 'rate_limits.max_response_seconds', max((int) $payload['min_response_seconds'], (int) $payload['max_response_seconds']));
+        data_forget($json, 'rate_limits.min_response_seconds');
+        data_forget($json, 'rate_limits.max_response_seconds');
         data_set($json, 'model_config.active', (bool) $payload['active']);
         data_set($json, 'model_config.model_name', $payload['model_name']);
         data_set($json, 'model_config.temperature', (float) $payload['temperature']);
@@ -481,13 +487,15 @@ class AiCharacterController extends Controller
             'can_send_photo' => (bool) data_get($json, 'messaging.can_send_photo', false),
             'timezone' => data_get($json, 'schedule.timezone', 'Europe/Istanbul'),
             'sleep_start_weekday' => data_get($json, 'schedule.sleep_start_weekday', '23:30'),
-            'sleep_end_weekday' => data_get($json, 'schedule.sleep_end_weekday', '07:30'),
-            'sleep_start_weekend' => data_get($json, 'schedule.sleep_start_weekend', '00:30'),
-            'sleep_end_weekend' => data_get($json, 'schedule.sleep_end_weekend', '09:30'),
-            'daily_chat_limit' => data_get($json, 'rate_limits.daily_chat_limit', 100),
+                'sleep_end_weekday' => data_get($json, 'schedule.sleep_end_weekday', '07:30'),
+                'sleep_start_weekend' => data_get($json, 'schedule.sleep_start_weekend', '00:30'),
+                'sleep_end_weekend' => data_get($json, 'schedule.sleep_end_weekend', '09:30'),
+                'active_hours_weekday_start' => data_get($json, 'schedule.active_hours_weekday_start'),
+                'active_hours_weekday_end' => data_get($json, 'schedule.active_hours_weekday_end'),
+                'active_hours_weekend_start' => data_get($json, 'schedule.active_hours_weekend_start'),
+                'active_hours_weekend_end' => data_get($json, 'schedule.active_hours_weekend_end'),
+                'daily_chat_limit' => data_get($json, 'rate_limits.daily_chat_limit', 100),
             'per_user_daily_message_limit' => data_get($json, 'rate_limits.per_user_daily_message_limit', 50),
-            'min_response_seconds' => data_get($json, 'rate_limits.min_response_seconds', 3),
-            'max_response_seconds' => data_get($json, 'rate_limits.max_response_seconds', 30),
             'model_name' => $character?->model_name ?? data_get($json, 'model_config.model_name', 'gemini-2.5-flash'),
             'temperature' => $character?->temperature ?? data_get($json, 'model_config.temperature', 0.8),
             'top_p' => $character?->top_p ?? data_get($json, 'model_config.top_p', 0.9),
@@ -610,8 +618,8 @@ class AiCharacterController extends Controller
             'behavior_rules' => ['system_command' => '', 'extra_restrictions' => []],
             'messaging' => ['sends_first_message' => false, 'first_message_templates' => [], 'average_message_length' => 60, 'message_length_min' => 5, 'message_length_max' => 220, 'can_send_voice' => false, 'can_send_photo' => false],
             'memory' => ['memory_active' => true, 'memory_level' => 'medium', 'remembers_user' => true, 'relationship_tracking_active' => true],
-            'schedule' => ['timezone' => 'Europe/Istanbul', 'sleep_start_weekday' => '23:30', 'sleep_end_weekday' => '07:30', 'sleep_start_weekend' => '00:30', 'sleep_end_weekend' => '09:30', 'availability_schedules' => []],
-            'rate_limits' => ['daily_chat_limit' => 100, 'per_user_daily_message_limit' => 50, 'min_response_seconds' => 3, 'max_response_seconds' => 30, 'random_delay_minutes' => 0],
+                'schedule' => ['timezone' => 'Europe/Istanbul', 'sleep_start_weekday' => '23:30', 'sleep_end_weekday' => '07:30', 'sleep_start_weekend' => '00:30', 'sleep_end_weekend' => '09:30', 'active_hours_weekday_start' => null, 'active_hours_weekday_end' => null, 'active_hours_weekend_start' => null, 'active_hours_weekend_end' => null, 'availability_schedules' => []],
+            'rate_limits' => ['daily_chat_limit' => 100, 'per_user_daily_message_limit' => 50, 'random_delay_minutes' => 0],
             'model_config' => ['active' => true, 'provider' => 'gemini', 'model_name' => 'gemini-2.5-flash', 'fallback_provider' => null, 'fallback_model_name' => null, 'temperature' => 0.8, 'top_p' => 0.9, 'max_output_tokens' => 1024],
             'quality_tag' => 'A',
         ];

@@ -17,13 +17,14 @@ class SohbetResource extends JsonResource
             'id' => $this->id,
             'eslesme_id' => $this->eslesme_id,
             'eslesme' => new EslesmeResource($this->whenLoaded('eslesme')),
-            'son_mesaj' => new MesajResource($this->whenLoaded('sonMesaj')),
+            'son_mesaj' => $this->lastMessagePayload(),
             'son_mesaj_tarihi' => $this->son_mesaj_tarihi,
             'ai_durumu' => $this->ai_durumu,
             'ai_durum_metni' => $this->normalizeAiStatusText(),
             'ai_planlanan_cevap_at' => $this->ai_planlanan_cevap_at,
             'toplam_mesaj_sayisi' => $this->toplam_mesaj_sayisi,
             'okunmamis_sayisi' => $this->okunmamis_sayisi,
+            'peer_hesap_tipi' => $peer?->hesap_tipi,
             'peer_language_code' => $peerLanguage['code'],
             'peer_language_name' => $peerLanguage['name'],
             'durum' => $this->durum,
@@ -77,5 +78,28 @@ class SohbetResource extends JsonResource
         }
 
         return $this->ai_durumu === 'typing' ? 'Yaziyor...' : null;
+    }
+
+    private function lastMessagePayload(): mixed
+    {
+        if ($this->resource->relationLoaded('sonMesaj') && $this->sonMesaj) {
+            return new MesajResource($this->sonMesaj);
+        }
+
+        if (!$this->son_mesaj_id) {
+            return null;
+        }
+
+        return [
+            'id' => $this->son_mesaj_id,
+            'sohbet_id' => $this->id,
+            'gonderen' => $this->son_mesaj_gonderen_user_id
+                ? ['id' => $this->son_mesaj_gonderen_user_id]
+                : null,
+            'mesaj_tipi' => $this->son_mesaj_tipi,
+            'mesaj_metni' => $this->son_mesaj_metni,
+            'okundu_mu' => (bool) $this->son_mesaj_okundu_mu,
+            'created_at' => $this->son_mesaj_tarihi,
+        ];
     }
 }
